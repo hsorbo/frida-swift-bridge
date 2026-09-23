@@ -20,6 +20,7 @@ import {
   splitBoundTypeName,
   SwiftFunctionSignature,
   SwiftAccessorSignature,
+  ParsedSwiftSignature,
 } from "./symbolication.js";
 import {
   makeSwiftNativeFunction,
@@ -441,6 +442,7 @@ const MANGLED_KIND_CHARS: { [kind: number]: string } = {
   [ContextDescriptorKind.Class]: "C",
   [ContextDescriptorKind.Struct]: "V",
   [ContextDescriptorKind.Enum]: "O",
+  [ContextDescriptorKind.Protocol]: "P",
 };
 
 function buildMangledTypeToken(descriptor: ContextDescriptor): string | null {
@@ -510,12 +512,33 @@ function foreignMembers(fullName: string): TypeMembers {
     if (module.base.equals(owner.base)) {
       continue;
     }
-    const key = `${module.path}@${module.base}|${token}`;
-    let found = foreignScans.get(key);
-    if (found === undefined) {
-      found = scanMembers([module], fullName, token, false);
-      foreignScans.set(key, found);
-    }
+    const found = exportedMembers(module, fullName, token);
+    methods.push(...found.methods);
+    accessors.push(...found.accessors);
+  }
+  return { methods, accessors };
+}
+
+function exportedMembers(module: Module, fullName: string, token: string): TypeMembers {
+  const key = `${module.path}@${module.base}|${token}`;
+  let found = foreignScans.get(key);
+  if (found === undefined) {
+    found = scanMembers([module], fullName, token, false);
+    foreignScans.set(key, found);
+  }
+  return found;
+}
+
+function protocolExtensionMembers(protocol: ContextDescriptor): TypeMembers {
+  const methods: MethodCandidate[] = [];
+  const accessors: AccessorCandidate[] = [];
+  const fullName = protocol.fullTypeName;
+  const token = buildMangledTypeToken(protocol);
+  if (fullName === null || token === null) {
+    return { methods, accessors };
+  }
+  for (const module of Process.enumerateModules()) {
+    const found = exportedMembers(module, fullName, token);
     methods.push(...found.methods);
     accessors.push(...found.accessors);
   }
@@ -2065,13 +2088,97 @@ export function resolveWitnessMethod(table: WitnessTable, methodName: string): R
       c.signature.kind === "function" && c.signature.name === methodName
   );
   if (matches.length === 0) {
-    throw new Error(`no requirement ${methodName} on ${protocolName}`);
+    return resolveExtensionMethod(table, methodName);
   }
   if (matches.length > 1) {
     const overloads = matches.map((m) => m.signature.selector).join(", ");
     throw new Error(`ambiguous requirement ${methodName} on ${protocolName}: ${overloads}`);
   }
   const { requirement, signature } = matches[0];
+  const address = table.requirement(requirement.witnessIndex);
+  return {
+    address,
+    ...resolveWitnessSignature(table, signature),
+    isStatic: !requirement.isInstance,
+    // An async requirement's slot holds the …Tu record (GenProto.cpp getAddrOfAsyncFunctionPointer).
+    async: requirement.isAsync,
+    asyncFunctionPointer: requirement.isAsync ? new AsyncFunctionPointer(address) : undefined,
+    witnessSelf: table,
+  };
+}
+
+function resolveExtensionMethod(table: WitnessTable, methodName: string): ResolvedMethod {
+  const protocol = protocolOf(table);
+  const protocolName = protocol.fullTypeName ?? "protocol";
+  const matches = protocolExtensionMembers(protocol).methods.filter(
+    (c) => c.name === methodName && !c.isStatic && c.signature.genericParams.length === 0
+  );
+  if (matches.length === 0) {
+    throw new Error(`no requirement ${methodName} on ${protocolName}`);
+  }
+  if (matches.length > 1) {
+    const overloads = matches.map((m) => m.signature.selector).join(", ");
+    throw new Error(`ambiguous extension method ${methodName} on ${protocolName}: ${overloads}`);
+  }
+  const { signature, mangled } = matches[0];
+  const requirement = requirementImplementedBy(
+    table,
+    (r) => r.kind === ProtocolRequirementKind.Method && r.isAsync === signature.async,
+    (s) => s.kind === "function" && s.selector === signature.selector
+  );
+  if (requirement === "undecodable") {
+    throw new Error(`cannot tell whether ${signature.selector} is a requirement of ${protocolName}`);
+  }
+  let address: NativePointer;
+  let asyncFunctionPointer: AsyncFunctionPointer | undefined;
+  if (requirement !== null) {
+    address = table.requirement(requirement.witnessIndex);
+    asyncFunctionPointer = signature.async ? new AsyncFunctionPointer(address) : undefined;
+  } else {
+    address = matches[0].address.strip();
+    if (signature.async) {
+      const module = Process.findModuleByAddress(address);
+      const afp = module === null ? null : findAsyncFunctionPointer(module, mangled);
+      if (afp === null) {
+        throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
+      }
+      asyncFunctionPointer = afp;
+    }
+  }
+  return {
+    address,
+    ...resolveWitnessSignature(table, signature),
+    isStatic: false,
+    async: signature.async,
+    asyncFunctionPointer,
+    witnessSelf: table,
+  };
+}
+
+// Stripped binaries only reveal a requirement's default through where the witness thunk branches.
+function requirementImplementedBy(
+  table: WitnessTable,
+  isCandidate: (requirement: ProtocolRequirement) => boolean,
+  isImplementation: (signature: ParsedSwiftSignature) => boolean
+): ProtocolRequirement | null | "undecodable" {
+  let undecodable = false;
+  for (const requirement of readProtocolRequirements(protocolOf(table)).filter(isCandidate)) {
+    const target = witnessTarget(table, requirement);
+    const demangled = target === null ? null : symbolicateLocal(target.address);
+    const signature = demangled === null ? null : parseSwiftSignature(demangled);
+    if (signature === null) {
+      undecodable = true;
+    } else if (isImplementation(signature)) {
+      return requirement;
+    }
+  }
+  return undecodable ? "undecodable" : null;
+}
+
+function resolveWitnessSignature(
+  table: WitnessTable,
+  signature: SwiftFunctionSignature
+): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector"> {
   assertBorrowingArgs(signature.argTypeNames, signature.selector);
   const argTypes = signature.argTypeNames.map((name) => {
     const metadata = resolveTypeExpr(name, (n) => resolveWitnessSelfOrAssociatedType(table, n));
@@ -2087,19 +2194,7 @@ export function resolveWitnessMethod(table: WitnessTable, methodName: string): R
       throw new Error(`cannot resolve return type ${signature.returnTypeName} of ${signature.selector}`);
     }
   }
-  const address = table.requirement(requirement.witnessIndex);
-  return {
-    address,
-    argTypes,
-    returnType,
-    throws: signature.throws,
-    isStatic: !requirement.isInstance,
-    selector: signature.selector,
-    // An async requirement's slot holds the …Tu record (GenProto.cpp getAddrOfAsyncFunctionPointer).
-    async: requirement.isAsync,
-    asyncFunctionPointer: requirement.isAsync ? new AsyncFunctionPointer(address) : undefined,
-    witnessSelf: table,
-  };
+  return { argTypes, returnType, throws: signature.throws, selector: signature.selector };
 }
 
 export function bindWitnessMethod(
@@ -2151,14 +2246,47 @@ function resolveWitnessAccessor(table: WitnessTable, member: string, kind: Acces
       c.signature.kind === kind && c.signature.member === member
   );
   if (match === undefined) {
-    throw new Error(`no ${kind} for ${member} on ${protocolOf(table).fullTypeName ?? "protocol"}`);
+    return resolveExtensionAccessor(table, member, kind);
   }
-  const type = resolveTypeExpr(match.signature.typeName, (n) => resolveWitnessSelfOrAssociatedType(table, n));
+  const address = table.requirement(match.requirement.witnessIndex);
+  return witnessAccessor(table, address, member, kind, match.signature.typeName);
+}
+
+function resolveExtensionAccessor(table: WitnessTable, member: string, kind: AccessorKind): ResolvedWitnessAccessor {
+  const protocol = protocolOf(table);
+  const protocolName = protocol.fullTypeName ?? "protocol";
+  const match = protocolExtensionMembers(protocol).accessors.find(
+    (a) => a.member === member && a.kind === kind && !a.isStatic
+  );
+  if (match === undefined) {
+    throw new Error(`no ${kind} for ${member} on ${protocolName}`);
+  }
+  const requirementKind = kind === "getter" ? ProtocolRequirementKind.Getter : ProtocolRequirementKind.Setter;
+  const requirement = requirementImplementedBy(
+    table,
+    (r) => r.kind === requirementKind,
+    (s) => s.kind === kind && s.member === member
+  );
+  if (requirement === "undecodable") {
+    throw new Error(`cannot tell whether ${member} is a requirement of ${protocolName}`);
+  }
+  const address = requirement === null ? match.address.strip() : table.requirement(requirement.witnessIndex);
+  return witnessAccessor(table, address, member, kind, match.typeName);
+}
+
+function witnessAccessor(
+  table: WitnessTable,
+  address: NativePointer,
+  member: string,
+  kind: AccessorKind,
+  typeName: string
+): ResolvedWitnessAccessor {
+  const type = resolveTypeExpr(typeName, (n) => resolveWitnessSelfOrAssociatedType(table, n));
   if (type === null) {
-    throw new Error(`cannot resolve ${kind} type ${match.signature.typeName} of ${member}`);
+    throw new Error(`cannot resolve ${kind} type ${typeName} of ${member}`);
   }
-  const abstract = match.signature.typeName === "A" || match.signature.typeName.startsWith("A.");
-  return { address: table.requirement(match.requirement.witnessIndex), type, kind, abstract, table };
+  const abstract = typeName === "A" || typeName.startsWith("A.");
+  return { address, type, kind, abstract, table };
 }
 
 function invokerForWitnessAccessor(accessor: ResolvedWitnessAccessor): SwiftNativeFunction {
@@ -2347,27 +2475,38 @@ export type WitnessOrigin =
 
 const EXTENSION_PREFIX = /^\(extension in [^)]*\):/;
 
-export function classifyWitnessOrigin(table: WitnessTable, requirement: ProtocolRequirement): WitnessOrigin {
-  if (requirement.isAsync || !CALLABLE_REQUIREMENT_KINDS.has(requirement.kind)) {
-    return { kind: "unknown" };
+function witnessTarget(
+  table: WitnessTable,
+  requirement: ProtocolRequirement
+): { address: NativePointer; dispatch: "direct" | "vtable" } | null {
+  if (requirement.isAsync) {
+    return null;
   }
   const branch = classifyBranch(table.requirement(requirement.witnessIndex));
-  const target =
+  const address =
     branch.kind === "direct"
       ? branch.target
       : branch.kind === "vtable"
         ? resolveVTableTarget(table, branch.metadataOffset)
         : null;
+  return address === null ? null : { address, dispatch: branch.kind === "vtable" ? "vtable" : "direct" };
+}
+
+export function classifyWitnessOrigin(table: WitnessTable, requirement: ProtocolRequirement): WitnessOrigin {
+  if (requirement.isAsync || !CALLABLE_REQUIREMENT_KINDS.has(requirement.kind)) {
+    return { kind: "unknown" };
+  }
+  const target = witnessTarget(table, requirement);
   if (target === null) {
     return { kind: "unknown" };
   }
-  const demangled = symbolicateLocal(target);
+  const demangled = symbolicateLocal(target.address);
   if (demangled === null) {
     return { kind: "unknown" };
   }
   const unwrapped = demangled.replace(EXTENSION_PREFIX, "");
   const protocolName = protocolOf(table).fullTypeName;
-  const dispatch = branch.kind === "vtable" ? "vtable" : "direct";
+  const { dispatch } = target;
   return unwrapped.startsWith(`${protocolName}.`)
     ? { kind: "default", symbol: demangled, dispatch }
     : { kind: "override", symbol: demangled, dispatch };

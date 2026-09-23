@@ -72,6 +72,36 @@ describe("witness-table method invocation", () => {
     expect(table.get(value, "badge")).toBe("[Ada]");
   });
 
+  test("calls a protocol-extension method that is not a requirement, from a stripped conformance", () => {
+    loadFixture();
+    const type = metadataFor("fixture.DefaultDescriber")!;
+    const value = ValueInstance.fromJS(type, { displayName: "Ada" }).handle;
+
+    const table = Protocol.find("fixture.Labeled")!.conformanceFor(type)!;
+    expect(table.method(value, "shout").call()).toBe("ADA");
+  });
+
+  test("reads a protocol-extension property that is not a requirement, from a stripped conformance", () => {
+    loadFixture();
+    const type = metadataFor("fixture.DefaultDescriber")!;
+    const value = ValueInstance.fromJS(type, { displayName: "Ada" }).handle;
+
+    const table = Protocol.find("fixture.Labeled")!.conformanceFor(type)!;
+    expect(table.get(value, "initial")).toBe("A");
+  });
+
+  test("a requirement reached through its default's name still dispatches to the override", () => {
+    loadFixture();
+    const labeled = Protocol.find("fixture.Labeled")!;
+    const describe = (typeName: string) => {
+      const type = metadataFor(typeName)!;
+      const value = ValueInstance.fromJS(type, { displayName: "Ada" }).handle;
+      return labeled.conformanceFor(type)!.method(value, "describe").call();
+    };
+    expect(describe("fixture.DefaultDescriber")).toBe("<Ada>");
+    expect(describe("fixture.CustomDescriber")).toBe("custom:Ada");
+  });
+
   test("unknown requirement name throws", () => {
     const mod = loadFixtureSyms();
     const Greeter = existentialMetadata("fixturesyms.greeterType", mod);

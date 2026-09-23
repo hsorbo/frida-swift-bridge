@@ -17,3 +17,7 @@ public extension Ranged {
 public extension Robot {
     convenience init(badge: String) { self.init(name: "R-\(badge)") }
 }
+
+public extension Labeled {
+    func whisper() -> String { displayName.lowercased() }
+}

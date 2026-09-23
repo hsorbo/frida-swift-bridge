@@ -542,6 +542,8 @@ public protocol Labeled {
 extension Labeled {
     public func describe() -> String { "<\(displayName)>" }
     public var badge: String { "[\(displayName)]" }
+    public func shout() -> String { displayName.uppercased() }
+    public var initial: String { String(displayName.prefix(1)) }
 }
 public struct DefaultDescriber: Labeled {
     public let displayName: String

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
 import { requireSwift } from "./swift.js";
 
 import { Metadata, Protocol, projectExistentialValue, BoundAsyncMethod, metadataFor } from "../src/abi.js";
@@ -44,5 +44,15 @@ describe("async witness-table method invocation", () => {
     const table = Protocol.find("fixturesyms.AsyncScaler")!.conformanceFor(type)!;
     const bound = table.method(value, "scaledTwice") as BoundAsyncMethod;
     expect(await bound.call(2)).toEqual(int64(18));
+  });
+
+  test("an async default on a stripped conformance is refused rather than guessed (TripleScaler : AsyncScaler)", () => {
+    const mod = loadFixture();
+    const AsyncScaler = existentialMetadata("fixture.asyncScalerType", mod);
+    const container = store(mod, "fixture.storeAsyncScaler", AsyncScaler);
+    const { type, value } = projectExistentialValue(AsyncScaler, container);
+
+    const table = Protocol.find("fixture.AsyncScaler")!.conformanceFor(type)!;
+    expect(() => table.method(value, "scaledTwice")).toThrow(/cannot tell/);
   });
 });

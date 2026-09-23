@@ -3,7 +3,7 @@ import { loadFixture, loadNoMetadata, loadConformance, NOMETADATA_MODULE, CONFOR
 
 import { Swift, ClassType, StructType } from "../src/index.js";
 import { enumerateMethods, enumerateProperties, resolveMethod } from "../src/runtime/method.js";
-import { Protocol, metadataFor, typeOf } from "../src/abi.js";
+import { Protocol, ValueInstance, metadataFor, typeOf } from "../src/abi.js";
 import { enumerateSwiftModules, enumerateTypes } from "../src/reflection/registry.js";
 
 // Runs before anything in this process loads the extending module, so it must come first.
@@ -63,6 +63,17 @@ describe("a type extended from another module", () => {
     const robot = (Swift.type("fixture.Robot") as ClassType).init("R2");
     expect(robot.fly()).toBe("fly R2");
     expect(Number(robot.wingspan)).toBe(2);
+  });
+});
+
+describe("a protocol extended from another module", () => {
+  beforeEach(() => { loadNoMetadata(); });
+
+  test("its extension methods are callable through a conformance", () => {
+    const type = metadataFor("fixture.DefaultDescriber")!;
+    const value = ValueInstance.fromJS(type, { displayName: "Ada" }).handle;
+    const table = Protocol.find("fixture.Labeled")!.conformanceFor(type)!;
+    expect(table.method(value, "whisper").call()).toBe("ada");
   });
 });
 
