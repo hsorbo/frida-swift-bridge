@@ -533,13 +533,15 @@ public struct GreeterBox {
     public static func wrapPerson(_ name: String, _ age: Int) -> any Greeter { Person(name: name, age: age) }
 }
 
-// describe() has a default; displayName never does.
+// describe() and badge have defaults; displayName never does.
 public protocol Labeled {
     var displayName: String { get }
     func describe() -> String
+    var badge: String { get }
 }
 extension Labeled {
     public func describe() -> String { "<\(displayName)>" }
+    public var badge: String { "[\(displayName)]" }
 }
 public struct DefaultDescriber: Labeled {
     public let displayName: String
@@ -1031,6 +1033,10 @@ public func makeTupleAsync(_ a: Int, _ b: Int) async -> (Int, String) {
 
 public protocol AsyncScaler {
     func scaled(_ x: Int) async -> Int
+    func scaledTwice(_ x: Int) async -> Int
+}
+extension AsyncScaler {
+    public func scaledTwice(_ x: Int) async -> Int { await scaled(await scaled(x)) }
 }
 public struct TripleScaler: AsyncScaler {
     public let factor: Int

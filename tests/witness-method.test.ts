@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
 
-import { Metadata, Protocol, projectExistentialValue, readProtocolRequirements, bindWitnessMethodAt, metadataFor } from "../src/abi.js";
+import { Metadata, Protocol, projectExistentialValue, readProtocolRequirements, bindWitnessMethodAt, metadataFor, ValueInstance } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
@@ -52,6 +52,24 @@ describe("witness-table method invocation", () => {
     const aged = Protocol.find("fixturesyms.Aged")!;
     expect(greeter.conformanceFor(type)!.method(value, "greet").call()).toBe("Hi, Cy");
     expect(aged.conformanceFor(type)!.get(value, "age")).toEqual(int64(9));
+  });
+
+  test("calls a default implementation from a protocol extension (DefaultDescriber : Labeled)", () => {
+    loadFixtureSyms();
+    const type = metadataFor("fixturesyms.DefaultDescriber")!;
+    const value = ValueInstance.fromJS(type, { displayName: "Ada" }).handle;
+
+    const table = Protocol.find("fixturesyms.Labeled")!.conformanceFor(type)!;
+    expect(table.method(value, "describe").call()).toBe("<Ada>");
+  });
+
+  test("reads a default getter from a protocol extension (DefaultDescriber : Labeled)", () => {
+    loadFixtureSyms();
+    const type = metadataFor("fixturesyms.DefaultDescriber")!;
+    const value = ValueInstance.fromJS(type, { displayName: "Ada" }).handle;
+
+    const table = Protocol.find("fixturesyms.Labeled")!.conformanceFor(type)!;
+    expect(table.get(value, "badge")).toBe("[Ada]");
   });
 
   test("unknown requirement name throws", () => {

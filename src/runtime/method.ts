@@ -124,6 +124,7 @@ export interface ResolvedMethod {
   selector: string;
   async?: boolean;
   asyncFunctionPointer?: AsyncFunctionPointer;
+  witnessSelf?: WitnessTable;
 }
 
 interface BaseResolveOptions {
@@ -770,7 +771,13 @@ function resolveMethodIn(
 function instanceInvokerKey(resolved: ResolvedMethod): string {
   const ret = resolved.returnType === null ? "v" : resolved.returnType.handle.toString();
   const args = resolved.argTypes.map((t) => t.handle.toString()).join(",");
-  return `${resolved.address}|self|${ret}|${args}|${resolved.throws ? "t" : "n"}`;
+  const witness = resolved.witnessSelf === undefined ? "" : `|${resolved.witnessSelf.handle}`;
+  return `${resolved.address}|self|${ret}|${args}|${resolved.throws ? "t" : "n"}${witness}`;
+}
+
+// witness_method CC: Self metadata + witness table trail the formal args; defaults depend on them.
+function witnessSelfArgs(table: WitnessTable | undefined): { typeArguments?: Metadata[]; witnessTables?: NativePointer[] } {
+  return table === undefined ? {} : { typeArguments: [table.conformingType], witnessTables: [table.handle] };
 }
 
 function invokerFor(resolved: ResolvedMethod): SwiftNativeFunction {
@@ -780,6 +787,7 @@ function invokerFor(resolved: ResolvedMethod): SwiftNativeFunction {
     fn = makeSwiftNativeFunction(resolved.address, resolved.returnType, resolved.argTypes, {
       hasSelf: true,
       throws: resolved.throws,
+      ...witnessSelfArgs(resolved.witnessSelf),
     });
     invokerCache.set(key, fn);
   }
@@ -918,6 +926,9 @@ export class BoundAsyncMethod {
       } else {
         pushAsyncArg(this.selfRouting.receiver, this.self, gp, fp); // small loadable value self trails the args
       }
+    }
+    if (this.resolved.witnessSelf !== undefined) {
+      gp.push(this.resolved.witnessSelf.conformingType.handle, this.resolved.witnessSelf.handle);
     }
     if (fp.length > 0) {
       options.floatArgs = fp;
@@ -2087,6 +2098,7 @@ export function resolveWitnessMethod(table: WitnessTable, methodName: string): R
     // An async requirement's slot holds the …Tu record (GenProto.cpp getAddrOfAsyncFunctionPointer).
     async: requirement.isAsync,
     asyncFunctionPointer: requirement.isAsync ? new AsyncFunctionPointer(address) : undefined,
+    witnessSelf: table,
   };
 }
 
@@ -2118,6 +2130,7 @@ export function bindWitnessMethodAt(
     throws: signature.throws ?? false,
     isStatic: false,
     selector: `#${witnessIndex}`,
+    witnessSelf: table,
   };
   return new BoundMethod(resolved, self);
 }
@@ -2129,6 +2142,7 @@ interface ResolvedWitnessAccessor {
   // Self ("A") and associated types ("A.<name>") are opaque at the protocol level, so the witness
   // thunk passes/returns them indirectly even when the concrete type is loadable.
   abstract: boolean;
+  table: WitnessTable;
 }
 
 function resolveWitnessAccessor(table: WitnessTable, member: string, kind: AccessorKind): ResolvedWitnessAccessor {
@@ -2144,18 +2158,19 @@ function resolveWitnessAccessor(table: WitnessTable, member: string, kind: Acces
     throw new Error(`cannot resolve ${kind} type ${match.signature.typeName} of ${member}`);
   }
   const abstract = match.signature.typeName === "A" || match.signature.typeName.startsWith("A.");
-  return { address: table.requirement(match.requirement.witnessIndex), type, kind, abstract };
+  return { address: table.requirement(match.requirement.witnessIndex), type, kind, abstract, table };
 }
 
 function invokerForWitnessAccessor(accessor: ResolvedWitnessAccessor): SwiftNativeFunction {
-  const key = `witness:${accessor.address}`;
+  const key = `witness:${accessor.address}|${accessor.table.handle}`;
   let fn = invokerCache.get(key);
   if (fn === undefined) {
     const type: SwiftArgType = accessor.abstract ? indirect(accessor.type) : accessor.type;
+    const options = { hasSelf: true, ...witnessSelfArgs(accessor.table) };
     fn =
       accessor.kind === "getter"
-        ? makeSwiftNativeFunction(accessor.address, type, [], { hasSelf: true })
-        : makeSwiftNativeFunction(accessor.address, null, [type], { hasSelf: true });
+        ? makeSwiftNativeFunction(accessor.address, type, [], options)
+        : makeSwiftNativeFunction(accessor.address, null, [type], options);
     invokerCache.set(key, fn);
   }
   return fn;

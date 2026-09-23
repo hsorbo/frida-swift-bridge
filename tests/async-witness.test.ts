@@ -33,4 +33,16 @@ describe("async witness-table method invocation", () => {
     expect(bound instanceof BoundAsyncMethod).toBe(true);
     expect(await (bound as BoundAsyncMethod).call(7)).toEqual(int64(21));
   });
+
+  test("awaits a default implementation from a protocol extension (TripleScaler : AsyncScaler)", async () => {
+    requireSwift();
+    const mod = loadFixtureSyms();
+    const AsyncScaler = existentialMetadata("fixturesyms.asyncScalerType", mod);
+    const container = store(mod, "fixturesyms.storeAsyncScaler", AsyncScaler);
+    const { type, value } = projectExistentialValue(AsyncScaler, container);
+
+    const table = Protocol.find("fixturesyms.AsyncScaler")!.conformanceFor(type)!;
+    const bound = table.method(value, "scaledTwice") as BoundAsyncMethod;
+    expect(await bound.call(2)).toEqual(int64(18));
+  });
 });
