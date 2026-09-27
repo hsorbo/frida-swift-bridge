@@ -43,6 +43,12 @@ describe("Swift object method sugar", () => {
     const o = robot("R2");
     expect(o.$call("greet", "Alice")).toBe(o.greet("Alice"));
   });
+
+  test("a misspelled method name suggests the closest one", () => {
+    const o = robot("R2");
+    expect(() => o.$call("grret", "Alice")).toThrow("no method grret on fixture.Robot (did you mean greet?)");
+    expect(() => o.$call("xyzzyq")).toThrow(/^no method xyzzyq on fixture\.Robot$/);
+  });
 });
 
 describe("Swift object intrinsics", () => {

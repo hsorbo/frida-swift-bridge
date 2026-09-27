@@ -868,9 +868,36 @@ export function resolveMethod(
 ): ResolvedMethod {
   const resolved = findMethod(typeName, methodName, options);
   if (resolved === null) {
-    throw new Error(`no method ${methodName} on ${canonicalTypeName(typeName)}`);
+    throw noMethodError(canonicalTypeName(typeName), methodName);
   }
   return resolved;
+}
+
+function noMethodError(fullName: string, methodName: string): Error {
+  const maxDistance = Math.max(1, Math.floor(methodName.length / 3));
+  let suggestion: string | null = null;
+  let best = maxDistance + 1;
+  for (const name of new Set(enumerateMethods(fullName, "definingModule").map((m) => m.name))) {
+    const distance = editDistance(methodName, name);
+    if (distance > 0 && distance < best) {
+      best = distance;
+      suggestion = name;
+    }
+  }
+  const hint = suggestion === null ? "" : ` (did you mean ${suggestion}?)`;
+  return new Error(`no method ${methodName} on ${fullName}${hint}`);
+}
+
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = current;
+  }
+  return previous[b.length];
 }
 
 export function findMethod(
@@ -1956,7 +1983,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     (c) => c.name === methodName && c.signature.genericParams.length === 0 && c.signature.simpleGenerics
   );
   if (candidates.length === 0) {
-    throw new Error(`no method ${methodName} on ${unboundName}`);
+    throw noMethodError(unboundName, methodName);
   }
   if (candidates.length > 1) {
     const overloads = candidates.map((c) => c.signature.selector).join(", ");
@@ -2163,7 +2190,7 @@ export function bindConformanceMethod(fullName: string, self: NativePointer, nam
     m.methods.some((c) => c.name === name && isConformanceMethod(c))
   );
   if (conformance === null) {
-    throw new Error(`no method ${name} on ${fullName}`);
+    throw noMethodError(fullName, name);
   }
   const resolved = resolveExtensionMethod(conformance.table, name);
   const receiver = witnessReceiver(conformance, self);
