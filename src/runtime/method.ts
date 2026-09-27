@@ -448,19 +448,20 @@ const MANGLED_KIND_CHARS: { [kind: number]: string } = {
   [ContextDescriptorKind.Protocol]: "P",
 };
 
-function buildMangledTypeToken(descriptor: ContextDescriptor): string | null {
+export function buildMangledTypeToken(descriptor: ContextDescriptor): string | null {
   let token = "";
   for (let context: ContextDescriptor | null = descriptor; context !== null; context = context.parent) {
+    const isModule = context.kind === ContextDescriptorKind.Module;
+    const kindChar = MANGLED_KIND_CHARS[context.kind];
+    if (!isModule && kindChar === undefined) {
+      return null;
+    }
     const name = context.name;
     if (name === null) {
       return null;
     }
-    if (context.kind === ContextDescriptorKind.Module) {
+    if (isModule) {
       return `${name.length}${name}${token}`;
-    }
-    const kindChar = MANGLED_KIND_CHARS[context.kind];
-    if (kindChar === undefined) {
-      return null;
     }
     token = `${name.length}${name}${kindChar}${token}`;
   }
