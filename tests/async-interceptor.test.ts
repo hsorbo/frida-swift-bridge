@@ -17,6 +17,16 @@ function driver(module: Module): (x: number) => number {
   return (x) => Number(fn(x));
 }
 
+// onFirstSuspend fires as the suspending thread returns, which can be after another thread has
+// resumed and completed the call; awaiting releases the JS lock so that callback can run.
+function signal(): { fire: () => void; fired: Promise<void> } {
+  let fire!: () => void;
+  const fired = new Promise<void>((resolve) => {
+    fire = resolve;
+  });
+  return { fire, fired };
+}
+
 function afp(module: Module, symbol: string): AsyncFunctionPointer {
   return new AsyncFunctionPointer(module.getExportByName(symbol).strip());
 }
@@ -45,25 +55,25 @@ describe("async interceptor", () => {
     }
   });
 
-  test("onFirstSuspend fires when the function suspends", () => {
+  test("onFirstSuspend fires when the function suspends", async () => {
     requireSwift();
     const module = loadFixture();
     const drive = driver(module);
 
     let entered = false;
-    let suspended = false;
+    const suspended = signal();
     const listener = Swift.Interceptor.attachAsync(module.getExportByName(COMPUTE_ASYNC), {
       onEnter() {
         entered = true;
       },
       onFirstSuspend() {
-        suspended = true;
+        suspended.fire();
       },
     });
     try {
       expect(drive(5)).toBe(10);
       expect(entered).toBe(true);
-      expect(suspended).toBe(true);
+      await suspended.fired;
     } finally {
       listener.detach();
     }
@@ -88,19 +98,21 @@ describe("async interceptor", () => {
     }
   });
 
-  test("onEnter, onFirstSuspend and onComplete all fire in order", () => {
+  test("onEnter, onFirstSuspend and onComplete all fire in order", async () => {
     requireSwift();
     const module = loadFixture();
     const drive = driver(module);
 
     const seen: string[] = [];
     let result: unknown;
+    const suspended = signal();
     const listener = Swift.Interceptor.attachAsync(module.getExportByName(COMPUTE_ASYNC), {
       onEnter() {
         seen.push("enter");
       },
       onFirstSuspend() {
         seen.push("suspend");
+        suspended.fire();
       },
       onComplete(retval) {
         seen.push("complete");
@@ -109,6 +121,7 @@ describe("async interceptor", () => {
     });
     try {
       expect(drive(9)).toBe(18);
+      await suspended.fired;
       // onFirstSuspend fires on the suspending worker, onComplete on the resuming worker; their
       // order across those threads is a race, so only enter-first is guaranteed.
       expect(seen[0]).toBe("enter");
