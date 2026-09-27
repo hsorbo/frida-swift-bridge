@@ -357,6 +357,9 @@ Static methods are called on the type wrapper via `ClassType.call` /
 ```js
 const made = Swift.type("MyApp.Robot").call("make", "Zed");
 made.greet("X");    // "Hello X, I am Zed"
+
+const Int = Swift.type("Swift.Int");
+Int.call("*", 6, 7);          // 42: operators are static methods; both operands are arguments
 ```
 
 Generic methods take their type arguments explicitly as `SwiftType`s:
