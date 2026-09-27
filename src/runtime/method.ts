@@ -43,6 +43,7 @@ import {
   projectOpaqueExistential,
   protocolClassConstraint,
 } from "../abi/existential.js";
+import { exportsByPrefix } from "./export-trie.js";
 import {
   findProtocol,
   conformsToProtocol,
@@ -534,15 +535,15 @@ function exportedMembersOfAll(module: Module, targets: MemberTarget[]): TypeMemb
   const keyOf = (target: MemberTarget): string => `${module.path}@${module.base}|${target.token}`;
   const pending = targets.filter((t) => !foreignScans.has(keyOf(t)));
   if (pending.length > 0) {
-    const found = pending.map(() => ({ members: { methods: [], accessors: [] } as TypeMembers, seen: new Set<string>() }));
-    for (const e of module.enumerateExports()) {
-      pending.forEach((target, i) => {
-        if (e.name.includes(target.token)) {
-          considerMember(found[i].members, found[i].seen, target.fullName, e.name, e.address, false);
-        }
-      });
-    }
-    pending.forEach((target, i) => foreignScans.set(keyOf(target), found[i].members));
+    const found = exportsByPrefix(module, pending.map((t) => `$s${t.token}`));
+    pending.forEach((target, i) => {
+      const members: TypeMembers = { methods: [], accessors: [] };
+      const seen = new Set<string>();
+      for (const e of found[i]) {
+        considerMember(members, seen, target.fullName, e.name, e.address, false);
+      }
+      foreignScans.set(keyOf(target), members);
+    });
   }
   return targets.map((t) => foreignScans.get(keyOf(t))!);
 }
