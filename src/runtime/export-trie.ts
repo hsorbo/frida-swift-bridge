@@ -35,6 +35,18 @@ interface MachOImage {
   codeRanges: { start: NativePointer; end: NativePointer }[];
 }
 
+const machOImages = new Map<string, MachOImage>();
+
+function machOImageOf(module: Module): MachOImage {
+  const key = `${module.path}@${module.base}`;
+  let image = machOImages.get(key);
+  if (image === undefined) {
+    image = readMachOImage(module.base);
+    machOImages.set(key, image);
+  }
+  return image;
+}
+
 function readMachOImage(base: NativePointer): MachOImage {
   const segments: { name: string; vmaddr: UInt64; fileoff: UInt64 }[] = [];
   const sections: { addr: UInt64; size: UInt64 }[] = [];
@@ -78,7 +90,7 @@ function readMachOImage(base: NativePointer): MachOImage {
 // Re-exports are skipped: the defining module yields the same symbol.
 function walkExportTrie(module: Module, prefixes: string[]): PrefixedExport[][] {
   const found = prefixes.map((): PrefixedExport[] => []);
-  const { trie, codeRanges } = readMachOImage(module.base);
+  const { trie, codeRanges } = machOImageOf(module);
   if (trie === null) {
     return found;
   }

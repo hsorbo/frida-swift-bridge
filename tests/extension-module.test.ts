@@ -64,6 +64,17 @@ describe("a type extended from another module", () => {
     expect(robot.fly()).toBe("fly R2");
     expect(Number(robot.wingspan)).toBe(2);
   });
+
+  test("a name whose words the symbol substitutes is still reached through the facade", () => {
+    const robot = (Swift.type("fixture.Robot") as ClassType).init("R2");
+    expect(robot.flyRobot()).toBe("fly robot R2");
+    expect(Number(robot.robotWingspan)).toBe(4);
+  });
+
+  test("a name no module declares reads as undefined through the facade", () => {
+    const robot = (Swift.type("fixture.Robot") as ClassType).init("R2");
+    expect(robot.flyAway).toBeUndefined();
+  });
 });
 
 describe("a protocol extended from another module", () => {
@@ -80,6 +91,11 @@ describe("a protocol extended from another module", () => {
     const type = Swift.type("fixture.DefaultDescriber") as StructType;
     expect(type.methods()).toContain("whisper()");
     expect(type.new({ displayName: "Ada" }).whisper()).toBe("ada");
+  });
+
+  test("an extension method whose words the symbol substitutes is reached through the facade", () => {
+    const type = Swift.type("fixture.DefaultDescriber") as StructType;
+    expect(type.new({ displayName: "Ada" }).whisperLabeled()).toBe("labeled ada");
   });
 });
 

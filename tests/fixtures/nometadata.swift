@@ -3,6 +3,10 @@ import fixture
 public extension Robot {
     func fly() -> String { "fly \(name)" }
 
+    func flyRobot() -> String { "fly robot \(name)" }
+
+    var robotWingspan: Int { name.count * 2 }
+
     var wingspan: Int { name.count }
 }
 
@@ -20,4 +24,6 @@ public extension Robot {
 
 public extension Labeled {
     func whisper() -> String { displayName.lowercased() }
+
+    func whisperLabeled() -> String { "labeled " + displayName.lowercased() }
 }

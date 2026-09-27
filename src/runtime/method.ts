@@ -43,7 +43,7 @@ import {
   projectOpaqueExistential,
   protocolClassConstraint,
 } from "../abi/existential.js";
-import { exportsByPrefix } from "./export-trie.js";
+import { exportsByPrefix, PrefixedExport } from "./export-trie.js";
 import {
   findProtocol,
   conformsToProtocol,
@@ -496,11 +496,14 @@ function carriesToken(module: Module, token: string): boolean {
   return false;
 }
 
+const exportScans = new Map<string, ModuleExportScan>();
 const foreignScans = new Map<string, TypeMembers>();
+
+type SymbolFilter = (symbol: string) => boolean;
 
 // Keyed on the module, not on the answer: a loaded module's symbols can't change, while
 // "type T has no member m" stops being true as soon as another module is loaded.
-function foreignMembers(fullName: string): TypeMembers {
+function foreignMembers(fullName: string, mayName: SymbolFilter | null = null): TypeMembers {
   const methods: MethodCandidate[] = [];
   const accessors: AccessorCandidate[] = [];
   const descriptor = findType(fullName)!;
@@ -516,15 +519,12 @@ function foreignMembers(fullName: string): TypeMembers {
     if (module.base.equals(owner.base)) {
       continue;
     }
-    const found = exportedMembers(module, fullName, token);
-    methods.push(...found.methods);
-    accessors.push(...found.accessors);
+    forEachExportedMembers(module, [{ fullName, token }], mayName, (_, found) => {
+      methods.push(...found.methods);
+      accessors.push(...found.accessors);
+    });
   }
   return { methods, accessors };
-}
-
-function exportedMembers(module: Module, fullName: string, token: string): TypeMembers {
-  return exportedMembersOfAll(module, [{ fullName, token }])[0];
 }
 
 interface MemberTarget {
@@ -532,21 +532,102 @@ interface MemberTarget {
   token: string;
 }
 
-function exportedMembersOfAll(module: Module, targets: MemberTarget[]): TypeMembers[] {
-  const keyOf = (target: MemberTarget): string => `${module.path}@${module.base}|${target.token}`;
-  const pending = targets.filter((t) => !foreignScans.has(keyOf(t)));
+interface ModuleExportScan {
+  scannedTokens: Set<string>;
+  exportsByToken: Map<string, PrefixedExport[]>;
+}
+
+// Only the tokens a module actually exports under are kept, so the common "nothing here" answer
+// costs one set lookup per target and allocates nothing.
+function forEachExportedMembers(
+  module: Module,
+  targets: MemberTarget[],
+  mayName: SymbolFilter | null,
+  visit: (targetIndex: number, members: TypeMembers) => void
+): void {
+  const moduleKey = `${module.path}@${module.base}`;
+  let scan = exportScans.get(moduleKey);
+  if (scan === undefined) {
+    scan = { scannedTokens: new Set(), exportsByToken: new Map() };
+    exportScans.set(moduleKey, scan);
+  }
+  const { scannedTokens, exportsByToken } = scan;
+  const pending = targets.filter((t) => !scannedTokens.has(t.token));
   if (pending.length > 0) {
     const found = exportsByPrefix(module, pending.map((t) => `$s${t.token}`));
     pending.forEach((target, i) => {
-      const members: TypeMembers = { methods: [], accessors: [] };
-      const seen = new Set<string>();
-      for (const e of found[i]) {
-        considerMember(members, seen, target.fullName, e.name, e.address, false);
+      scannedTokens.add(target.token);
+      if (found[i].length > 0) {
+        exportsByToken.set(target.token, found[i]);
       }
-      foreignScans.set(keyOf(target), members);
     });
   }
-  return targets.map((t) => foreignScans.get(keyOf(t))!);
+  if (exportsByToken.size === 0) {
+    return;
+  }
+  targets.forEach((target, i) => {
+    const exports = exportsByToken.get(target.token);
+    if (exports === undefined) {
+      return;
+    }
+    if (mayName !== null) {
+      visit(i, membersAmong(exports.filter((e) => mayName(e.name)), target.fullName));
+      return;
+    }
+    const key = `${moduleKey}|${target.token}`;
+    let members = foreignScans.get(key);
+    if (members === undefined) {
+      members = membersAmong(exports, target.fullName);
+      foreignScans.set(key, members);
+    }
+    visit(i, members);
+  });
+}
+
+function membersAmong(exports: PrefixedExport[], fullName: string): TypeMembers {
+  const members: TypeMembers = { methods: [], accessors: [] };
+  const seen = new Set<string>();
+  for (const e of exports) {
+    considerMember(members, seen, fullName, e.name, e.address, false);
+  }
+  return members;
+}
+
+// A word substitution only refers back to a word spelled out earlier in the same symbol, so every
+// word of the name appears verbatim even when the identifier itself is mangled with substitutions.
+function symbolMayName(name: string): SymbolFilter | null {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    return null;
+  }
+  const words = name
+    .replace(/([^A-Z])([A-Z])/g, "$1_$2")
+    .split("_")
+    .map((w) => w.replace(/^[0-9]+/, ""))
+    .filter((w) => w.length > 0);
+  return (symbol) => words.every((w) => symbol.includes(w));
+}
+
+export interface InstanceMemberKinds {
+  method: boolean;
+  property: boolean;
+}
+
+export function instanceMemberKindsInOtherModules(typeName: string, name: string): InstanceMemberKinds {
+  const fullName = canonicalTypeName(typeName);
+  const mayName = symbolMayName(name);
+  const found: InstanceMemberKinds = { method: false, property: false };
+  const consider = (members: TypeMembers, isMethod: (c: MethodCandidate) => boolean): void => {
+    found.method ||= members.methods.some((c) => c.name === name && isMethod(c));
+    found.property ||= members.accessors.some((a) => a.member === name && !a.isStatic);
+  };
+  const isInstanceMethod = (c: MethodCandidate): boolean => !c.isStatic && methodKind(c.name) === "method";
+  for (const className of classChainNames(fullName)) {
+    consider(foreignMembers(className, mayName), isInstanceMethod);
+  }
+  for (const conformance of conformanceMembers(fullName, mayName)) {
+    consider(conformance.members, (c) => isConformanceMethod(c) && isInstanceMethod(c));
+  }
+  return found;
 }
 
 // The stdlib and imported ObjC modules mangle as substitutions (`s`, `So`), never as a spelled-out token.
@@ -558,7 +639,7 @@ function protocolExtensionTarget(protocol: ContextDescriptor): MemberTarget | nu
   return fullName === null || token === null ? null : { fullName, token };
 }
 
-function protocolExtensionMembersOfAll(protocols: ContextDescriptor[]): TypeMembers[] {
+function protocolExtensionMembersOfAll(protocols: ContextDescriptor[], mayName: SymbolFilter | null = null): TypeMembers[] {
   const result = protocols.map((): TypeMembers => ({ methods: [], accessors: [] }));
   const targets: MemberTarget[] = [];
   const slots: number[] = [];
@@ -573,7 +654,7 @@ function protocolExtensionMembersOfAll(protocols: ContextDescriptor[]): TypeMemb
     return result;
   }
   for (const module of Process.enumerateModules()) {
-    exportedMembersOfAll(module, targets).forEach((found, i) => {
+    forEachExportedMembers(module, targets, mayName, (i, found) => {
       result[slots[i]].methods.push(...found.methods);
       result[slots[i]].accessors.push(...found.accessors);
     });
@@ -2021,7 +2102,7 @@ interface ConformanceMembers {
   members: TypeMembers;
 }
 
-function conformanceMembers(fullName: string): ConformanceMembers[] {
+function conformanceMembers(fullName: string, mayName: SymbolFilter | null = null): ConformanceMembers[] {
   const descriptor = findType(fullName);
   const receiver = descriptor === null || descriptor.isGeneric ? null : resolveType(fullName);
   if (receiver === null) {
@@ -2042,7 +2123,7 @@ function conformanceMembers(fullName: string): ConformanceMembers[] {
       }
     }
   }
-  const members = protocolExtensionMembersOfAll(conformances.map((c) => c.protocol));
+  const members = protocolExtensionMembersOfAll(conformances.map((c) => c.protocol), mayName);
   return conformances.map((c, i) => ({ ...c, members: members[i] }));
 }
 

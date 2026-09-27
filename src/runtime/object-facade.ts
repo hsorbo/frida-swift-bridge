@@ -12,7 +12,7 @@ import {
   lowerResolveOptions,
   enumerateMethods,
   enumerateProperties,
-  ModuleScope,
+  instanceMemberKindsInOtherModules,
 } from "./method.js";
 import { typeName } from "./type-name.js";
 import { SwiftType } from "./swift-type.js";
@@ -141,31 +141,37 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   };
 
   let index: MemberIndex | null = null;
-  let searchedAllModules = false;
-  const buildIndex = (modules: ModuleScope): MemberIndex => ({
+  const buildIndex = (): MemberIndex => ({
     methods: new Set(
-      enumerateMethods(fullName(), modules)
+      enumerateMethods(fullName(), "definingModule")
         .filter((m) => m.kind === "method" && !m.isStatic)
         .map((m) => m.name)
     ),
     properties: new Set(
-      enumerateProperties(fullName(), modules).filter((p) => !p.isStatic).map((p) => p.name)
+      enumerateProperties(fullName(), "definingModule").filter((p) => !p.isStatic).map((p) => p.name)
     ),
   });
   const members = (): MemberIndex => {
     if (index === null) {
-      index = buildIndex("definingModule");
+      index = buildIndex();
     }
     return index;
   };
+  const searchedInOtherModules = new Set<string>();
   const membersIncludingOtherModules = (key: string): MemberIndex => {
     const own = members();
-    if (own.methods.has(key) || own.properties.has(key) || searchedAllModules) {
+    if (own.methods.has(key) || own.properties.has(key) || searchedInOtherModules.has(key)) {
       return own;
     }
-    searchedAllModules = true;
-    index = buildIndex("allLoadedModules");
-    return index;
+    searchedInOtherModules.add(key);
+    const found = instanceMemberKindsInOtherModules(fullName(), key);
+    if (found.method) {
+      own.methods.add(key);
+    }
+    if (found.property) {
+      own.properties.add(key);
+    }
+    return own;
   };
 
   const callables = new Map<string, (...args: CallArg[]) => CallResult | Promise<CallResult>>();

@@ -4,7 +4,8 @@ import {
   RelativeDirectPointer,
   RelativeIndirectablePointer,
 } from "../basic/relative-pointer.js";
-import { getSwiftSection } from "../image/sections.js";
+import { getSwiftSection, SwiftSection } from "../image/sections.js";
+import { conformanceScanner, ConformanceScanner } from "./conformance-scan.js";
 import { enumerateSwiftModules } from "../reflection/registry.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import {
@@ -210,17 +211,27 @@ function appendTo(map: Map<string, ContextDescriptor[]>, key: string, value: Con
 }
 
 function collectAcrossModules(
+  scan: (scanner: ConformanceScanner, section: SwiftSection) => NativePointer[],
   select: (index: ConformanceIndex) => ContextDescriptor[] | undefined
 ): ContextDescriptor[] {
   const result: ContextDescriptor[] = [];
   const seen = new Set<string>();
+  const add = (descriptor: ContextDescriptor): void => {
+    const handle = descriptor.handle.toString();
+    if (!seen.has(handle)) {
+      seen.add(handle);
+      result.push(descriptor);
+    }
+  };
+  const scanner = conformanceScanner();
   for (const module of enumerateSwiftModules()) {
-    for (const descriptor of select(conformanceIndexOf(module)) ?? []) {
-      const handle = descriptor.handle.toString();
-      if (!seen.has(handle)) {
-        seen.add(handle);
-        result.push(descriptor);
-      }
+    if (scanner === null) {
+      (select(conformanceIndexOf(module)) ?? []).forEach(add);
+      continue;
+    }
+    const section = getSwiftSection(module, "__swift5_proto");
+    if (section !== null) {
+      scan(scanner, section).forEach((handle) => add(new ContextDescriptor(handle)));
     }
   }
   return result;
@@ -228,10 +239,16 @@ function collectAcrossModules(
 
 export function conformingProtocols(typeDescriptor: NativePointer): ContextDescriptor[] {
   const key = typeDescriptor.toString();
-  return collectAcrossModules((index) => index.protocolsByType.get(key));
+  return collectAcrossModules(
+    (scanner, section) => scanner.protocolsOf(section, typeDescriptor),
+    (index) => index.protocolsByType.get(key)
+  );
 }
 
 export function conformingTypes(protocol: ContextDescriptor): ContextDescriptor[] {
   const key = protocol.handle.toString();
-  return collectAcrossModules((index) => index.typesByProtocol.get(key));
+  return collectAcrossModules(
+    (scanner, section) => scanner.typesOf(section, protocol.handle),
+    (index) => index.typesByProtocol.get(key)
+  );
 }
