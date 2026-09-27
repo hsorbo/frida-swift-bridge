@@ -743,10 +743,11 @@ function considerMember(
   address: NativePointer,
   initsOnly: boolean
 ): void {
-  if (address.isNull() || seen.has(address.toString())) {
+  const key = address.strip().toString();
+  if (address.isNull() || seen.has(key)) {
     return;
   }
-  seen.add(address.toString());
+  seen.add(key);
   const demangled = demangle(name)?.replace(PRIVATE_DECL_NAME, "$1") ?? null;
   if (demangled === null) {
     return;
