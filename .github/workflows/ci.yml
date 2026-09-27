@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-26, macos-26-intel, macos-15]
+        os: [xcode-27, macos-26, macos-26-intel, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +28,24 @@ jobs:
 
       - name: Test
         run: npm test
+
+  macos-arm64e:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: SDKROOT=$(xcrun --show-sdk-path) npm run test:macos-arm64e
 
   linux:
     strategy:
