@@ -108,6 +108,7 @@ function handleOf(other: SwiftObject | ClassInstance | ValueInstance | NativePoi
 interface MemberIndex {
   methods: Set<string>;
   properties: Set<string>;
+  writableProperties: Set<string>;
 }
 
 // One facade for class and value alike; $kind discriminates. The proxy roots its target, so an
@@ -145,16 +146,18 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   };
 
   let index: MemberIndex | null = null;
-  const buildIndex = (): MemberIndex => ({
-    methods: new Set(
-      enumerateMethods(fullName(), "definingModule")
-        .filter((m) => m.kind === "method" && !m.isStatic)
-        .map((m) => m.name)
-    ),
-    properties: new Set(
-      enumerateProperties(fullName(), "definingModule").filter((p) => !p.isStatic).map((p) => p.name)
-    ),
-  });
+  const buildIndex = (): MemberIndex => {
+    const properties = enumerateProperties(fullName(), "definingModule").filter((p) => !p.isStatic);
+    return {
+      methods: new Set(
+        enumerateMethods(fullName(), "definingModule")
+          .filter((m) => m.kind === "method" && !m.isStatic)
+          .map((m) => m.name)
+      ),
+      properties: new Set(properties.map((p) => p.name)),
+      writableProperties: new Set(properties.filter((p) => p.writable).map((p) => p.name)),
+    };
+  };
   const members = (): MemberIndex => {
     if (index === null) {
       index = buildIndex();
@@ -174,6 +177,9 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
     }
     if (found.property) {
       own.properties.add(key);
+    }
+    if (found.writable) {
+      own.writableProperties.add(key);
     }
     return own;
   };
@@ -262,15 +268,27 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
       }
       return undefined;
     },
-    set() {
-      return false;
+    set(_t, key, v) {
+      if (typeof key !== "string") {
+        return false;
+      }
+      const m = RESERVED.has(key) || POISON.has(key) ? null : membersIncludingOtherModules(key);
+      if (m === null || !m.properties.has(key)) {
+        throw new Error(`no property ${key} on ${fullName()}`);
+      }
+      if (!m.writableProperties.has(key)) {
+        throw new Error(`${key} on ${fullName()} is read-only`);
+      }
+      writeProperty(key, v);
+      return true;
     },
     ownKeys() {
       const m = members();
       return ["$handle", ...m.methods, ...m.properties];
     },
-    getOwnPropertyDescriptor() {
-      return { writable: false, configurable: true, enumerable: true };
+    getOwnPropertyDescriptor(_t, key) {
+      const writable = typeof key === "string" && members().writableProperties.has(key);
+      return { writable, configurable: true, enumerable: true };
     },
   });
   return proxy as unknown as SwiftObject;

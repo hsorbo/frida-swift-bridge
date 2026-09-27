@@ -328,9 +328,6 @@ before demangling anything. Listing a facade (`Object.keys(robot)`, `in`)
 shows the defining module's members plus names already looked up; use
 `robot.$type.methods()` for the full list.
 
-Assigning through the facade (`robot.badge = "D2"`) is not supported yet; use
-`$set`.
-
 ## Calling methods
 
 The bare-name and `$call` forms cover the common case and dispatch overloads by
@@ -479,9 +476,12 @@ Stored and computed properties read and write through the bare-name sugar or
 
 ```js
 robot.badge;                // computed getter -> "[R2]"
-robot.$set("badge", "D2");  // computed setter
+robot.badge = "D2";         // computed setter, same as robot.$set("badge", "D2")
 robot.badge;                // "[D2]"
 ```
+
+Assigning a property without a setter, or a name that is not a property,
+throws.
 
 `type.properties` enumerates the declared members:
 

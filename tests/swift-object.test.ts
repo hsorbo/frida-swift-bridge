@@ -3,7 +3,7 @@ import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, ClassType } from "../src/index.js";
 
-import { metadataFor, typeOf, typeName, metadataOf } from "../src/abi.js";
+import { metadataFor, typeOf, typeName, metadataOf, ValueInstance, asSwiftObject } from "../src/abi.js";
 function robot(name: string) {
   return (typeOf(metadataFor("fixture.Robot")!) as ClassType).init(name);
 }
@@ -53,6 +53,28 @@ describe("Swift object intrinsics", () => {
     expect(o.$get("badge")).toBe("[R2]");
     o.$set("badge", "D2");
     expect(o.$get("badge")).toBe("[D2]");
+  });
+
+  test("assigning a writable property routes to its setter", () => {
+    const o = robot("R2");
+    o.badge = "D2";
+    expect(o.badge).toBe("[D2]");
+    expect(Object.getOwnPropertyDescriptor(o, "badge")!.writable).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(o, "greet")!.writable).toBe(false);
+  });
+
+  test("assigning a writable property on a value facade routes to its setter", () => {
+    const rect = asSwiftObject(ValueInstance.fromJS(metadataFor("fixture.Rect")!, { width: 3 }));
+    rect.scaled = 10;
+    expect(rect.width).toEqual(int64(5));
+    expect(rect.scaled).toEqual(int64(10));
+  });
+
+  test("assigning a read-only or unknown property throws", () => {
+    const point = asSwiftObject(ValueInstance.fromJS(metadataFor("fixture.Point")!, { x: 2 }));
+    expect(() => { point.doubled = 8; }).toThrow("doubled on fixture.Point is read-only");
+    expect(() => { robot("R2").nope = 1; }).toThrow("no property nope on fixture.Robot");
+    expect(() => { robot("R2").greet = 1; }).toThrow("no property greet on fixture.Robot");
   });
 
   test("$type.methods() lists callable selectors", () => {

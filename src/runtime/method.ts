@@ -610,15 +610,17 @@ function symbolMayName(name: string): SymbolFilter | null {
 export interface InstanceMemberKinds {
   method: boolean;
   property: boolean;
+  writable: boolean;
 }
 
 export function instanceMemberKindsInOtherModules(typeName: string, name: string): InstanceMemberKinds {
   const fullName = canonicalTypeName(typeName);
   const mayName = symbolMayName(name);
-  const found: InstanceMemberKinds = { method: false, property: false };
+  const found: InstanceMemberKinds = { method: false, property: false, writable: false };
   const consider = (members: TypeMembers, isMethod: (c: MethodCandidate) => boolean): void => {
     found.method ||= members.methods.some((c) => c.name === name && isMethod(c));
     found.property ||= members.accessors.some((a) => a.member === name && !a.isStatic);
+    found.writable ||= members.accessors.some((a) => a.member === name && !a.isStatic && a.kind === "setter");
   };
   const isInstanceMethod = (c: MethodCandidate): boolean => !c.isStatic && methodKind(c.name) === "method";
   for (const className of classChainNames(fullName)) {
