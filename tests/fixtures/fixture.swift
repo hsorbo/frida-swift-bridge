@@ -101,6 +101,10 @@ public struct Accumulator {
 // Nested type; full name fixture.Outer.Inner.
 public struct Outer {
     public var tag: Int
+    // Protocols nested in types need SE-0404.
+#if compiler(>=5.10)
+    public protocol Marker {}
+#endif
     public struct Inner {
         public var value: Int
         public func doubled() -> Int { value * 2 }

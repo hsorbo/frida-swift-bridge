@@ -1,5 +1,6 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { loadSwiftCore } from "./swift.js";
+import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
 import { Swift } from "../src/index.js";
 import { findType } from "../src/reflection/registry.js";
@@ -64,5 +65,27 @@ describe("protocol conformances", () => {
     ]);
     expect(dictionary.kind).toBe(MetadataKind.Struct);
     expect(dictionary.description.handle.equals(findType("Swift.Dictionary")!.handle)).toBeTruthy();
+  });
+});
+
+describe("findProtocol", () => {
+  test("resolves a protocol nested in a type by its full name", (ctx) => {
+    loadFixture();
+    const declared = [...Swift.enumerateProtocols()].some((p) => p.fullName === "fixture.Outer.Marker");
+    if (!declared) ctx.skip("fixture compiled without nested protocols (Swift < 5.10)");
+    expect(findProtocol("fixture.Outer.Marker")!.fullTypeName).toBe("fixture.Outer.Marker");
+  });
+
+  test("resolves a unique bare name", () => {
+    loadSwiftCore();
+    expect(findProtocol("Hashable")!.fullTypeName).toBe("Swift.Hashable");
+  });
+
+  test("rejects a bare name two modules share but resolves each qualified form", () => {
+    loadFixture();
+    loadFixtureSyms();
+    expect(() => findProtocol("Greeter")).toThrow(/ambiguous/);
+    expect(findProtocol("fixture.Greeter")!.fullTypeName).toBe("fixture.Greeter");
+    expect(findProtocol("fixturesyms.Greeter")!.fullTypeName).toBe("fixturesyms.Greeter");
   });
 });

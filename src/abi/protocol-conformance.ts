@@ -147,22 +147,36 @@ export function findProtocol(name: string): ContextDescriptor | null {
 
   const dot = name.lastIndexOf(".");
   const simpleName = dot === -1 ? name : name.slice(dot + 1);
-  const moduleName = dot === -1 ? null : name.slice(0, dot);
+  const qualified = dot === -1 ? null : name;
 
+  let match: ContextDescriptor | null = null;
+  let matchName: string | null = null;
   for (const module of enumerateSwiftModules()) {
     for (const protocol of protocolsOf(module)) {
       if (protocol.name !== simpleName) {
         continue;
       }
-      if (moduleName !== null && protocol.moduleName !== moduleName) {
+      if (qualified !== null) {
+        if (protocol.fullTypeName !== qualified) {
+          continue;
+        }
+        resolvedProtocols.set(name, protocol);
+        return protocol;
+      }
+      const fullName = protocol.fullTypeName;
+      if (fullName === null) {
         continue;
       }
-      resolvedProtocols.set(name, protocol);
-      return protocol;
+      if (match !== null && fullName !== matchName) {
+        throw new Error(`ambiguous protocol name "${name}"; qualify it with a module`);
+      }
+      match = protocol;
+      matchName = fullName;
     }
   }
 
-  return null;
+  // Never cached: a later-loaded image can make a bare name ambiguous.
+  return match;
 }
 
 export function conformsToProtocol(
