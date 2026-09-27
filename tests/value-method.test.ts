@@ -58,6 +58,10 @@ describe("facade method routing on a small loadable value", () => {
     expect(() => accumulator(5).peek(10)).toThrow(/mutating/);
   });
 
+  test("the missing-flag error names the working call form", () => {
+    expect(() => accumulator(5).peek(10)).toThrow('$method("peek", { mutating: false }).call(...)');
+  });
+
   test("$method({ mutating: false }) invokes a non-mutating method", () => {
     expect(accumulator(5).$method("peek", { mutating: false }).call(10)).toEqual(int64(15));
   });

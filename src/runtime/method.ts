@@ -1329,8 +1329,10 @@ function valueSelfRouting(receiver: Metadata, selector: string, mutating: boolea
     return { indirect: true };
   }
   if (mutating === undefined) {
+    const baseName = selector.split("(")[0];
     throw new Error(
-      `${selector} on small loadable ${typeName(receiver)}: self routing depends on whether it mutates; pass { mutating: true } or { mutating: false }`
+      `${selector} on small loadable ${typeName(receiver)}: self routing depends on whether it mutates; ` +
+        `call it as $method("${baseName}", { mutating: false }).call(...), or { mutating: true } if it mutates`
     );
   }
   return mutating ? { indirect: true } : { indirect: false, receiver };
