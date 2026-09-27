@@ -62,16 +62,18 @@ describe("Swift object intrinsics", () => {
     }
   });
 
-  test("$methods lists instance selectors as '- ' and static ones as '+ '", () => {
-    const methods = robot("R2").$methods;
-    expect(methods).toContain("- greet(_:)");
-    expect(methods).toContain("- rename(to:)");
-    expect(methods).toContain("+ make(name:)");
-    expect(methods).not.toContain("greet(_:)");
+  test("$instanceMethods and $typeMethods list plain Swift selectors", () => {
+    const o = robot("R2");
+    expect(o.$instanceMethods).toContain("greet(_:)");
+    expect(o.$instanceMethods).toContain("rename(to:)");
+    expect(o.$instanceMethods).not.toContain("make(name:)");
+    expect(o.$typeMethods).toContain("make(name:)");
+    expect(o.$typeMethods).not.toContain("greet(_:)");
+    expect(o.$methods).toBeUndefined();
   });
 
-  test("$methods works on a value facade", () => {
-    expect(Swift.struct("Swift.Int")!.new(-1).$methods).toContain("- signum()");
+  test("$instanceMethods works on a value facade", () => {
+    expect(Swift.struct("Swift.Int")!.new(-1).$instanceMethods).toContain("signum()");
   });
 
   test("$className reflects the dynamic type", () => {

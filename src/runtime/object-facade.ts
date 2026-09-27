@@ -29,7 +29,8 @@ const RESERVED = new Set([
   "$handle",
   "$className",
   "$fields",
-  "$methods",
+  "$instanceMethods",
+  "$typeMethods",
   "$owned",
   "$call",
   "$method",
@@ -62,7 +63,8 @@ export interface SwiftObjectBase {
   readonly $handle: NativePointer;
   readonly $className: string;
   readonly $fields: { [name: string]: SwiftValue } | SwiftValue;
-  readonly $methods: string[];
+  readonly $instanceMethods: string[];
+  readonly $typeMethods: string[];
   readonly $owned: boolean;
   $call(method: string, ...args: CallArg[]): CallResult | Promise<CallResult>;
   $get(name: string): CallResult;
@@ -205,11 +207,10 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
           return typeName(dynamicType());
         case "$fields":
           return isValue ? value.read() : object.read();
-        case "$methods":
-          return [
-            ...target.type.methods({ static: true }).map((s) => `+ ${s}`),
-            ...target.type.methods().map((s) => `- ${s}`),
-          ];
+        case "$instanceMethods":
+          return target.type.methods();
+        case "$typeMethods":
+          return target.type.methods({ static: true });
         case "$owned":
           return target.owned;
         case "$call":
