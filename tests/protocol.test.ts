@@ -45,17 +45,17 @@ describe("Protocol", () => {
   });
 });
 
-describe("Swift.protocols", () => {
+describe("Swift.enumerateProtocols", () => {
   beforeEach(() => { loadFixture(); });
 
   test("enumerates protocols across loaded modules, including the fixture's", () => {
-    const names = [...Swift.protocols()].map((p) => p.fullName);
+    const names = [...Swift.enumerateProtocols()].map((p) => p.fullName);
     expect(names).toContain("fixture.Greeter");
     expect(names).toContain("fixture.Scalable");
   });
 
   test("each yielded entry is a usable Protocol", () => {
-    const greeter = [...Swift.protocols()].find((p) => p.fullName === "fixture.Greeter")!;
+    const greeter = [...Swift.enumerateProtocols()].find((p) => p.fullName === "fixture.Greeter")!;
     expect(greeter.requirements.length).toBeGreaterThan(0);
   });
 });

@@ -134,14 +134,14 @@ export const Swift = {
 
   demangle,
   images: swiftImages,
-  protocols: swiftProtocols,
+  enumerateProtocols: swiftProtocols,
 
   type(name: string): SwiftType | null {
     const descriptor = findType(name);
     return descriptor === null ? null : typeFromDescriptor(descriptor);
   },
 
-  *types(module?: Module): Generator<SwiftType> {
+  *enumerateTypes(module?: Module): Generator<SwiftType> {
     for (const descriptor of nameable(swiftTypes(module))) {
       yield typeFromDescriptor(descriptor);
     }
@@ -151,7 +151,7 @@ export const Swift = {
     return typeOfKind(name, ClassType, "class");
   },
 
-  *classes(module?: Module): Generator<ClassType> {
+  *enumerateClasses(module?: Module): Generator<ClassType> {
     for (const descriptor of nameable(swiftClasses(module))) {
       yield new ClassType(descriptor);
     }
@@ -161,7 +161,7 @@ export const Swift = {
     return typeOfKind(name, StructType, "struct");
   },
 
-  *structs(module?: Module): Generator<StructType> {
+  *enumerateStructs(module?: Module): Generator<StructType> {
     for (const descriptor of nameable(swiftStructs(module))) {
       yield new StructType(descriptor);
     }
@@ -171,7 +171,7 @@ export const Swift = {
     return typeOfKind(name, EnumType, "enum");
   },
 
-  *enums(module?: Module): Generator<EnumType> {
+  *enumerateEnums(module?: Module): Generator<EnumType> {
     for (const descriptor of nameable(swiftEnums(module))) {
       yield new EnumType(descriptor);
     }
