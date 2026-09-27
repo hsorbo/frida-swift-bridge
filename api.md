@@ -1,0 +1,766 @@
+# Swift bridge API reference
+
+Swift runtime interop from Frida. The bridge reflects the Swift metadata that a
+process already carries, so you can look up types, construct and inspect
+instances, call methods (sync, async, generic, static), read and write
+properties, work with protocols and existentials, pass JavaScript callbacks as
+Swift closures, and intercept Swift functions with fully decoded arguments and
+return values.
+
+The examples are written against plausible application types (`MyApp.Robot`,
+…). The tests under `tests/` exercise the same capabilities against the compiled
+fixture in `tests/fixtures/`.
+
+```js
+import Swift from "frida-swift-bridge2";
+
+if (Swift.available) {
+    const NSDate = Swift.type("Foundation.Date");
+    // ...
+}
+```
+
+`Swift.available` is a side-effect-free presence check: reading it does not load
+or initialize `libswiftCore`. Call it before touching any other member.
+
+The package has two entry points. The root (`frida-swift-bridge2`) is the stable
+facade documented here. A second subpath, `frida-swift-bridge2/abi`, exposes the
+low-level Swift-ABI and reversing machinery; it is version-sensitive and not
+covered by this reference — see [Going lower: the `/abi` entry point](#going-lower-the-abi-entry-point).
+
+## Table of contents
+
+1. [The `Swift` object](#the-swift-object)
+2. [Finding types](#finding-types)
+3. [Types](#types)
+4. [Creating instances](#creating-instances)
+5. [Objects and values](#objects-and-values)
+6. [Calling methods](#calling-methods)
+7. [Async and actors](#async-and-actors)
+8. [Properties](#properties)
+9. [Protocols](#protocols)
+10. [Free functions](#free-functions)
+11. [Closures](#closures)
+12. [Intercepting](#intercepting)
+13. [Values and marshalling](#values-and-marshalling)
+14. [Errors](#errors)
+15. [Ownership and lifetime](#ownership-and-lifetime)
+16. [Symbols](#symbols)
+17. [Going lower: the `/abi` entry point](#going-lower-the-abi-entry-point)
+
+---
+
+## The `Swift` object
+
+The default export is the whole facade. Its members:
+
+- `Swift.available`: a boolean, `true` when a usable Swift runtime is loaded in
+  the target. Reading it never loads Swift.
+- `Swift.api`: the raw `libswiftCore` runtime functions (`swift_retain`,
+  `swift_getTypeName`, …) as typed `NativeFunction`s. An escape hatch; ordinary
+  workflows do not need it.
+- `Swift.demangle(name)`: turn a mangled Swift symbol into its readable form, or
+  `null` if it is not a Swift symbol. See [Symbols](#symbols).
+- `Swift.symbolicate(address)`: resolve a code address to a Swift symbol.
+- `Swift.images()`: a generator of the native `Module`s that carry Swift
+  metadata.
+- `Swift.type(name)`: look a type up by name; returns a [type wrapper](#types)
+  or `null`. See [Finding types](#finding-types).
+- `Swift.class(name)`, `Swift.struct(name)`, `Swift.enum(name)`: like
+  `Swift.type`, but checked to the named kind. See
+  [Finding types](#finding-types).
+- `Swift.modules`: a lazy namespace per Swift module, so
+  `Swift.modules.MyApp.Robot` reaches a type or protocol without a
+  module-qualified string. See [Finding types](#finding-types).
+- `Swift.enumerateTypes(module?)`, `Swift.enumerateClasses(module?)`,
+  `Swift.enumerateStructs(module?)`, `Swift.enumerateEnums(module?)`: lazy
+  generators over the types in a module (or every loaded module). Enumerating
+  does not realize metadata for types you skip.
+- `Swift.enumerateProtocols(module?)`: a generator of [`Protocol`](#protocols)s.
+- `Swift.Protocol.find(name)`, `Swift.ProtocolComposition.fromSignature(signature)`:
+  look up protocols. See [Protocols](#protocols).
+- `Swift.NativeFunction(address, returnType, argTypes, options?)`: wrap a free
+  Swift function as a callable. See [Free functions](#free-functions).
+- `Swift.asyncFunction(module, mangledName)`: wrap an `async` Swift function,
+  resolved from its mangled symbol, as an awaitable callable. See
+  [Async and actors](#async-and-actors).
+- `Swift.Interceptor`: attach to Swift functions. See
+  [Intercepting](#intercepting).
+- `Swift.closure(body)`: build a Swift closure from a JS callback. See
+  [Closures](#closures).
+- `Swift.borrowObject(handle)`, `Swift.adoptObject(handle)`: wrap a raw class
+  pointer as an object facade. See [Ownership and lifetime](#ownership-and-lifetime).
+- `Swift.markResilient(moduleName)`: force a module's types to be treated as
+  resilient (library-evolution) for ABI purposes.
+
+```js
+if (!Swift.available)
+    throw new Error("no Swift runtime here");
+
+for (const image of Swift.images())
+    console.log(image.name);
+
+const Date = Swift.type("Foundation.Date");
+```
+
+## Finding types
+
+`Swift.type(name)` resolves a **qualified** name (`Module.Type`) to a wrapper of
+the matching kind — a `ClassType`, `StructType`, or `EnumType`. It returns
+`null` when nothing matches.
+
+```js
+const url = Swift.type("Foundation.URLComponents"); // StructType
+const task = Swift.type("_Concurrency.Task");        // null if not loaded
+```
+
+A bare, unqualified name is accepted **only** when it resolves uniquely across
+the loaded images. If two modules both declare `Point`, the lookup throws rather
+than silently guessing:
+
+```js
+Swift.type("Point");            // throws: "ambiguous ..."
+Swift.type("MyApp.Point");      // resolves
+Swift.type("Geometry.Point");   // resolves
+```
+
+When you know the kind, the singular forms return it precisely typed:
+`Swift.class(name)` yields a `ClassType`, `Swift.struct(name)` a `StructType`,
+and `Swift.enum(name)` an `EnumType`. Name resolution is identical to
+`Swift.type`, and `null` still means "not found" — but a name that resolves to
+a different kind throws rather than silently mis-typing:
+
+```js
+const url = Swift.struct("Foundation.URL");  // StructType
+Swift.class("Foundation.URL");               // throws: "'Foundation.URL' is struct, not class"
+```
+
+Each singular pairs with a generator of the same kind (`class` /
+`enumerateClasses`, `struct` / `enumerateStructs`, `enum` / `enumerateEnums`).
+
+`Swift.modules` offers the same lookups as property access, which lets the REPL
+tab-complete. `Swift.modules.MyApp` is the namespace of the Swift module
+`MyApp`, and its members are that module's top-level types and protocols:
+
+```js
+Swift.modules.MyApp.Robot;          // ClassType, same as Swift.type("MyApp.Robot")
+Swift.modules.MyApp.Greeter;        // Protocol
+Swift.modules.Swift.Int;            // StructType
+Swift.modules.MyApp.NoSuchThing;    // undefined
+"MyApp" in Swift.modules;           // true
+Object.keys(Swift.modules.MyApp);   // ["Robot", "Greeter", ...]
+```
+
+Namespaces are keyed by Swift module name, not image name. One image can hold
+several statically linked modules, and `libswiftCore` holds the module `Swift`.
+Touching `Swift.modules` scans nothing. A lookup reads type sections only until
+it finds the name. Listing keys, or looking up a module that doesn't exist,
+reads every loaded image's type sections. Nested types are not reachable through
+the namespace yet; use `Swift.type("MyApp.Outer.Inner")`.
+
+To walk a module's types without knowing their names, use the lazy generators.
+They yield descriptor-backed wrappers and don't parse a type you never touch:
+
+```js
+const app = Process.getModuleByName("MyApp");
+for (const cls of Swift.enumerateClasses(app))
+    console.log(cls.name);
+```
+
+`Swift.enumerateTypes`, `Swift.enumerateClasses`, `Swift.enumerateStructs`, and
+`Swift.enumerateEnums` all accept an optional `Module`; with no argument they
+span every loaded Swift image and reflect modules loaded later.
+
+## Types
+
+Every wrapper extends `SwiftType`:
+
+- `type.name`: the fully-qualified name, including every enclosing context
+  (`MyApp.Outer.Inner`).
+- `type.moduleName`: the logical Swift module name.
+- `type.superClass`: the parent as a `SwiftType`, or `null`.
+- `type.methods(query?)`: the callable selectors, e.g. `["greet(_:)", …]`.
+  `query` is `{ static?, inherited? }`.
+- `type.properties`: the properties as `{ name, typeName, isStatic, writable }`.
+
+Both lists span every loaded module: they include members that other modules
+add in extensions, and members a conformed-to protocol provides through a
+protocol extension.
+- `type.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
+- `type.toJSON()`: cheap identity `{ kind, name, module }`.
+
+Reading a name, kind, or module does not realize the type's metadata.
+
+```js
+const robot = Swift.type("MyApp.Robot");
+robot.name;             // "MyApp.Robot"
+robot.moduleName;       // "MyApp"
+robot.methods();        // ["greet(_:)", "rename(to:)", ...]
+robot.superClass;       // null, or a SwiftType
+```
+
+Kind-specific members:
+
+- `StructType.fields`: stored members as `{ name, type, isVar }`.
+- `EnumType.cases`: the cases as `{ name, type, isVar }`.
+- `ClassType.isActor` / `ClassType.isDefaultActor`: actor classification.
+
+```js
+Swift.type("MyApp.Rect").fields.map(f => f.name);   // ["width", "height"]
+Swift.type("MyApp.Suit").cases.map(c => c.name);    // ["hearts", "spades", ...]
+Swift.type("MyApp.Session").isActor;                // true for `actor Session`
+```
+
+Other wrappers you may encounter from reflection: `TupleType` (`elements`, each
+`{ label, type }`), `MetatypeType` (`instanceType`), `FunctionType` (`signature`), and
+the foreign/ObjC bridging wrappers `ObjCClassWrapperType`, `ForeignClassType`,
+`ForeignReferenceType`.
+
+## Creating instances
+
+Construct instances from a type wrapper.
+
+Classes — `ClassType.init(...args)` runs a Swift initializer and hands back a
+live [object facade](#objects-and-values):
+
+```js
+const robot = Swift.type("MyApp.Robot").init("R2");
+robot.greet("Alice");   // "Hello Alice, I am R2"
+```
+
+Positional arguments select an initializer by arity. To select a **labeled**
+initializer, pass a single `{ label: value }` object — the keys map to the
+argument labels in order, so the call reads like the Swift original:
+
+```js
+Swift.type("MyApp.Vec2").init({ x: 1, y: 2 });            // init(x:y:)
+Swift.type("MyApp.Vec2").init({ angle: 1, radius: 2 });   // init(angle:radius:)
+
+const url = Swift.struct("Foundation.URL").init({ string: "https://frida.re" });
+```
+
+The object form works on value types too — `init` on a struct or enum runs a
+real Swift initializer when its symbol is resolvable, and a failable
+initializer that returns nil yields `null`. A lone object whose keys match no
+initializer falls back to being a single positional argument, so
+dictionary-like arguments still pass through unchanged. For what an object
+cannot express — mixed labeled and unlabeled arguments, or overloads that
+differ only in argument type — resolve explicitly with
+`initializer({ labels, argTypes })`, which returns a bound initializer to
+`.call(...)`.
+
+Structs — `StructType.new(value)` (an alias for `fromJS`) builds a value from a
+plain JS object; `EnumType.case(name, payload?)` builds an enum case:
+
+```js
+const rect = Swift.type("MyApp.Rect").new({ width: 3, height: 4 });
+
+const empty = Swift.type("MyApp.Pick").case("empty");
+const some  = Swift.type("MyApp.Pick").case("value", 42);
+```
+
+Value types also offer storage-oriented constructors that mirror the underlying
+Swift operations — `fromJS(value)`, `borrow(address)`, `copy(address)`,
+`adopt(address)` — see [Ownership and lifetime](#ownership-and-lifetime).
+
+To wrap a class pointer you already hold (e.g. from an interceptor or another
+call), use `Swift.borrowObject(handle)` for a non-owning view or
+`Swift.adoptObject(handle)` to take over an existing +1 reference:
+
+```js
+const view = Swift.borrowObject(handle);
+view.$className;    // "MyApp.Robot"
+```
+
+## Objects and values
+
+Both class and value instances are represented by a facade — a JS proxy that
+exposes Swift members directly and reserves its own controls under a `$` prefix.
+`$kind` discriminates the two: `"object"` for classes, `"value"` for
+structs/enums.
+
+Swift members are reached by their bare name:
+
+```js
+const robot = Swift.type("MyApp.Robot").init("R2");
+robot.greet("Alice");   // call a method
+robot.name;             // read a property
+```
+
+The control surface (never shadowed by Swift members of the same spelling):
+
+- `$type`: the `SwiftType`.
+- `$handle`: the underlying `NativePointer`.
+- `$className`: the dynamic type name.
+- `$kind`: `"object"` or `"value"`.
+- `$owned`: whether the facade owns its reference/storage.
+- `$call(name, ...args)`: invoke a method by name.
+- `$method(name, options?)`: resolve a bound method for overload/generic/mutating
+  control (see [Calling methods](#calling-methods)).
+- `$get(name)` / `$set(name, value)`: read/write a property by name.
+- `$field(name)`: a live borrowed [field view](#properties).
+- `$container()`: on a value facade wrapping a bridged `Array`/`Set`/`Dictionary`,
+  the decoded JS value.
+- `$dispose()` and `[Symbol.dispose]()`: release (idempotent); works with `using`.
+- `equals(other)`, `toString()`.
+
+```js
+robot.$className;                       // "MyApp.Robot"
+robot.$call("greet", "Alice");          // same as robot.greet("Alice")
+robot.$get("badge");                    // "[R2]"
+robot.$set("badge", "D2");
+robot.equals(Swift.borrowObject(robot.$handle));   // true
+```
+
+Because the controls live under `$`, a Swift member literally named `call`,
+`field`, or `handle` is still reachable as `robot.call()` while the bridge's own
+invoker stays at `robot.$call(...)`.
+
+A bare name reaches members declared anywhere: in the type's own module, in an
+extension from another loaded module, or in an extension of a protocol the type
+conforms to. The facade looks in the defining module first and searches the
+other modules only for a name it did not find there, filtering symbols by name
+before demangling anything. Listing a facade (`Object.keys(robot)`, `in`)
+shows the defining module's members plus names already looked up; use
+`robot.$type.methods()` for the full list.
+
+Assigning through the facade (`robot.badge = "D2"`) is not supported yet; use
+`$set`.
+
+## Calling methods
+
+The bare-name and `$call` forms cover the common case and dispatch overloads by
+argument count:
+
+```js
+robot.at(5);        // calls at(_:)
+robot.at(5, 6);     // calls at(_:_:)
+```
+
+When bare-name resolution is ambiguous — same arity, different labels; a
+generic method; or a mutating value method — use `$method(name, options)` to get
+an explicit bound method. Options: `arity`, `labels`, `argTypes`, `static`,
+`typeArguments`, and (value types only) `mutating`.
+
+```js
+robot.$method("move", { labels: ["to"] }).call(5);   // move(to:)
+robot.$method("move", { labels: ["by"] }).call(5);   // move(by:)
+```
+
+Static methods are called on the type wrapper via `ClassType.call` /
+`ValueType.call` (or `.method`):
+
+```js
+const made = Swift.type("MyApp.Robot").call("make", "Zed");
+made.greet("X");    // "Hello X, I am Zed"
+```
+
+Generic methods take their type arguments explicitly as `SwiftType`s:
+
+```js
+const box = Swift.type("MyApp.Box").init();
+box.$method("echo", { typeArguments: [Swift.type("Swift.Int")] }).call(21);   // 21
+```
+
+Mutating value methods must declare their intent. A small loadable value type is
+ambiguous about `self` routing, so the bridge refuses to guess: bare invocation
+throws, and you pass `{ mutating: true | false }`:
+
+```js
+const acc = Swift.type("MyApp.Accumulator").new({ total: 5 });
+acc.peek(10);                                   // throws: needs a mutating flag
+acc.$method("peek", { mutating: false }).call(10);   // 15
+acc.$method("add",  { mutating: true  }).call(3);    // writes back through self
+acc.total;                                      // 8
+```
+
+**Sync and async share one call site.** A call returns a decoded value for a
+synchronous method and a `Promise` for an `async` one — same syntax, you just
+`await` the async case. See [Async and actors](#async-and-actors).
+
+## Async and actors
+
+Awaiting an async method looks exactly like a sync call, with `await`:
+
+```js
+const calc = Swift.type("MyApp.AsyncCalc").init(100);
+await calc.addAsync(5);     // 105
+```
+
+Actor-isolated async methods run on the actor's executor; concurrent calls are
+serialized, and state persists between them:
+
+```js
+const session = Swift.type("MyApp.Session").init();   // `actor Session`
+await session.advance();    // 1
+await session.advance();    // 2
+```
+
+An `async throws` method rejects its promise on failure:
+
+```js
+await calc.divideBaseBy(2);   // 50
+await calc.divideBaseBy(0);   // rejects
+```
+
+Global-actor and custom-executor actors are handled the same way; the bridge
+observes completion regardless of which executor resumes the continuation.
+
+Facade methods are one route to async code. When you hold a **symbol** instead,
+`Swift.asyncFunction(module, mangledName)` builds an awaitable callable
+directly from it — argument and return types are derived from the demangled
+signature, so there is nothing to annotate. A free function is invoked with
+`.call(...)`:
+
+```js
+const app = Process.getModuleByName("MyApp");
+
+const computeAsync = Swift.asyncFunction(app, "$s5MyApp12computeAsyncyS2iYaF");
+await computeAsync.call(21);    // 42
+```
+
+An instance method binds its receiver first: `.bind(self)` accepts a Swift
+object facade, a raw pointer, or an ObjC object, and returns a plain async
+function. Receiver binding is supported for class receivers.
+
+```js
+const calc = Swift.type("MyApp.AsyncCalc").init(100);
+const addAsync = Swift.asyncFunction(app, "$s5MyApp9AsyncCalcC8addAsyncyS2iYaF").bind(calc);
+await addAsync(5);    // 105
+```
+
+An `async throws` function rejects its promise with a `SwiftError` (see
+[Errors](#errors)); a tuple return decodes to a destructurable array. Misuse
+fails fast: a non-async symbol is rejected (use `Swift.NativeFunction`),
+calling an unbound instance method throws, as does binding a receiver to a
+free function. Generic async functions are not supported.
+
+In TypeScript the wrapper is generic like `NativeFunction<Ret, Args>`: annotate
+the marshalled return (and optionally argument) types once and the call site is
+typed without casting.
+
+```ts
+const makeTuple = Swift.asyncFunction<[Int64, string], [number, number]>(app, MAKE_TUPLE);
+const [sum, label] = await makeTuple.call(3, 4);   // Promise<[Int64, string]>
+```
+
+The symbol may also be a cross-module extension method on an imported ObjC
+class — for example Foundation's `URLSession.data(from:)`. Bind the receiver
+from frida-objc-bridge, pass `null` where Swift expects an Optional `.none`,
+and an ObjC-class return arrives as a raw pointer ready to wrap in
+`ObjC.Object`:
+
+```js
+const DATA_FROM =
+    "$sSo12NSURLSessionC10FoundationE4data4from8delegateAC4DataV_So13NSURLResponseCtAC3URLV_So0A12TaskDelegate_pSgtYaKF";
+
+const foundation = Process.getModuleByName("Foundation");
+const url = Swift.struct("Foundation.URL").init({ string: "https://example.com/" });
+
+const dataFrom = Swift
+    .asyncFunction(foundation, DATA_FROM)
+    .bind(ObjC.classes.NSURLSession.sharedSession());
+
+const [data, response] = await dataFrom(url, null);
+new ObjC.Object(response).statusCode();   // 200
+```
+
+## Properties
+
+Stored and computed properties read and write through the bare-name sugar or
+`$get` / `$set`:
+
+```js
+robot.badge;                // computed getter -> "[R2]"
+robot.$set("badge", "D2");  // computed setter
+robot.badge;                // "[D2]"
+```
+
+`type.properties` enumerates the declared members:
+
+```js
+Swift.type("MyApp.Robot").properties.map(p => p.name);   // ["name", "badge"]
+```
+
+For direct access to a stored field's storage, `$field(name)` returns a live
+borrowed view with `.read()`, `.write(value)`, and `.handle`. Reads and writes
+go through the parent instance's storage:
+
+```js
+const f = robot.$field("name");
+f.read();           // "R2"
+f.write("C3");
+robot.greet("X");   // "Hello X, I am C3"
+```
+
+A field view is borrowed: its lifetime is bounded by the parent instance. It is
+not itself a full facade — for owning/ABI operations on a field value, go
+through `/abi`.
+
+## Protocols
+
+`Swift.Protocol.find(name)` looks a protocol up by name and returns `null` when
+nothing matches. Name resolution follows the same rules as
+[`Swift.type`](#finding-types): a qualified name matches the protocol's full
+name, including one nested in a type (`MyApp.Outer.Delegate`), and a bare name
+is accepted only when it is unique across the loaded images.
+
+```js
+const greeter = Swift.Protocol.find("MyApp.Greeter");
+greeter.name;               // "Greeter"
+greeter.moduleName;         // "MyApp"
+greeter.fullName;           // "MyApp.Greeter"
+greeter.isClassOnly;        // false; true for `: AnyObject` protocols
+
+Swift.Protocol.find("Greeter");   // throws if two modules declare Greeter
+```
+
+Relate types and protocols in both directions:
+
+```js
+Swift.Protocol.find("MyApp.Scalable").conformingTypes().map(t => t.name);   // ["Swift.Int", ...]
+
+Swift.type("MyApp.Person").protocols();   // { "MyApp.Greeter": Protocol, "MyApp.Aged": Protocol }
+```
+
+`ProtocolComposition` models an `any P & Q` existential, built from a signature:
+
+```js
+const ga = Swift.ProtocolComposition.fromSignature("MyApp.Greeter & MyApp.Aged");
+ga.numProtocols;    // 2
+ga.protocols;       // [Protocol, Protocol]
+ga.isClassOnly;     // false
+```
+
+Requirements, witness tables, and the existential metadata of a composition are
+not part of the stable root; they live under [`/abi`](#going-lower-the-abi-entry-point).
+
+Calling a protocol requirement on a concrete instance is just a normal method
+call — the facade dispatches through the value's witness. When a function takes
+or returns an existential (`any Greeter`), the bridge projects the dynamic value
+for you inside [interceptors](#intercepting).
+
+## Free functions
+
+`Swift.NativeFunction(address, returnType, argTypes, options?)` wraps a free
+Swift function. `returnType` and each of `argTypes` is a `SwiftType` (use `null`
+as the return type for `Void`). The returned callable marshals JS values in and
+decodes the Swift return out:
+
+```js
+const Int = Swift.type("Swift.Int");
+const addr = Module.getGlobalExportByName("$s5MyApp7addIntsyS2i_SitF");
+
+const addInts = Swift.NativeFunction(addr, Int, [Int, Int]);
+addInts(20, 22);    // 42
+```
+
+Strings and other non-POD types round-trip:
+
+```js
+const String = Swift.type("Swift.String");
+const stringLength = Swift.NativeFunction(lenAddr, Int, [String]);
+stringLength("frida");    // 5
+```
+
+A `Void` function passes `null` as the return type:
+
+```js
+const rename = Swift.NativeFunction(renameAddr, null, [Robot, String]);
+rename(robot, "new");     // null
+```
+
+The only option the stable wrapper accepts is `{ throws: true }` for a Swift
+`throws` function (see [Errors](#errors)). Consuming (`__owned`) parameters,
+generics, witness tables, and other lowering controls are rejected here — reach
+for the raw primitive under `/abi` when you need them.
+
+Finding an address is ordinary Frida work: `Module.getGlobalExportByName` with a
+mangled symbol, a scan of `module.enumerateExports()` filtered through
+`Swift.demangle`, or `Swift.symbolicate` on an address you already have.
+
+`Swift.NativeFunction` is synchronous. For an `async` function resolved from
+its mangled symbol, use `Swift.asyncFunction` — see
+[Async and actors](#async-and-actors).
+
+## Closures
+
+`Swift.closure(body)` turns a JS function into a Swift closure argument. Pass it
+where a Swift API expects a closure; the bridge marshals the closure's
+parameters into JS and its return value back into Swift.
+
+```js
+const source = /* a value or object facade with a closure-taking method */;
+source
+    .$method("map", { typeArguments: [] })
+    .call(7, Swift.closure(n => Number(n) * 6));    // 42
+```
+
+Loadable parameters (integers, booleans, pointers, `Double`), `String`, and
+buffer-style `(UnsafeRawBufferPointer) -> …` closures are supported. To throw
+out of a closure body, return a `SwiftThrow` (exported from
+`frida-swift-bridge2/abi`).
+
+> Closure synthesis is platform-specific — it requires an arm64 or x86-64 Swift
+> host. On other architectures `Swift.closure` is unavailable.
+
+## Intercepting
+
+`Swift.Interceptor.attach(target, callbacks)` hooks a Swift function and hands
+your callbacks the **decoded** Swift arguments and return value — structs
+exploded to objects, strings as JS strings, class/value returns as live facades,
+existentials projected to their dynamic value.
+
+```js
+const listener = Swift.Interceptor.attach(addr, {
+    onEnter(args) {
+        // args: SwiftValue[]
+        console.log("addInts", args[0], args[1]);
+    },
+    onLeave(retval, error) {
+        // retval: the decoded return; error is set instead when the call threw
+        console.log("=>", retval);
+    },
+});
+// ... later
+listener.detach();
+```
+
+When the target `throws` and does throw, `onLeave` receives `retval === null`
+and the decoded Swift error as its second argument, instead of a bogus return:
+
+```js
+Swift.Interceptor.attach(addr, {
+    onLeave(retval, error) {
+        if (error !== undefined)
+            console.log("threw:", error);   // e.g. "boom"
+    },
+});
+```
+
+For async functions, `Swift.Interceptor.attachAsync(target, callbacks)` provides
+`onEnter(args, context)`, `onFirstSuspend()`, and `onComplete(retval, error?)`,
+so you observe the real completion after the continuation resumes rather than
+the initial suspend. See `tests/async-interceptor.test.ts`.
+
+## Values and marshalling
+
+Swift values cross the boundary as a `SwiftValue`: JS numbers, booleans,
+`NativePointer`s, strings, arrays, and plain objects for aggregates. Integer
+decoding preserves precision on 64-bit hosts:
+
+- `Int` / `Int64` decode as Frida `Int64`.
+- `UInt` / `UInt64` decode as Frida `UInt64`.
+- 32-bit and smaller integers decode as JS numbers.
+
+Readers always return the same representation for a given type — never a number
+for small values and a wrapper for large ones.
+
+Where Swift expects an `Optional`, JS `null` marshals to `.none`.
+
+```js
+addInts(20, 22);    // int64(42), not 42
+```
+
+A struct decodes to an object keyed by field name; a bridged `Array`, `Set`, or
+`Dictionary` decodes to the corresponding JS value. A container returned from a
+call arrives as a value facade; `$container()` projects it:
+
+```js
+const ints = Swift.type("MyApp.Bag").call("ints");   // a value facade
+ints.$container();    // [int64(10), int64(20), int64(30)]
+```
+
+## Errors
+
+A `throws` free function wrapped with `{ throws: true }` raises a
+`SwiftError` (exported from the root) when Swift throws; its `.error`
+property is the thrown error's pointer:
+
+```js
+import Swift, { SwiftError } from "frida-swift-bridge2";
+
+const mightThrow = Swift.NativeFunction(addr, Int, [Int], { throws: true });
+mightThrow(0);    // 99
+try {
+    mightThrow(1);
+} catch (e) {
+    e instanceof SwiftError;   // true
+}
+```
+
+An `async throws` call — a facade method or a `Swift.asyncFunction` — rejects
+its promise with the same `SwiftError`.
+
+Inside an [interceptor](#intercepting), a thrown error surfaces as the second
+argument to `onLeave` (sync) or `onComplete` (async) instead of a return value.
+To throw from a JS-provided [closure](#closures) body, return a `SwiftThrow`
+from `/abi`.
+
+## Ownership and lifetime
+
+A facade tracks whether it owns its reference or storage via `$owned`.
+Constructing an instance produces an owned facade; borrowing a handle produces a
+non-owning view:
+
+```js
+const robot = Swift.type("MyApp.Robot").init("R2");
+robot.$owned;                               // true
+Swift.borrowObject(robot.$handle).$owned;   // false
+```
+
+The acquisition names encode the reference contract:
+
+- `Swift.borrowObject(handle)` — a view; does not retain or consume.
+- `Swift.adoptObject(handle)` — takes over an existing +1 reference.
+- For value types: `fromJS(value)` initializes owned storage, `borrow(address)`
+  is a non-owning view, `copy(address)` makes an independent owned copy, and
+  `adopt(address)` takes responsibility for already-initialized storage.
+
+An owned facade releases when it is garbage-collected. To release
+deterministically, call `$dispose()` (idempotent) or use a `using` binding:
+
+```js
+{
+    using tmp = Swift.type("MyApp.Robot").init("scratch");
+    tmp.greet("X");
+}   // released here
+```
+
+Raw `retain`/`release` are deliberately absent from the facade — mismatched
+counts cause double releases. Low-level reference-count operations live under
+`/abi`.
+
+## Symbols
+
+`Swift.symbolicate(address)` resolves a code address to
+`{ address, name, demangled }`, and `Swift.demangle(mangled)` turns a mangled
+symbol into its readable Swift form (or `null` for a non-Swift symbol):
+
+```js
+const sym = Swift.symbolicate(addr);
+sym.demangled;                  // "MyApp.addInts(...) -> ..."
+Swift.demangle(sym.name);       // same readable form
+```
+
+`isSwiftSymbol(name)` (exported from the root) reports whether a raw symbol is a
+Swift mangled name.
+
+## Going lower: the `/abi` entry point
+
+Everything above is the stable facade. When you need to reverse the Swift ABI
+directly — read metadata and context descriptors, walk `__swift5_*` sections,
+resolve witness tables, instantiate generic metadata, project enum tags, drive
+the raw calling convention, bind witness methods, or work with async task
+records — import the second entry point:
+
+```js
+import { Metadata, ValueInstance, makeSwiftNativeFunction } from "frida-swift-bridge2/abi";
+```
+
+`/abi` is an explicit allowlist of low-level types and helpers. It is
+**version-sensitive**: it tracks Swift's internal ABI and is not covered by the
+root's compatibility promise. Reach for it only when the stable facade cannot
+express what you need, and expect to revisit that code across Swift releases.
+This reference does not document `/abi` member by member; read the exports in
+`src/abi.ts`.
