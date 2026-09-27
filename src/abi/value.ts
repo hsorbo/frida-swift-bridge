@@ -3,6 +3,7 @@ import { readValue, writeValue, enumerateInstanceFields, swiftValueEquals, Swift
 import { decodeBridgedContainer } from "./container.js";
 import {
   BoundValueMethod,
+  BoundMethod,
   BoundAsyncMethod,
   GenericBoundMethod,
   GenericBoundAsyncMethod,
@@ -134,7 +135,7 @@ export class ValueInstance implements RawInstance {
     throw new Error(`ValueInstance.field: no field ${name}`);
   }
 
-  method(name: string, options: RawValueMethodResolveOptions = {}): BoundValueMethod | GenericBoundMethod | GenericBoundAsyncMethod | BoundAsyncMethod {
+  method(name: string, options: RawValueMethodResolveOptions = {}): BoundValueMethod | BoundMethod | GenericBoundMethod | GenericBoundAsyncMethod | BoundAsyncMethod {
     this.checkLive();
     if (options.typeArguments !== undefined) {
       return rootAsyncReceiver(bindGenericValueMethod(this.metadata, this.handle, name, options), this);

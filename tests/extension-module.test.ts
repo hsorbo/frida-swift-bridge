@@ -75,6 +75,12 @@ describe("a protocol extended from another module", () => {
     const table = Protocol.find("fixture.Labeled")!.conformanceFor(type)!;
     expect(table.method(value, "whisper").call()).toBe("ada");
   });
+
+  test("its extension methods are listed and callable on the conforming type", () => {
+    const type = Swift.type("fixture.DefaultDescriber") as StructType;
+    expect(type.methods()).toContain("whisper()");
+    expect(type.new({ displayName: "Ada" }).whisper()).toBe("ada");
+  });
 });
 
 describe("a module of extensions alone", () => {

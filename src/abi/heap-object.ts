@@ -12,7 +12,8 @@ import {
   GenericBoundMethod,
   GenericBoundAsyncMethod,
   ResolvedMethod,
-  resolveMethod,
+  findMethod,
+  bindConformanceMethod,
   actorSerialExecutor,
   bindGenericMethod,
   rootAsyncReceiver,
@@ -151,7 +152,10 @@ export class ClassInstance implements RawInstance {
     if (this.metadata.description.isGeneric) {
       return rootAsyncReceiver(bindGenericTypeClassMethod(this.dynamicType, this.handle, name, options), this);
     }
-    const resolved = resolveMethod(this.typeName, name, { ...options, static: false });
+    const resolved = findMethod(this.typeName, name, { ...options, static: false });
+    if (resolved === null) {
+      return rootAsyncReceiver(bindConformanceMethod(this.typeName, this.handle, name), this);
+    }
     if (resolved.async === true) {
       let executor = null;
       if (isActor(this.metadata.description)) {

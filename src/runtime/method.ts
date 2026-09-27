@@ -41,10 +41,12 @@ import {
   existentialRepresentation,
   projectErrorExistential,
   projectOpaqueExistential,
+  protocolClassConstraint,
 } from "../abi/existential.js";
 import {
   findProtocol,
   conformsToProtocol,
+  conformingProtocols,
   conformingTypes,
   ProtocolConformance,
 } from "../abi/protocol-conformance.js";
@@ -520,29 +522,65 @@ function foreignMembers(fullName: string): TypeMembers {
 }
 
 function exportedMembers(module: Module, fullName: string, token: string): TypeMembers {
-  const key = `${module.path}@${module.base}|${token}`;
-  let found = foreignScans.get(key);
-  if (found === undefined) {
-    found = scanMembers([module], fullName, token, false);
-    foreignScans.set(key, found);
+  return exportedMembersOfAll(module, [{ fullName, token }])[0];
+}
+
+interface MemberTarget {
+  fullName: string;
+  token: string;
+}
+
+function exportedMembersOfAll(module: Module, targets: MemberTarget[]): TypeMembers[] {
+  const keyOf = (target: MemberTarget): string => `${module.path}@${module.base}|${target.token}`;
+  const pending = targets.filter((t) => !foreignScans.has(keyOf(t)));
+  if (pending.length > 0) {
+    const found = pending.map(() => ({ members: { methods: [], accessors: [] } as TypeMembers, seen: new Set<string>() }));
+    for (const e of module.enumerateExports()) {
+      pending.forEach((target, i) => {
+        if (e.name.includes(target.token)) {
+          considerMember(found[i].members, found[i].seen, target.fullName, e.name, e.address, false);
+        }
+      });
+    }
+    pending.forEach((target, i) => foreignScans.set(keyOf(target), found[i].members));
   }
-  return found;
+  return targets.map((t) => foreignScans.get(keyOf(t))!);
+}
+
+// The stdlib and imported ObjC modules mangle as substitutions (`s`, `So`), never as a spelled-out token.
+const SUBSTITUTED_MODULES = new Set(["Swift", "__C"]);
+
+function protocolExtensionTarget(protocol: ContextDescriptor): MemberTarget | null {
+  const fullName = protocol.fullTypeName;
+  const token = SUBSTITUTED_MODULES.has(protocol.moduleName ?? "") ? null : buildMangledTypeToken(protocol);
+  return fullName === null || token === null ? null : { fullName, token };
+}
+
+function protocolExtensionMembersOfAll(protocols: ContextDescriptor[]): TypeMembers[] {
+  const result = protocols.map((): TypeMembers => ({ methods: [], accessors: [] }));
+  const targets: MemberTarget[] = [];
+  const slots: number[] = [];
+  protocols.forEach((protocol, i) => {
+    const target = protocolExtensionTarget(protocol);
+    if (target !== null) {
+      targets.push(target);
+      slots.push(i);
+    }
+  });
+  if (targets.length === 0) {
+    return result;
+  }
+  for (const module of Process.enumerateModules()) {
+    exportedMembersOfAll(module, targets).forEach((found, i) => {
+      result[slots[i]].methods.push(...found.methods);
+      result[slots[i]].accessors.push(...found.accessors);
+    });
+  }
+  return result;
 }
 
 function protocolExtensionMembers(protocol: ContextDescriptor): TypeMembers {
-  const methods: MethodCandidate[] = [];
-  const accessors: AccessorCandidate[] = [];
-  const fullName = protocol.fullTypeName;
-  const token = buildMangledTypeToken(protocol);
-  if (fullName === null || token === null) {
-    return { methods, accessors };
-  }
-  for (const module of Process.enumerateModules()) {
-    const found = exportedMembers(module, fullName, token);
-    methods.push(...found.methods);
-    accessors.push(...found.accessors);
-  }
-  return { methods, accessors };
+  return protocolExtensionMembersOfAll([protocol])[0];
 }
 
 export type ModuleScope = "definingModule" | "allLoadedModules";
@@ -583,44 +621,14 @@ function scanMembers(
   token: string | null,
   withSymbols: boolean
 ): TypeMembers {
-  const methods: MethodCandidate[] = [];
-  const accessors: AccessorCandidate[] = [];
+  const members: TypeMembers = { methods: [], accessors: [] };
   const seen = new Set<string>();
   // initsOnly restricts the symbol-table pass to initializers: value-type inits are omitted from the
   // export trie in non-library-evolution builds, but regular non-exported methods stay reachable only
   // via the vtable, not the symbol route. The export trie carries everything else.
   const consider = (name: string, address: NativePointer, initsOnly: boolean): void => {
-    if (token !== null && !name.includes(token)) {
-      return;
-    }
-    if (address.isNull() || seen.has(address.toString())) {
-      return;
-    }
-    seen.add(address.toString());
-    const demangled = demangle(name);
-    if (demangled === null) {
-      return;
-    }
-    if (!demangled.includes(fullName)) {
-      return;
-    }
-    const signature = parseSwiftSignature(demangled);
-    if (signature === null) {
-      return;
-    }
-    if (signature.kind === "function") {
-      if (initsOnly && signature.name !== "init") {
-        return;
-      }
-      const { context, isStatic } = stripReceiverKeyword(signature.context);
-      if (context === fullName) {
-        methods.push({ address, name: signature.name, mangled: name, isStatic, signature });
-      }
-    } else if (!initsOnly) {
-      const { context, isStatic } = stripReceiverKeyword(signature.context);
-      if (context === fullName) {
-        accessors.push({ address, member: signature.member, kind: signature.kind, typeName: signature.typeName, isStatic });
-      }
+    if (token === null || name.includes(token)) {
+      considerMember(members, seen, fullName, name, address, initsOnly);
     }
   };
   for (const module of modules) {
@@ -634,7 +642,46 @@ function scanMembers(
       consider(s.name, s.address, true);
     }
   }
-  return { methods, accessors };
+  return members;
+}
+
+function considerMember(
+  members: TypeMembers,
+  seen: Set<string>,
+  fullName: string,
+  name: string,
+  address: NativePointer,
+  initsOnly: boolean
+): void {
+  if (address.isNull() || seen.has(address.toString())) {
+    return;
+  }
+  seen.add(address.toString());
+  const demangled = demangle(name);
+  if (demangled === null) {
+    return;
+  }
+  if (!demangled.includes(fullName)) {
+    return;
+  }
+  const signature = parseSwiftSignature(demangled);
+  if (signature === null) {
+    return;
+  }
+  if (signature.kind === "function") {
+    if (initsOnly && signature.name !== "init") {
+      return;
+    }
+    const { context, isStatic } = stripReceiverKeyword(signature.context);
+    if (context === fullName) {
+      members.methods.push({ address, name: signature.name, mangled: name, isStatic, signature });
+    }
+  } else if (!initsOnly) {
+    const { context, isStatic } = stripReceiverKeyword(signature.context);
+    if (context === fullName) {
+      members.accessors.push({ address, member: signature.member, kind: signature.kind, typeName: signature.typeName, isStatic });
+    }
+  }
 }
 
 export type TypeScope = "thisType" | "withSuperclasses";
@@ -652,26 +699,32 @@ export function enumerateMethods(
   const seen = new Set<string>();
   const methods: MethodInfo[] = [];
   const fullName = canonicalTypeName(typeName);
+  const add = (c: MethodCandidate): void => {
+    const key = `${c.isStatic ? "s" : "i"}:${c.signature.selector}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    methods.push({
+      name: c.name,
+      kind: methodKind(c.name),
+      isStatic: c.isStatic,
+      address: c.address,
+      argTypeNames: c.signature.argTypeNames,
+      argLabels: c.signature.argLabels,
+      returnTypeName: c.signature.returnTypeName,
+      selector: c.signature.selector,
+      genericParams: c.signature.genericParams,
+      throws: c.signature.throws,
+      mangled: c.mangled,
+    });
+  };
   for (const className of types === "withSuperclasses" ? classChainNames(fullName) : [fullName]) {
-    for (const c of members(className).methods) {
-      const key = `${c.isStatic ? "s" : "i"}:${c.signature.selector}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      methods.push({
-        name: c.name,
-        kind: methodKind(c.name),
-        isStatic: c.isStatic,
-        address: c.address,
-        argTypeNames: c.signature.argTypeNames,
-        argLabels: c.signature.argLabels,
-        returnTypeName: c.signature.returnTypeName,
-        selector: c.signature.selector,
-        genericParams: c.signature.genericParams,
-        throws: c.signature.throws,
-        mangled: c.mangled,
-      });
+    members(className).methods.forEach(add);
+  }
+  if (modules === "allLoadedModules" && types === "withSuperclasses") {
+    for (const conformance of conformanceMembers(fullName)) {
+      conformance.members.methods.filter(isConformanceMethod).forEach(add);
     }
   }
   return methods;
@@ -694,9 +747,14 @@ export function enumerateProperties(
   const members = memberSource(modules);
   const seen = new Set<string>();
   const properties: PropertyInfo[] = [];
-  for (const className of classChainNames(canonicalTypeName(typeName))) {
+  const fullName = canonicalTypeName(typeName);
+  const levels = classChainNames(fullName).map((className) => members(className).accessors);
+  if (modules === "allLoadedModules") {
+    levels.push(conformanceMembers(fullName).flatMap((c) => c.members.accessors.filter((a) => !a.isStatic)));
+  }
+  for (const accessors of levels) {
     const atThisLevel = new Map<string, PropertyInfo>();
-    for (const a of members(className).accessors) {
+    for (const a of accessors) {
       const key = `${a.isStatic ? "s" : "i"}:${a.member}`;
       if (seen.has(key)) {
         continue;
@@ -723,14 +781,23 @@ export function resolveMethod(
   methodName: string,
   options: RawMethodResolveOptions = {}
 ): ResolvedMethod {
-  const fullName = canonicalTypeName(typeName);
-  const resolved =
-    resolveMethodIn(fullName, methodName, options, definingModuleMembers) ??
-    resolveMethodIn(fullName, methodName, options, allLoadedModuleMembers);
+  const resolved = findMethod(typeName, methodName, options);
   if (resolved === null) {
-    throw new Error(`no method ${methodName} on ${fullName}`);
+    throw new Error(`no method ${methodName} on ${canonicalTypeName(typeName)}`);
   }
   return resolved;
+}
+
+export function findMethod(
+  typeName: string,
+  methodName: string,
+  options: RawMethodResolveOptions = {}
+): ResolvedMethod | null {
+  const fullName = canonicalTypeName(typeName);
+  return (
+    resolveMethodIn(fullName, methodName, options, definingModuleMembers) ??
+    resolveMethodIn(fullName, methodName, options, allLoadedModuleMembers)
+  );
 }
 
 function resolveMethodIn(
@@ -1235,8 +1302,11 @@ export function bindValueMethod(
   self: NativePointer,
   name: string,
   options: RawValueMethodResolveOptions = {}
-): BoundValueMethod | BoundAsyncMethod {
-  const resolved = resolveMethod(typeName(receiver), name, options);
+): BoundValueMethod | BoundMethod | BoundAsyncMethod {
+  const resolved = findMethod(typeName(receiver), name, options);
+  if (resolved === null) {
+    return bindConformanceMethod(typeName(receiver), self, name);
+  }
   const routing = valueSelfRouting(receiver, resolved.selector, options.mutating);
   return resolved.async === true
     ? new BoundAsyncMethod(resolved, self, routing)
@@ -1864,14 +1934,19 @@ interface ResolvedAccessor {
 // Instance accessors only, walking the superclass chain like enumerateProperties so a subclass
 // shadows an inherited property and a static accessor of the same name is never mistaken for it.
 function resolveAccessor(typeName: string, member: string, kind: AccessorKind): ResolvedAccessor {
-  const fullName = canonicalTypeName(typeName);
-  const resolved =
-    resolveAccessorIn(fullName, member, kind, definingModuleMembers) ??
-    resolveAccessorIn(fullName, member, kind, allLoadedModuleMembers);
+  const resolved = findAccessor(typeName, member, kind);
   if (resolved === null) {
-    throw new Error(`no ${kind} for ${member} on ${fullName}`);
+    throw new Error(`no ${kind} for ${member} on ${canonicalTypeName(typeName)}`);
   }
   return resolved;
+}
+
+function findAccessor(typeName: string, member: string, kind: AccessorKind): ResolvedAccessor | null {
+  const fullName = canonicalTypeName(typeName);
+  return (
+    resolveAccessorIn(fullName, member, kind, definingModuleMembers) ??
+    resolveAccessorIn(fullName, member, kind, allLoadedModuleMembers)
+  );
 }
 
 function resolveAccessorIn(
@@ -1924,7 +1999,10 @@ function invokerForAccessor(accessor: ResolvedAccessor, selfByValue: Metadata | 
 }
 
 export function getProperty(self: NativePointer, typeName: string, member: string): CallResult {
-  const accessor = resolveAccessor(typeName, member, "getter");
+  const accessor = findAccessor(typeName, member, "getter");
+  if (accessor === null) {
+    return conformanceGetProperty(canonicalTypeName(typeName), self, member);
+  }
   return decodeReturn(accessor.type, invokerForAccessor(accessor, getterSelfByValue(typeName))(self));
 }
 
@@ -1933,6 +2011,87 @@ export function getProperty(self: NativePointer, typeName: string, member: strin
 export function setProperty(self: NativePointer, typeName: string, member: string, value: CallArg): void {
   const accessor = resolveAccessor(typeName, member, "setter");
   invokerForAccessor(accessor, null)(self, marshalConsumedArgs([accessor.type], [value])[0]);
+}
+
+interface ConformanceMembers {
+  table: WitnessTable;
+  protocol: ContextDescriptor;
+  members: TypeMembers;
+}
+
+function conformanceMembers(fullName: string): ConformanceMembers[] {
+  const descriptor = findType(fullName);
+  const receiver = descriptor === null || descriptor.isGeneric ? null : resolveType(fullName);
+  if (receiver === null) {
+    return [];
+  }
+  const conformances: { table: WitnessTable; protocol: ContextDescriptor }[] = [];
+  const seen = new Set<string>();
+  for (const className of classChainNames(fullName)) {
+    for (const protocol of conformingProtocols(findType(className)!.handle)) {
+      const key = protocol.handle.toString();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const table = conformsToProtocol(receiver, protocol);
+      if (table !== null) {
+        conformances.push({ table: new WitnessTable(table, receiver), protocol });
+      }
+    }
+  }
+  const members = protocolExtensionMembersOfAll(conformances.map((c) => c.protocol));
+  return conformances.map((c, i) => ({ ...c, members: members[i] }));
+}
+
+function isConformanceMethod(c: MethodCandidate): boolean {
+  return !c.isStatic && c.signature.genericParams.length === 0;
+}
+
+function conformanceDeclaring(
+  fullName: string,
+  member: string,
+  declares: (members: TypeMembers) => boolean
+): ConformanceMembers | null {
+  const owners = conformanceMembers(fullName).filter((c) => declares(c.members));
+  if (owners.length > 1) {
+    const protocols = owners.map((c) => c.protocol.fullTypeName).join(", ");
+    throw new Error(`ambiguous ${member} on ${fullName}: declared by extensions of ${protocols}`);
+  }
+  return owners[0] ?? null;
+}
+
+// Self is @in_guaranteed unless the protocol is class-bound, so a class reference needs a cell.
+function witnessReceiver(conformance: ConformanceMembers, self: NativePointer): NativePointer {
+  if (conformance.table.conformingType.kind !== MetadataKind.Class || protocolClassConstraint(conformance.protocol) === 0) {
+    return self;
+  }
+  const cell = Memory.alloc(Process.pointerSize);
+  cell.writePointer(self);
+  return cell;
+}
+
+export function bindConformanceMethod(fullName: string, self: NativePointer, name: string): BoundMethod | BoundAsyncMethod {
+  const conformance = conformanceDeclaring(fullName, name, (m) =>
+    m.methods.some((c) => c.name === name && isConformanceMethod(c))
+  );
+  if (conformance === null) {
+    throw new Error(`no method ${name} on ${fullName}`);
+  }
+  const resolved = resolveExtensionMethod(conformance.table, name);
+  const receiver = witnessReceiver(conformance, self);
+  return resolved.async === true ? new BoundAsyncMethod(resolved, receiver) : new BoundMethod(resolved, receiver);
+}
+
+function conformanceGetProperty(fullName: string, self: NativePointer, member: string): CallResult {
+  const conformance = conformanceDeclaring(fullName, member, (m) =>
+    m.accessors.some((a) => a.member === member && a.kind === "getter" && !a.isStatic)
+  );
+  if (conformance === null) {
+    throw new Error(`no getter for ${member} on ${fullName}`);
+  }
+  const accessor = resolveExtensionAccessor(conformance.table, member, "getter");
+  return decodeReturn(accessor.type, invokerForWitnessAccessor(accessor)(witnessReceiver(conformance, self)));
 }
 
 function protocolOf(table: WitnessTable): ContextDescriptor {

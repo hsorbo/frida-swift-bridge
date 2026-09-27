@@ -557,20 +557,30 @@ public protocol Vocal {
     func speak() -> String
 }
 public class BaseSpeaker: Vocal {
+    public init() {}
     public func speak() -> String { "base" }
 }
 public final class SubSpeaker: BaseSpeaker {
+    public override init() { super.init() }
     public override func speak() -> String { "sub" }
+}
+extension Vocal {
+    public func speakTwice() -> String { speak() + speak() }
 }
 
 public protocol Squawker: AnyObject {
     func squawk() -> String
 }
 public class BaseSquawker: Squawker {
+    public init() {}
     public func squawk() -> String { "base" }
 }
 public final class SubSquawker: BaseSquawker {
+    public override init() { super.init() }
     public override func squawk() -> String { "sub" }
+}
+extension Squawker {
+    public func squawkTwice() -> String { squawk() + squawk() }
 }
 
 public protocol Container {
