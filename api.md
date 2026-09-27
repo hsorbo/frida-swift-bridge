@@ -46,7 +46,8 @@ covered by this reference — see [Going lower: the `/abi` entry point](#going-l
 14. [Errors](#errors)
 15. [Ownership and lifetime](#ownership-and-lifetime)
 16. [Symbols](#symbols)
-17. [Going lower: the `/abi` entry point](#going-lower-the-abi-entry-point)
+17. [Known limitations](#known-limitations)
+18. [Going lower: the `/abi` entry point](#going-lower-the-abi-entry-point)
 
 ---
 
@@ -752,6 +753,51 @@ Swift.demangle(sym.name);       // same readable form
 
 `isSwiftSymbol(name)` (exported from the root) reports whether a raw symbol is a
 Swift mangled name.
+
+## Known limitations
+
+The bridge works from what the process carries: type metadata, witness tables
+and symbol names. Some facts about Swift code are not in any of these. Where a
+fact is missing, the bridge throws rather than guessing, because a wrong guess
+corrupts memory instead of failing cleanly.
+
+**Things you have to state**
+
+- **Whether a value-type method is `mutating`.** The mangled name does not
+  record it. For a small loadable receiver (`String`, `Int`, small structs), it
+  decides whether `self` is passed as a pointer or in registers. Pass
+  `{ mutating: true | false }` to `$method` (see
+  [Calling methods](#calling-methods)). This often shows up with an app's own
+  extensions on standard types, such as `extension String { func trim() }`.
+  Large or non-trivial receivers are unaffected.
+- **Generic type arguments.** A JavaScript value does not identify a Swift type
+  (`5` could be `Int`, `Int32` or `Double`), so a generic method needs
+  `{ typeArguments }`. The one exception: a type parameter that appears only as
+  the result of a closure argument is inferred as `Void`.
+
+**Things the bridge cannot recover**
+
+- **Code with no symbol.** Methods and free functions are found by name through
+  the export trie and the symbol table. If a binary is stripped and a function
+  is not exported, it can't be found by name, and `Swift.symbolicate` returns
+  `null` for it. Its address can still be bound through `/abi`.
+  This is worse on Linux. In ELF, a struct's memberwise initializers are local
+  symbols that disappear with `.symtab`, so a stripped `.so` still has the type
+  but not its initializer: `init` throws `no method init`. On Mach-O the same
+  initializers are external and survive stripping. `new({ field: value, … })`
+  still works, because it writes the fields directly without calling `init`.
+- **Code that was never emitted as a function.** Inlined, specialized or
+  dead-stripped code has no entry point to call. Hooking a function doesn't see
+  call sites where it was inlined.
+- **Protocol requirement or extension method.** To decide whether a
+  protocol-extension member is a requirement (dispatched through the witness
+  table) or an extension method (called directly), the bridge symbolicates the
+  witnesses. If it can't, it throws
+  `cannot tell whether … is a requirement of …`.
+- **Closure captures.** Capture layout comes from the closure's capture
+  descriptor. Escaping closures wrapped in a reabstraction thunk are unwrapped
+  by their structure. When a capture's type can't be resolved, the bridge
+  doesn't expose the captures.
 
 ## Going lower: the `/abi` entry point
 
