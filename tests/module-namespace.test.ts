@@ -65,4 +65,13 @@ describe("Swift.modules", () => {
     expect(names).not.toContain("Inner");
     expect(names).not.toContain("Int");
   });
+
+  test("serializes to the names it lists, without descending into members", () => {
+    const modules = JSON.parse(JSON.stringify(Swift.modules));
+    expect(Array.isArray(modules)).toBeTruthy();
+    expect(modules).toContain("fixture");
+    const fixture = JSON.parse(JSON.stringify(Swift.modules.fixture));
+    expect(Array.isArray(fixture)).toBeTruthy();
+    expect(fixture).toContain("Robot");
+  });
 });

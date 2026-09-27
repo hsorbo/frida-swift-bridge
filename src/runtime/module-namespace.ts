@@ -65,6 +65,10 @@ function lazyNamespace<T>(
       if (key === "toString") {
         return () => label;
       }
+      // Serializers (the REPL, JSON.stringify) would otherwise read every member and recurse into it.
+      if (key === "toJSON") {
+        return () => [...new Set(keys())];
+      }
       return find(key) ?? undefined;
     },
     set() {

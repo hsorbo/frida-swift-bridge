@@ -155,7 +155,8 @@ Namespaces are keyed by Swift module name, not image name. One image can hold
 several statically linked modules, and `libswiftCore` holds the module `Swift`.
 Touching `Swift.modules` scans nothing. A lookup reads type sections only until
 it finds the name. Listing keys, or looking up a module that doesn't exist,
-reads every loaded image's type sections. Nested types are not reachable through
+reads every loaded image's type sections. Printing a namespace (in the REPL, or
+through `JSON.stringify`) shows only its names and does not descend into them. Nested types are not reachable through
 the namespace yet; use `Swift.type("MyApp.Outer.Inner")`.
 
 To walk a module's types without knowing their names, use the lazy generators.
