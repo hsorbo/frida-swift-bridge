@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
 import { Swift, ClassType, StructType } from "../src/index.js";
 
@@ -47,6 +47,12 @@ describe("protocol-extension members on a conforming type", () => {
     const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
     expect(n.$method("scaledTwice", { labels: [null] }).call(3)).toEqual(int64(66));
     expect(n.$method("scaledTwice", { labels: ["by"] }).call(3)).toEqual(int64(67));
+  });
+
+  test("an extension method resolves when the requirement's witness thunk inlines the implementation", () => {
+    loadFixtureSyms();
+    const w = (Swift.type("fixturesyms.WideScalar") as StructType).new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
+    expect(w.scaledTwice()).toEqual(int64(30));
   });
 
   test("an extension method still ambiguous after filtering lists its overloads", () => {

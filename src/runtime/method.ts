@@ -2466,9 +2466,7 @@ function requirementImplementedBy(
 ): ProtocolRequirement | null | "undecodable" {
   let undecodable = false;
   for (const requirement of readProtocolRequirements(protocolOf(table)).filter(isCandidate)) {
-    const target = witnessTarget(table, requirement);
-    const demangled = target === null ? null : symbolicateLocal(target.address);
-    const signature = demangled === null ? null : parseSwiftSignature(demangled);
+    const signature = witnessTargetSignature(table, requirement) ?? witnessThunkSignature(table, requirement);
     if (signature === null) {
       undecodable = true;
     } else if (isImplementation(signature)) {
@@ -2476,6 +2474,18 @@ function requirementImplementedBy(
     }
   }
   return undecodable ? "undecodable" : null;
+}
+
+function witnessTargetSignature(table: WitnessTable, requirement: ProtocolRequirement): ParsedSwiftSignature | null {
+  const target = witnessTarget(table, requirement);
+  const demangled = target === null ? null : symbolicateLocal(target.address);
+  return demangled === null ? null : parseSwiftSignature(demangled);
+}
+
+function witnessThunkSignature(table: WitnessTable, requirement: ProtocolRequirement): ParsedSwiftSignature | null {
+  const demangled = symbolicateLocal(table.requirement(requirement.witnessIndex));
+  const stripped = demangled === null ? null : stripWitnessWrapper(demangled);
+  return stripped === null ? null : parseSwiftSignature(stripped);
 }
 
 function resolveWitnessSignature(
