@@ -30,6 +30,7 @@ import type { StableProtocol, StableProtocolComposition } from "./runtime/protoc
 import { markResilientModule } from "./runtime/calling-convention.js";
 import { resolveAsyncFunction } from "./runtime/method.js";
 import { closure } from "./runtime/closure.js";
+import { moduleRegistry, ModuleRegistry } from "./runtime/module-namespace.js";
 import { ContextDescriptor } from "./abi/context-descriptor.js";
 
 function* nameable(
@@ -100,6 +101,7 @@ export {
   SwiftAsyncCallbacks,
 } from "./runtime/interceptor.js";
 export { isSwiftObject } from "./runtime/method.js";
+export type { ModuleRegistry, ModuleNamespace, ModuleMember } from "./runtime/module-namespace.js";
 export type {
   SwiftBoundMethod,
   SwiftBoundInitializer,
@@ -135,6 +137,10 @@ export const Swift = {
   demangle,
   images: swiftImages,
   enumerateProtocols: swiftProtocols,
+
+  get modules(): ModuleRegistry {
+    return moduleRegistry();
+  },
 
   type(name: string): SwiftType | null {
     const descriptor = findType(name);
