@@ -395,8 +395,13 @@ function applyOverloadFilters<T extends { isStatic: boolean; signature: SwiftFun
   return candidates;
 }
 
+// swift_getTypeName spells a private type's anonymous parent as "(unknown context at $<address>)";
+// its symbols spell the type itself as "(Name in _<discriminator>)". Both collapse to the plain name.
+const RUNTIME_ANONYMOUS_CONTEXT = /\(unknown context at \$[0-9a-f]+\)\./g;
+const PRIVATE_DECL_NAME = /\(([^()\s]+) in _[0-9A-F]+\)/g;
+
 function canonicalTypeName(typeName: string): string {
-  const descriptor = findType(typeName);
+  const descriptor = findType(typeName.replace(RUNTIME_ANONYMOUS_CONTEXT, ""));
   if (descriptor === null) {
     throw new Error(`unknown type: ${typeName}`);
   }
@@ -742,7 +747,7 @@ function considerMember(
     return;
   }
   seen.add(address.toString());
-  const demangled = demangle(name);
+  const demangled = demangle(name)?.replace(PRIVATE_DECL_NAME, "$1") ?? null;
   if (demangled === null) {
     return;
   }

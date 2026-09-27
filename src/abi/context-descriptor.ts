@@ -131,6 +131,10 @@ export class ContextDescriptor {
         const extended = extendedTypeName(ctx);
         return extended === null ? null : `${extended}.${components.join(".")}`;
       }
+      if (ctx.kind === ContextDescriptorKind.Anonymous) {
+        ctx = ctx.parent;
+        continue;
+      }
       break;
     }
     const module = this.moduleName;

@@ -1114,3 +1114,14 @@ public distributed actor Calculator {
     public distributed func add(_ a: Int, _ b: Int) -> Int { a + b }
     public distributed func greet(_ name: String) -> String { "Hi, \(name)" }
 }
+
+public struct CodableCard: Codable {
+    public var title: String
+
+    private struct Hidden {
+        let n: Int
+        init(n: Int) { self.n = n }
+    }
+
+    public var hiddenDoubled: Int { Hidden(n: 21).n * 2 }
+}
