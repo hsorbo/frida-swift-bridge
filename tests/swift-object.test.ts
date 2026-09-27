@@ -62,6 +62,18 @@ describe("Swift object intrinsics", () => {
     }
   });
 
+  test("$methods lists instance selectors as '- ' and static ones as '+ '", () => {
+    const methods = robot("R2").$methods;
+    expect(methods).toContain("- greet(_:)");
+    expect(methods).toContain("- rename(to:)");
+    expect(methods).toContain("+ make(name:)");
+    expect(methods).not.toContain("greet(_:)");
+  });
+
+  test("$methods works on a value facade", () => {
+    expect(Swift.struct("Swift.Int")!.new(-1).$methods).toContain("- signum()");
+  });
+
   test("$className reflects the dynamic type", () => {
     expect(cat().$className).toBe("fixture.Cat");
     expect(robot("R2").$className).toBe("fixture.Robot");

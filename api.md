@@ -295,6 +295,9 @@ The control surface (never shadowed by Swift members of the same spelling):
 - `$className`: the dynamic type name.
 - `$kind`: `"object"` or `"value"`.
 - `$owned`: whether the facade owns its reference/storage.
+- `$methods`: the callable selectors, as in ObjC: `"- greet(_:)"` for instance
+  methods and `"+ make(name:)"` for static ones. Same scope as
+  `$type.methods()`.
 - `$call(name, ...args)`: invoke a method by name.
 - `$method(name, options?)`: resolve a bound method for overload/generic/mutating
   control (see [Calling methods](#calling-methods)).
