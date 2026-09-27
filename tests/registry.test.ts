@@ -66,7 +66,7 @@ describe("registry", () => {
   test("rejects an ambiguous bare name but resolves each qualified form", () => {
     loadFixture();
     loadFixtureSyms();
-    expect(() => findType("LoadableStruct")).toThrow(/ambiguous/);
+    expect(() => findType("LoadableStruct")).toThrow(`: fixture.LoadableStruct, fixturesyms.LoadableStruct; qualify it with a module`);
     expect(findType("fixture.LoadableStruct")!.fullTypeName).toBe("fixture.LoadableStruct");
     expect(findType("fixturesyms.LoadableStruct")!.fullTypeName).toBe(
       "fixturesyms.LoadableStruct"

@@ -150,7 +150,7 @@ export function findProtocol(name: string): ContextDescriptor | null {
   const qualified = dot === -1 ? null : name;
 
   let match: ContextDescriptor | null = null;
-  let matchName: string | null = null;
+  const candidateNames = new Set<string>();
   for (const module of enumerateSwiftModules()) {
     for (const protocol of protocolsOf(module)) {
       if (protocol.name !== simpleName) {
@@ -167,12 +167,12 @@ export function findProtocol(name: string): ContextDescriptor | null {
       if (fullName === null) {
         continue;
       }
-      if (match !== null && fullName !== matchName) {
-        throw new Error(`ambiguous protocol name "${name}"; qualify it with a module`);
-      }
       match = protocol;
-      matchName = fullName;
+      candidateNames.add(fullName);
     }
+  }
+  if (candidateNames.size > 1) {
+    throw new Error(`ambiguous protocol name "${name}": ${[...candidateNames].sort().join(", ")}; qualify it with a module`);
   }
 
   // Never cached: a later-loaded image can make a bare name ambiguous.

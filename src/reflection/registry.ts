@@ -105,7 +105,7 @@ export function findType(name: string): ContextDescriptor | null {
   // resolves uniquely across loaded images, so it must scan every image before committing. Distinct
   // descriptors that share a qualified name denote the same type (dyld cache aliases), not ambiguity.
   let match: ContextDescriptor | null = null;
-  let matchName: string | null = null;
+  const candidateNames = new Set<string>();
   for (const module of enumerateSwiftModules()) {
     for (const descriptor of typesOf(module)) {
       if (descriptor.name !== simpleName) {
@@ -122,12 +122,12 @@ export function findType(name: string): ContextDescriptor | null {
       if (fullName === null) {
         continue;
       }
-      if (match !== null && fullName !== matchName) {
-        throw new Error(`ambiguous type name "${name}"; qualify it with a module`);
-      }
       match = descriptor;
-      matchName = fullName;
+      candidateNames.add(fullName);
     }
+  }
+  if (candidateNames.size > 1) {
+    throw new Error(`ambiguous type name "${name}": ${[...candidateNames].sort().join(", ")}; qualify it with a module`);
   }
 
   // Never cached: a later-loaded image can make a bare name ambiguous.

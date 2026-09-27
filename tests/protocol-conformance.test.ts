@@ -84,7 +84,7 @@ describe("findProtocol", () => {
   test("rejects a bare name two modules share but resolves each qualified form", () => {
     loadFixture();
     loadFixtureSyms();
-    expect(() => findProtocol("Greeter")).toThrow(/ambiguous/);
+    expect(() => findProtocol("Greeter")).toThrow(`: fixture.Greeter, fixturesyms.Greeter; qualify it with a module`);
     expect(findProtocol("fixture.Greeter")!.fullTypeName).toBe("fixture.Greeter");
     expect(findProtocol("fixturesyms.Greeter")!.fullTypeName).toBe("fixturesyms.Greeter");
   });
