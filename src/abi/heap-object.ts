@@ -154,7 +154,7 @@ export class ClassInstance implements RawInstance {
     }
     const resolved = findMethod(this.typeName, name, { ...options, static: false });
     if (resolved === null) {
-      return rootAsyncReceiver(bindConformanceMethod(this.typeName, this.handle, name), this);
+      return rootAsyncReceiver(bindConformanceMethod(this.typeName, this.handle, name, options), this);
     }
     if (resolved.async === true) {
       let executor = null;

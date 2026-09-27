@@ -1419,7 +1419,7 @@ export function bindValueMethod(
 ): BoundValueMethod | BoundMethod | BoundAsyncMethod {
   const resolved = findMethod(typeName(receiver), name, options);
   if (resolved === null) {
-    return bindConformanceMethod(typeName(receiver), self, name);
+    return bindConformanceMethod(typeName(receiver), self, name, options);
   }
   const routing = valueSelfRouting(receiver, resolved.selector, options.mutating);
   return resolved.async === true
@@ -2162,6 +2162,17 @@ function isConformanceMethod(c: MethodCandidate): boolean {
   return !c.isStatic && c.signature.genericParams.length === 0;
 }
 
+function conformanceMethodOverloads(
+  members: TypeMembers,
+  name: string,
+  options: RawMethodResolveOptions
+): MethodCandidate[] {
+  return applyOverloadFilters(
+    members.methods.filter((c) => c.name === name && isConformanceMethod(c)),
+    options
+  );
+}
+
 function conformanceDeclaring(
   fullName: string,
   member: string,
@@ -2185,14 +2196,21 @@ function witnessReceiver(conformance: ConformanceMembers, self: NativePointer): 
   return cell;
 }
 
-export function bindConformanceMethod(fullName: string, self: NativePointer, name: string): BoundMethod | BoundAsyncMethod {
-  const conformance = conformanceDeclaring(fullName, name, (m) =>
-    m.methods.some((c) => c.name === name && isConformanceMethod(c))
+export function bindConformanceMethod(
+  fullName: string,
+  self: NativePointer,
+  name: string,
+  options: RawMethodResolveOptions = {}
+): BoundMethod | BoundAsyncMethod {
+  const conformance = conformanceDeclaring(
+    fullName,
+    name,
+    (m) => conformanceMethodOverloads(m, name, options).length > 0
   );
   if (conformance === null) {
     throw noMethodError(fullName, name);
   }
-  const resolved = resolveExtensionMethod(conformance.table, name);
+  const resolved = resolveExtensionMethod(conformance.table, name, options);
   const receiver = witnessReceiver(conformance, self);
   return resolved.async === true ? new BoundAsyncMethod(resolved, receiver) : new BoundMethod(resolved, receiver);
 }
@@ -2380,18 +2398,24 @@ export function resolveWitnessMethod(table: WitnessTable, methodName: string): R
   };
 }
 
-function resolveExtensionMethod(table: WitnessTable, methodName: string): ResolvedMethod {
+function resolveExtensionMethod(
+  table: WitnessTable,
+  methodName: string,
+  options: RawMethodResolveOptions = {}
+): ResolvedMethod {
   const protocol = protocolOf(table);
   const protocolName = protocol.fullTypeName ?? "protocol";
-  const matches = protocolExtensionMembers(protocol).methods.filter(
-    (c) => c.name === methodName && !c.isStatic && c.signature.genericParams.length === 0
-  );
+  const matches = conformanceMethodOverloads(protocolExtensionMembers(protocol), methodName, options);
   if (matches.length === 0) {
     throw new Error(`no requirement ${methodName} on ${protocolName}`);
   }
   if (matches.length > 1) {
-    const overloads = matches.map((m) => m.signature.selector).join(", ");
-    throw new Error(`ambiguous extension method ${methodName} on ${protocolName}: ${overloads}`);
+    const overloads = matches
+      .map((m) => `${m.signature.selector} (${m.signature.argTypeNames.join(", ")})`)
+      .join(", ");
+    throw new Error(
+      `ambiguous extension method ${methodName} on ${protocolName}: ${overloads} (disambiguate with { arity }, { labels }, or { argTypes })`
+    );
   }
   const { signature, mangled } = matches[0];
   const requirement = requirementImplementedBy(

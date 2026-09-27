@@ -37,4 +37,22 @@ describe("protocol-extension members on a conforming type", () => {
     const squawker = (Swift.type("fixture.SubSquawker") as ClassType).init();
     expect(squawker.squawkTwice()).toBe("subsub");
   });
+
+  test("an overloaded extension method is picked by call arity", () => {
+    const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
+    expect(n.scaledTwice()).toEqual(int64(22));
+  });
+
+  test("an overloaded extension method is picked by labels", () => {
+    const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
+    expect(n.$method("scaledTwice", { labels: [null] }).call(3)).toEqual(int64(66));
+    expect(n.$method("scaledTwice", { labels: ["by"] }).call(3)).toEqual(int64(67));
+  });
+
+  test("an extension method still ambiguous after filtering lists its overloads", () => {
+    const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
+    expect(() => n.scaledTwice(3)).toThrow(
+      /ambiguous extension method scaledTwice on fixture\.Scalable: .*scaledTwice\(_:\).*\{ arity \}, \{ labels \}/
+    );
+  });
 });

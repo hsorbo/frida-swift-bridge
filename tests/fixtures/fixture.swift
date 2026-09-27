@@ -279,6 +279,16 @@ extension Int: Scalable {
     public func scaled(by factor: Int) -> Int { self * factor }
 }
 
+extension Scalable {
+    public func scaledTwice() -> Int { scaled(by: 2) }
+    public func scaledTwice(_ factor: Int) -> Int { scaled(by: factor * 2) }
+    public func scaledTwice(by factor: Int) -> Int { scaled(by: factor * 2) + 1 }
+}
+public struct NarrowScalar: Scalable {
+    public var n: Int
+    public func scaled(by factor: Int) -> Int { n * factor }
+}
+
 @inline(never)
 public func scaleGeneric<T: Scalable>(_ x: T, by factor: Int) -> Int {
     return x.scaled(by: factor)
