@@ -33,7 +33,7 @@ import {
   indirect,
 } from "./calling-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
-import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, SerialExecutorRef } from "./async-call.js";
+import { callAsync, asyncArgsFitRegisters, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, SerialExecutorRef } from "./async-call.js";
 import { SwiftClosure, ClosureSpec, ClosureBody, LoadableClosureBody, SwiftThrow } from "./closure.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName } from "./type-name.js";
@@ -155,7 +155,7 @@ export interface MethodResolveOptions extends BaseResolveOptions {
 }
 
 // mutating and consuming are unrecoverable from the symbol; the caller supplies them. mutating only
-// changes self routing for small loadable receivers of generic or async methods, where it is required.
+// changes self routing for small loadable receivers: required for generic methods, optional for async ones.
 export interface ValueMethodResolveOptions extends MethodResolveOptions {
   mutating?: boolean;
   consuming?: boolean;
@@ -1143,10 +1143,18 @@ export class BoundAsyncMethod {
       options.onActor = this.executor;
     }
     if (this.self !== null) {
-      if (this.selfRouting.indirect) {
-        options.receiver = this.self;
-      } else {
-        pushAsyncArg(this.selfRouting.receiver, this.self, gp, fp); // small loadable value self trails the args
+      options.receiver = this.self;
+      if (!this.selfRouting.indirect) {
+        const argsFit = asyncArgsFitRegisters(gp.length, fp.length, this.result);
+        pushAsyncArg(this.selfRouting.receiver, this.self, gp, fp); // both ways, as in valueInvoker
+        if (argsFit && !asyncArgsFitRegisters(gp.length, fp.length, this.result)) {
+          cleanup();
+          const { selector } = this.resolved;
+          throw new Error(
+            `${selector} on ${typeName(this.selfRouting.receiver)}: args plus a trailing self exceed the async ` +
+              `argument registers; if it mutates, call it as $method("${selector.split("(")[0]}", { mutating: true }).call(...)`
+          );
+        }
       }
     }
     if (this.resolved.witnessSelf !== undefined) {
@@ -1370,8 +1378,8 @@ export type SelfRouting = { indirect: true } | { indirect: false; receiver: Meta
 
 // Value-type self is indirect (x20) when mutating/inout or large/non-POD; else it rides as a trailing
 // arg. Only a small loadable receiver's routing depends on `mutating`, which isn't recoverable from the
-// symbol. Plain sync calls pass self both ways (valueInvoker); generic ones can't, since a trailing self
-// shifts the metadata args, and async ones don't yet, so there the caller must state it.
+// symbol. Plain calls pass self both ways (valueInvoker, BoundAsyncMethod); generic ones can't, since a
+// trailing self shifts the metadata args, so there the caller must state it.
 function valueSelfRouting(receiver: Metadata, selector: string, mutating: boolean | undefined): SelfRouting {
   if (shouldPassIndirectly(receiver)) {
     return { indirect: true };
@@ -1449,8 +1457,9 @@ export function bindValueMethod(
   if (resolved === null) {
     return bindConformanceMethod(typeName(receiver), self, name, options);
   }
+  // Both ways unless { mutating: true }, which keeps self out of the async trampoline's scarce arg registers.
   return resolved.async === true
-    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.mutating))
+    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.mutating ?? false))
     : new BoundValueMethod(resolved, receiver, self, options.consuming === true);
 }
 

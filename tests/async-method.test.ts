@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { ClassType, ValueType, ValueInstance, BoundAsyncMethod, GenericBoundAsyncMethod, SwiftError, metadataFor, typeOf } from "../src/abi.js";
+import { ClassType, ValueType, ValueInstance, BoundAsyncMethod, GenericBoundAsyncMethod, SwiftError, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
 
 import { Swift } from "../src/index.js";
 function calc(base: number) {
@@ -65,6 +65,38 @@ describe("async method", () => {
   test("async method on a small loadable value type trails self after the args: Accumulator.peekAsync(10) ⇒ 15", async () => {
     const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
     expect(await acc.method("peekAsync", { mutating: false }).call(10)).toEqual(int64(15));
+  });
+
+  test("a non-mutating async method on a small loadable value needs no mutating flag", async () => {
+    const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
+    expect(await acc.method("peekAsync").call(10)).toEqual(int64(15));
+  });
+
+  test("a mutating async method on a small loadable value needs no mutating flag", async () => {
+    const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
+    await acc.method("depositAsync").call(3);
+    expect((acc.read() as { total: number }).total).toEqual(int64(8));
+  });
+
+  test("a mutating async method still accepts { mutating: true }", async () => {
+    const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
+    await acc.method("depositAsync", { mutating: true }).call(3);
+    expect((acc.read() as { total: number }).total).toEqual(int64(8));
+  });
+
+  test("an async method whose trailing self overflows the registers asks for { mutating: true }", () => {
+    const quad = ValueInstance.fromJS(metadataFor("fixture.DoubleQuad")!, { a: 1, b: 2, c: 3, d: 4 });
+    expect(() => quad.method("shiftAsync").call(1, 1, 1, 1, 2)).toThrow("{ mutating: true }");
+  });
+
+  test("{ mutating: true } keeps self out of the async argument registers", async () => {
+    const quad = ValueInstance.fromJS(metadataFor("fixture.DoubleQuad")!, { a: 1, b: 2, c: 3, d: 4 });
+    await quad.method("shiftAsync", { mutating: true }).call(1, 1, 1, 1, 2);
+    expect(quad.read()).toEqual({ a: 4, b: 6, c: 8, d: 10 });
+  });
+
+  test("property-style invocation of an async method on a small loadable value", async () => {
+    expect(await asSwiftObject(ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 })).peekAsync(10)).toEqual(int64(15));
   });
 
   test("static async method on a value type (no self): Accumulator.sumStaticAsync(4, 5) ⇒ 9", async () => {

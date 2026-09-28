@@ -134,6 +134,11 @@ interface SynthesizedCall {
   option: NativePointer | null;
 }
 
+export function asyncArgsFitRegisters(gpCount: number, fpCount: number, result: AsyncResultShape | null): boolean {
+  const gpBase = result?.kind === "indirect" ? 1 : 0;
+  return gpBase + gpCount <= NUM_ARG_REGS && fpCount <= MAX_FLOAT_REGS;
+}
+
 // Two swiftasync trampolines (PAC stripped): `operation` allocates foo's frame, wires Parent/
 // ResumeParent, loads args + self, and tail-calls foo; `continuation` captures the result/error, frees
 // the frame, sets `done`, and returns through ourCtx.ResumeParent.

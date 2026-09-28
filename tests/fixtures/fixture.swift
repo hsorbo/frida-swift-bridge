@@ -95,6 +95,10 @@ public struct Accumulator {
         await Task.yield()
         return total + x
     }
+    public mutating func depositAsync(_ amount: Int) async {
+        await Task.yield()
+        total += amount
+    }
     public func describe(_ prefix: String) -> String { "\(prefix): \(total)" }
     public static func zero() -> Accumulator { Accumulator(total: 0) }
     public static func summing(_ a: Int, _ b: Int) -> Int { a + b }
@@ -555,7 +559,13 @@ public struct DoublePair { public var x: Double; public var y: Double }
 public func makeDoublePair() -> DoublePair { DoublePair(x: 1.5, y: 2.5) }
 public func sumDoublePair(_ p: DoublePair) -> Double { p.x + p.y }
 
-public struct DoubleQuad { public var a: Double; public var b: Double; public var c: Double; public var d: Double }
+public struct DoubleQuad {
+    public var a: Double; public var b: Double; public var c: Double; public var d: Double
+    public mutating func shiftAsync(_ da: Double, _ db: Double, _ dc: Double, _ dd: Double, _ scale: Double) async {
+        await Task.yield()
+        a = (a + da) * scale; b = (b + db) * scale; c = (c + dc) * scale; d = (d + dd) * scale
+    }
+}
 public func makeDoubleQuad() -> DoubleQuad { DoubleQuad(a: 1, b: 2, c: 3, d: 4) }
 public func sumDoubleQuad(_ q: DoubleQuad) -> Double { q.a + q.b + q.c + q.d }
 

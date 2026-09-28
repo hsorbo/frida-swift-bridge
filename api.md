@@ -339,10 +339,10 @@ robot.at(5);        // calls at(_:)
 robot.at(5, 6);     // calls at(_:_:)
 ```
 
-When bare-name resolution is ambiguous — same arity, different labels; a
-generic method; or a generic or async method on a small value — use `$method(name, options)` to get
-an explicit bound method. Options: `arity`, `labels`, `argTypes`, `static`,
-`typeArguments`, and (value types only) `mutating` and `consuming`.
+When bare-name resolution is ambiguous — same arity, different labels; or a
+generic method — use `$method(name, options)` to get an explicit bound method.
+Options: `arity`, `labels`, `argTypes`, `static`, `typeArguments`, and (value
+types only) `mutating` and `consuming`.
 
 ```js
 robot.$method("move", { labels: ["to"] }).call(5);   // move(to:)
@@ -367,8 +367,8 @@ const box = Swift.type("MyApp.Box").init();
 box.$method("echo", { typeArguments: [Swift.type("Swift.Int")] }).call(21);   // 21
 ```
 
-Value methods work the same whether or not they are `mutating`; a mutating one
-writes back into the value:
+Value methods, sync or async, work the same whether or not they are
+`mutating`; a mutating one writes back into the value:
 
 ```js
 const acc = Swift.type("MyApp.Accumulator").new({ total: 5 });
@@ -377,9 +377,9 @@ acc.add(3);      // writes back through self
 acc.total;       // 8
 ```
 
-A generic or async method on a small value type (`String`, `Int`, small structs)
-still needs `{ mutating: true | false }`, since there the bridge can't tell how
-`self` is passed:
+A generic method on a small value type (`String`, `Int`, small structs) still
+needs `{ mutating: true | false }`, since there the bridge can't tell how `self`
+is passed:
 
 ```js
 box.$method("echo", { typeArguments: [Swift.type("Swift.Int")], mutating: false }).call(7);
@@ -776,11 +776,11 @@ corrupts memory instead of failing cleanly.
 
 **Things you have to state**
 
-- **Whether a generic or async value-type method is `mutating`.** The mangled
-  name does not record it. For a small loadable receiver (`String`, `Int`, small
-  structs), it decides whether `self` is passed as a pointer or in registers.
-  Plain methods don't need it, because the bridge passes `self` both ways; for
-  generic and async ones pass `{ mutating: true | false }` to `$method` (see
+- **Whether a generic value-type method is `mutating`.** The mangled name does
+  not record it. For a small loadable receiver (`String`, `Int`, small structs),
+  it decides whether `self` is passed as a pointer or in registers. Plain
+  methods, sync or async, don't need it, because the bridge passes `self` both
+  ways; for generic ones pass `{ mutating: true | false }` to `$method` (see
   [Calling methods](#calling-methods)). Large receivers are unaffected.
 - **Whether a value-type method is `consuming`.** The mangled name does not
   record it either, and here the bridge can't detect it and throw: without
