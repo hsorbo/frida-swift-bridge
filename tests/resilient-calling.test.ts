@@ -100,10 +100,9 @@ describe("resilient calling convention (local library-evolution fixture)", () =>
 describe("the stdlib's non-frozen types", () => {
   beforeEach(() => { loadFixture(); });
 
-  test("are resilient only where the stdlib is built with library evolution", () => {
-    const evolving = Process.platform === "darwin";
-    expect(isResilientValueType(metadataFor("Swift.CodingUserInfoKey")!)).toBe(evolving);
-    expect(isResilientValueType(metadataFor("Swift.FloatingPointRoundingRule")!)).toBe(evolving);
+  test("are resilient while the stdlib's frozen ones are not", () => {
+    expect(isResilientValueType(metadataFor("Swift.CodingUserInfoKey")!)).toBe(true);
+    expect(isResilientValueType(metadataFor("Swift.FloatingPointRoundingRule")!)).toBe(true);
     expect(isResilientValueType(metadataFor("Swift.String")!)).toBe(false);
     expect(isResilientValueType(metadataFor("Swift.FloatingPointSign")!)).toBe(false);
   });
