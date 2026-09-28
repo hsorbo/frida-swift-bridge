@@ -3027,7 +3027,7 @@ function isArm64AuthInPlace(mnemonic: string): boolean {
   return mnemonic.startsWith("aut") || mnemonic.startsWith("xpac");
 }
 
-const CONTROL_FLOW_GROUPS = new Set(["jump", "call", "ret"]);
+const CONTROL_FLOW_GROUPS = new Set(["jump", "call", "ret", "return"]);
 
 type BranchClassification =
   | { kind: "direct"; target: NativePointer }
