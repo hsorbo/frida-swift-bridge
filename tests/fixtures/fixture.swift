@@ -453,6 +453,17 @@ extension Box {
     public func labelOf<T: Named>(_ x: T) -> String { x.label }
 }
 
+// Bounds that take no witness table: AnyObject and a superclass make T a bare reference, a marker
+// protocol leaves it address-only.
+extension Box {
+    public func anyIdentity<T: AnyObject>(_ x: T) -> T { x }
+    public func speakerOf<T: BaseSpeaker>(_ x: T) -> String { x.speak() }
+    public func sendableEcho<T: Sendable>(_ x: T) -> T { x }
+    public func optionalObject<T: AnyObject>(_ x: T?) -> T? { x }
+    public func madeObject<T: AnyObject>(_ body: () -> T) -> T { body() }
+    public func madeObject<T: AnyObject>(_ n: Int, _ body: (Int) -> T) -> T { body(n) }
+}
+
 public struct CodedError: Error {
     public let code: Int
 }
@@ -733,6 +744,27 @@ public struct DefaultDescriber: Labeled {
 public struct CustomDescriber: Labeled {
     public let displayName: String
     public func describe() -> String { "custom:\(displayName)" }
+    public func tag() -> String { "own tag" }
+}
+
+// CodingUserInfoKey and FloatingPointRoundingRule are the stdlib's non-frozen types: address-only here.
+public enum StdlibBoundary {
+    public static func keyName(_ key: CodingUserInfoKey) -> String { key.rawValue }
+    public static func makeKey(_ name: String) -> CodingUserInfoKey { CodingUserInfoKey(rawValue: name)! }
+    public static func isRoundingUp(_ rule: FloatingPointRoundingRule) -> Bool { rule == .up }
+    public static func roundingDown() -> FloatingPointRoundingRule { .down }
+}
+
+// Conforms to Collection only; its Sequence conformance is implied.
+public struct Trio: Collection, CustomStringConvertible {
+    public let a: Int
+    public let b: Int
+    public let c: Int
+    public var startIndex: Int { 0 }
+    public var endIndex: Int { 3 }
+    public func index(after i: Int) -> Int { i + 1 }
+    public subscript(i: Int) -> Int { i == 0 ? a : i == 1 ? b : c }
+    public var description: String { "trio" }
 }
 
 // HiddenRanked's witness is internal, so a stripped build names it on no arch.
@@ -1147,6 +1179,23 @@ extension Box {
     public func scaledIfObject<T: NSObjectProtocol, U: Scalable>(_ x: T, _ u: U, by k: Int) -> Int {
         x.isEqual(x) ? u.scaled(by: k) : -1
     }
+    public func flaps<T: Winged>(_ x: T) -> Int { x.flap() }
+}
+// Built with -disable-objc-attr-requires-foundation-module, so @objc needs no Foundation.
+@objc public protocol Winged {
+    func flap() -> Int
+}
+public final class Bat: NSObject, Winged {
+    public func flap() -> Int { 2 }
+}
+public final class ObjCRefBox<T: NSObjectProtocol> {
+    public let value: T
+    public init(value: T) { self.value = value }
+    public func holds(_ x: T) -> Bool { value.isEqual(x) }
+    public func held() -> T { value }
+}
+public enum ObjCBoxes {
+    public static func conformerRefBox(_ c: ObjCConformer) -> ObjCRefBox<ObjCConformer> { ObjCRefBox(value: c) }
 }
 #endif
 

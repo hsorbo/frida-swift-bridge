@@ -15,3 +15,7 @@ extension Robot: fixture.Container {
 extension Robot: fixture.AsyncMeasurable {
     public func measure() async -> Int { name.count }
 }
+
+public extension Robot {
+    func hover() -> String { "hover too" }
+}

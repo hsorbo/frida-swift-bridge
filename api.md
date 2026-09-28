@@ -194,7 +194,7 @@ Every wrapper extends `SwiftType`:
 
 Both lists span every loaded module: they include members that other modules
 add in extensions, and members a conformed-to protocol provides through a
-protocol extension. A constrained extension (`extension P where Self: Base`,
+protocol extension, stdlib protocols such as `Sequence` included. A constrained extension (`extension P where Self: Base`,
 `where Item: Numeric`) contributes only to types that meet its `where` clause,
 and its members shadow the same members of a less constrained extension. An
 extension whose clause the bridge can't check is left out: one with a same-type
@@ -364,6 +364,19 @@ robot.$method("move", { labels: ["by"] }).call(5);   // move(by:)
 robot.$method("pick", { returnType: "Swift.Int" }).call();   // pick() -> Int
 ```
 
+A bound method has `address`, `call(...)`, and `origin`, which says where the
+member was found. A type's own member wins over one another module adds, and
+both win over a protocol extension's:
+
+```js
+robot.$method("greet").origin;   // { kind: "own", type: "MyApp.Robot", module: "MyApp" }
+robot.$method("fly").origin;     // { kind: "extension", type: "MyApp.Robot", module: "Wings" }
+robot.$method("tally").origin;   // { kind: "protocolExtension", protocol: "Swift.Sequence", module: "Wings" }
+```
+
+`module` is the image's name. An ambiguity error between extensions in
+different modules names each overload's module.
+
 Static methods are called on the type wrapper via `ClassType.call` /
 `ValueType.call` (or `.method`):
 
@@ -381,6 +394,12 @@ Generic methods take their type arguments explicitly as `SwiftType`s:
 const box = Swift.type("MyApp.Box").init();
 box.$method("echo", { typeArguments: [Swift.type("Swift.Int")] }).call(21);   // 21
 ```
+
+Witness tables for the method's protocol requirements are resolved from the
+type arguments. A class-bound parameter (`T: AnyObject`, a superclass, an
+Objective-C protocol) is passed as a bare reference, as is `T?` and a closure
+result of that type. A pure Objective-C class such as `NSObject` can be a type
+argument; its objects are passed and returned as raw pointers.
 
 Value methods, sync or async, work the same whether or not they are
 `mutating`; a mutating one writes back into the value:
@@ -856,7 +875,10 @@ corrupts memory instead of failing cleanly.
   When that gives no verdict, and for generic structs, it falls back to the
   module: library evolution is detected from the module's exports and a
   non-frozen enum from its case symbols, and every public struct in such a
-  module is treated as resilient. Mark frozen structs the bridge misses (e.g.
+  module is treated as resilient. The Swift standard library is the exception:
+  nearly all its public structs are `@frozen`, so only its few non-frozen ones
+  (`CodingUserInfoKey`, `RangeSet`, `Mirror`, ...) are passed by address. Mark
+  frozen structs the bridge misses (e.g.
   `System.FileDescriptor`, which exports no getters) with
   `Swift.markFrozen("Module.Type")`, including frozen structs they store. A
   module whose exports show no sign of library evolution (only structs and

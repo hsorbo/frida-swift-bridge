@@ -26,10 +26,28 @@ public extension Labeled {
     func whisper() -> String { displayName.lowercased() }
 
     func whisperLabeled() -> String { "labeled " + displayName.lowercased() }
+
+    func tag() -> String { "default tag" }
 }
 
 public extension String {
     func shouted() -> String { uppercased() + "!" }
 
     mutating func exclaim() { self += "!" }
+}
+
+public extension Robot {
+    func hover() -> String { "hover" }
+}
+
+public extension Sequence {
+    func tally() -> Int { reduce(0) { n, _ in n + 1 } }
+}
+
+public extension Collection {
+    var middleOffset: Int { count / 2 }
+}
+
+public extension CustomStringConvertible {
+    func quoted() -> String { "\"\(description)\"" }
 }

@@ -71,6 +71,11 @@ describe("a type extended from another module", () => {
     expect(Number(robot.robotWingspan)).toBe(4);
   });
 
+  test("a misspelled name suggests a member another module declares", () => {
+    const robot = (Swift.type("fixture.Robot") as ClassType).init("R2");
+    expect(() => robot.$call("flyy")).toThrow("no method flyy on fixture.Robot (did you mean fly?)");
+  });
+
   test("a name no module declares reads as undefined through the facade", () => {
     const robot = (Swift.type("fixture.Robot") as ClassType).init("R2");
     expect(robot.flyAway).toBeUndefined();
@@ -93,9 +98,47 @@ describe("a protocol extended from another module", () => {
     expect(type.new({ displayName: "Ada" }).whisper()).toBe("ada");
   });
 
+  test("a misspelled name suggests an extension method of a conformed protocol", () => {
+    const describer = (Swift.type("fixture.DefaultDescriber") as StructType).new({ displayName: "Ada" });
+    expect(() => describer.$call("whispr")).toThrow("no method whispr on fixture.DefaultDescriber (did you mean whisper?)");
+  });
+
   test("an extension method whose words the symbol substitutes is reached through the facade", () => {
     const type = Swift.type("fixture.DefaultDescriber") as StructType;
     expect(type.new({ displayName: "Ada" }).whisperLabeled()).toBe("labeled ada");
+  });
+});
+
+describe("a stdlib protocol extended from another module", () => {
+  beforeEach(() => { loadNoMetadata(); });
+
+  const trio = () => (Swift.type("fixture.Trio") as StructType).new({ a: 1, b: 2, c: 3 });
+
+  test("an extension of a protocol the stdlib mangles as a substitution is callable", () => {
+    expect(Number(trio().tally())).toBe(3);
+  });
+
+  test("an extension of an inherited protocol reaches a type conforming only to the refinement", () => {
+    expect(trio().$method("tally").origin).toEqual({
+      kind: "protocolExtension",
+      protocol: "Swift.Sequence",
+      module: NOMETADATA_MODULE,
+    });
+  });
+
+  test("an extension property of a stdlib protocol is readable", () => {
+    expect(Number(trio().middleOffset)).toBe(1);
+  });
+
+  test("an extension of a stdlib protocol spelled out in full is callable", () => {
+    expect(trio().quoted()).toBe('"trio"');
+  });
+
+  test("they are listed on the conforming type", () => {
+    const type = Swift.type("fixture.Trio") as StructType;
+    expect(type.methods()).toContain("tally()");
+    expect(type.methods()).toContain("quoted()");
+    expect(type.properties.some((p) => p.name === "middleOffset")).toBeTruthy();
   });
 });
 

@@ -17,7 +17,30 @@ const ARCH = Process.arch;
 const resilientModules = new Set<string>();
 const frozenTypes = new Set<string>();
 
-const FROZEN_BY_DEFAULT_MODULES = new Set(["Swift", "Synchronization"]);
+// The stdlib is built with library evolution, yet nearly all its public structs are @frozen, and a
+// struct leaves no per-type trace, so the exceptions are listed. Its enums are told apart as elsewhere.
+const STDLIB_MODULES = new Set(["Swift", "Synchronization"]);
+const RESILIENT_STDLIB_STRUCTS = new Set([
+  "Swift._BridgeableMetatype",
+  "Swift._StringRepresentation",
+  "Swift.CodingUserInfoKey",
+  "Swift.CollectionDifference",
+  "Swift.DecodingError.Context",
+  "Swift.DiscontiguousSlice",
+  "Swift.DiscontiguousSlice.Index",
+  "Swift.EncodingError.Context",
+  "Swift.KeyedDecodingContainer",
+  "Swift.KeyedEncodingContainer",
+  "Swift.Mirror",
+  "Swift.RangeSet",
+  "Swift.RangeSet.Ranges",
+  "Swift.UTF8Span.CharacterIterator",
+  "Swift.Unicode._CharacterRecognizer",
+  "Swift.Unicode._RandomAccessWordRecognizer",
+  "Swift.Unicode._WordRecognizer",
+  "Swift.Unicode.CanonicalCombiningClass",
+  "Swift.Unicode.Scalar.Properties",
+]);
 
 export function markResilientModule(name: string): void {
   resilientModules.add(name);
@@ -61,7 +84,7 @@ function isResilientNominal(metadata: Metadata): boolean {
   const description = metadata.description;
   const moduleName = description.moduleName;
   const fullName = description.fullTypeName;
-  if (moduleName === null || fullName === null || FROZEN_BY_DEFAULT_MODULES.has(moduleName)) {
+  if (moduleName === null || fullName === null) {
     return false;
   }
   const image = Process.findModuleByAddress(description.handle);
@@ -74,6 +97,9 @@ function isResilientNominal(metadata: Metadata): boolean {
   }
   if (frozenTypes.has(fullName)) {
     return false;
+  }
+  if (STDLIB_MODULES.has(moduleName)) {
+    return RESILIENT_STDLIB_STRUCTS.has(fullName) && isLibraryEvolutionImage(image);
   }
   const isPublic = image.findExportByName(`$s${token}Mn`) !== null;
   if (!isPublic) {

@@ -3,7 +3,7 @@ import { loadFixture, loadResilient } from "./fixtures/load.js";
 
 import { indirect, isResilientValueType, makeSwiftNativeFunction, metadataFor } from "../src/abi.js";
 
-import { Swift } from "../src/index.js";
+import { Swift, SwiftValue } from "../src/index.js";
 // resilient.dylib (-enable-library-evolution) gives a real resilience boundary without a system
 // framework: ResilientPoint crosses it address-only, FrozenPoint stays direct.
 
@@ -94,5 +94,31 @@ describe("resilient calling convention (local library-evolution fixture)", () =>
 
     const flipMode = Swift.NativeFunction(resilientFn(mod, "resilient.flipMode("), Mode, [Mode]);
     expect(flipMode(Mode.case("first"))).toBe("second");
+  });
+});
+
+describe("the stdlib's non-frozen types", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("are resilient only where the stdlib is built with library evolution", () => {
+    const evolving = Process.platform === "darwin";
+    expect(isResilientValueType(metadataFor("Swift.CodingUserInfoKey")!)).toBe(evolving);
+    expect(isResilientValueType(metadataFor("Swift.FloatingPointRoundingRule")!)).toBe(evolving);
+    expect(isResilientValueType(metadataFor("Swift.String")!)).toBe(false);
+    expect(isResilientValueType(metadataFor("Swift.FloatingPointSign")!)).toBe(false);
+  });
+
+  test("a non-frozen stdlib struct crosses a call in both directions", () => {
+    const boundary = Swift.enum("fixture.StdlibBoundary")!;
+    const key = boundary.call("makeKey", "k") as SwiftValue;
+    expect(boundary.call("keyName", key)).toBe("k");
+  });
+
+  test("a non-frozen stdlib enum crosses a call in both directions", () => {
+    const boundary = Swift.enum("fixture.StdlibBoundary")!;
+    const rule = Swift.enum("Swift.FloatingPointRoundingRule")!;
+    expect(boundary.call("isRoundingUp", rule.case("up"))).toBe(true);
+    expect(boundary.call("isRoundingUp", rule.case("down"))).toBe(false);
+    expect(boundary.call("roundingDown")).toBe("down");
   });
 });

@@ -48,6 +48,7 @@ case "$(uname -s)" in
   *)      host="$(uname -s)" ;;
 esac
 platform="${PLATFORM:-$host}"
+objc_without_foundation="-Xfrontend -disable-objc-attr-requires-foundation-module"
 
 # fixture/resilient are stripped on every platform, matching a real release binary; resilient
 # stays unstripped until fixture/fixturesyms have linked against it. fixturesyms is the same
@@ -77,7 +78,7 @@ case "$platform" in
 
       for mod in fixture fixturesyms; do
         xcrun -sdk iphoneos swiftc -target "${arch}-apple-ios${dep}" \
-          -emit-library -emit-module -module-name "$mod" "$fixtures/fixture.swift" \
+          -emit-library -emit-module -module-name "$mod" "$fixtures/fixture.swift" $objc_without_foundation \
           -I "$work/$arch" "$work/$arch/resilient.dylib" -o "$work/$arch/$mod.dylib" \
           -emit-module-path "$work/$arch/$mod.swiftmodule" \
           -Xlinker -install_name -Xlinker "@rpath/$mod.dylib" \
@@ -136,11 +137,11 @@ case "$platform" in
       "$fixtures/resilient.swift" -o "$resilient_out" \
       -Xlinker -install_name -Xlinker "$resilient_out"
 
-    swiftc $target_flag -emit-library -emit-module -module-name fixture "$fixtures/fixture.swift" -I "$fixtures" "$resilient_out" -o "$fixture_out"
+    swiftc $target_flag -emit-library -emit-module -module-name fixture "$fixtures/fixture.swift" $objc_without_foundation -I "$fixtures" "$resilient_out" -o "$fixture_out"
     xcrun strip -x "$fixture_out"
     codesign -s - -f "$fixture_out"
 
-    swiftc $target_flag -emit-library -module-name fixturesyms "$fixtures/fixture.swift" -I "$fixtures" "$resilient_out" -o "$fixturesyms_out"
+    swiftc $target_flag -emit-library -module-name fixturesyms "$fixtures/fixture.swift" $objc_without_foundation -I "$fixtures" "$resilient_out" -o "$fixturesyms_out"
     codesign -s - -f "$fixturesyms_out"
 
     for mod in nometadata conformance; do

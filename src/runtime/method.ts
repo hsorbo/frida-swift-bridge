@@ -42,6 +42,8 @@ import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClas
 import { SwiftClosure, ClosureSpec, ClosureBody, LoadableClosureBody, SwiftThrow } from "./closure.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
+import { lookUpObjCProtocol } from "./objc.js";
+import { getSwiftCoreApi } from "./api.js";
 import { readString, createString } from "../abi/string.js";
 import {
   isClassExistential,
@@ -50,6 +52,7 @@ import {
   projectOpaqueExistential,
   protocolClassConstraint,
   compareProtocolDescriptors,
+  getExistentialTypeMetadata,
 } from "../abi/existential.js";
 import { exportsByPrefix, PrefixedExport } from "./export-trie.js";
 import {
@@ -71,6 +74,7 @@ import {
   GenericRequirementLayoutKind,
 } from "../abi/generic-requirement-descriptor.js";
 import { WitnessTable } from "../abi/witness-table.js";
+import { genericRequirements } from "../abi/generic-instantiation.js";
 import type { SwiftType } from "./swift-type.js";
 import { metadataOf } from "./swift-type.js";
 
@@ -85,14 +89,27 @@ export function isSwiftObject(value: CallResult): value is SwiftObject {
 // A SwiftField ($field view) is a borrowed ValueInstance at runtime, which marshalArg accepts.
 export type CallArg = SwiftValue | SwiftObject | SwiftField | ClosureSpec;
 
+// Resolution order is own, then extension in another module, then protocol extension.
+export type MemberOrigin =
+  | { kind: "own" | "extension"; type: string; module: string }
+  | { kind: "protocolExtension"; protocol: string; module: string };
+
 export interface SwiftBoundMethod {
   readonly address: NativePointer;
+  readonly origin: MemberOrigin;
   call(...args: CallArg[]): CallResult | Promise<CallResult>;
 }
 
-export function narrowBoundMethod(binder: SwiftBoundMethod, receiver?: RawInstance): SwiftBoundMethod {
+interface ResolvedBoundMethod {
+  readonly address: NativePointer;
+  readonly origin?: MemberOrigin;
+  call(...args: CallArg[]): CallResult | Promise<CallResult>;
+}
+
+export function narrowBoundMethod(binder: ResolvedBoundMethod, receiver?: RawInstance): SwiftBoundMethod {
   return {
     address: binder.address,
+    origin: binder.origin!,
     call: (...args) => {
       receiver?.checkLive(); // roots the receiver past its GC release and rejects a disposed one
       return binder.call(...args);
@@ -150,6 +167,7 @@ export interface ResolvedMethod {
   witnessTables?: NativePointer[];
   abstractArgs?: boolean[];
   abstractReturn?: boolean;
+  origin?: MemberOrigin;
 }
 
 interface BaseResolveOptions {
@@ -225,8 +243,10 @@ function rawArg(value: CallArg): CallArg | ClassInstance | ValueInstance {
 }
 
 function assertClassAssignable(arg: ClassInstance, declared: Metadata): void {
+  const declaredClass =
+    declared.kind === MetadataKind.ObjCClassWrapper ? declared.handle.add(Process.pointerSize).readPointer().strip() : declared.handle;
   for (let cls: ClassMetadata | null = arg.metadata; cls !== null; cls = cls.superclass) {
-    if (cls.handle.equals(declared.handle)) {
+    if (cls.handle.equals(declaredClass)) {
       return;
     }
   }
@@ -242,11 +262,16 @@ function marshalArg(metadata: Metadata, value: CallArg): NativePointer {
     }
     arg.copyInto(buffer);
   } else if (arg instanceof ClassInstance) {
-    if (metadata.kind !== MetadataKind.Class) {
+    const referenceType =
+      metadata.kind === MetadataKind.Optional ? new Metadata(metadata.genericArguments.readPointer()) : metadata;
+    if (!isClassType(referenceType)) {
       throw new Error(`argument is a class instance, expected ${typeName(metadata)}`);
     }
-    assertClassAssignable(arg, metadata);
-    buffer.writePointer(arg.handle);
+    assertClassAssignable(arg, referenceType);
+    // Optional<class> is the bare reference; unlike a class arg, its temp owns it like any value temp.
+    buffer.writePointer(referenceType === metadata ? arg.handle : getSwiftCoreApi().swift_unknownObjectRetain(arg.handle));
+  } else if (metadata.kind === MetadataKind.ObjCClassWrapper && arg instanceof NativePointer) {
+    buffer.writePointer(arg); // an ObjC reference is raw both ways, as decodeReturn hands it back
   } else if (metadata.kind === MetadataKind.Class) {
     throw new Error(`expected a ${typeName(metadata)} object; a raw pointer is only accepted via /abi`);
   } else {
@@ -426,6 +451,24 @@ function applyOverloadFilters<T extends { isStatic: boolean; signature: SwiftFun
 
 function describeOverload(signature: SwiftFunctionSignature): string {
   return `${signature.selector} (${signature.argTypeNames.join(", ")}) -> ${signature.returnTypeName ?? "()"}`;
+}
+
+function imageName(address: NativePointer): string {
+  return Process.findModuleByAddress(address.strip())?.name ?? "<unknown image>";
+}
+
+function describeOverloads(candidates: MethodCandidate[]): string {
+  const images = candidates.map((c) => imageName(c.address));
+  const spansImages = new Set(images).size > 1;
+  return candidates
+    .map((c, i) => describeOverload(c.signature) + (spansImages ? ` in ${images[i]}` : ""))
+    .join(", ");
+}
+
+function memberOrigin(address: NativePointer, type: string): MemberOrigin {
+  const module = imageName(address);
+  const owner = imageName(findType(type)!.handle);
+  return { kind: module === owner ? "own" : "extension", type, module };
 }
 
 // swift_getTypeName spells a private type's anonymous parent as "(unknown context at $<address>)";
@@ -644,12 +687,26 @@ export function instanceMemberKindsInOtherModules(typeName: string, name: string
   return found;
 }
 
-// The stdlib and imported ObjC modules mangle as substitutions (`s`, `So`), never as a spelled-out token.
-const SUBSTITUTED_MODULES = new Set(["Swift", "__C"]);
+const STANDARD_PROTOCOL_SUBSTITUTION = /^S(?:c)?[A-Za-z]$/;
+const protocolTokens = new Map<string, string | null>();
+
+// The runtime spells `any P` as P's protocol-list entry plus `_p`: the stdlib's as a substitution
+// (ST), any other without the P an extension's context carries.
+function protocolToken(protocol: ContextDescriptor): string | null {
+  const key = protocol.handle.toString();
+  let token = protocolTokens.get(key);
+  if (token === undefined) {
+    const existential = mangledTypeName(getExistentialTypeMetadata([protocol]));
+    const entry = existential?.endsWith("_p") ? existential.slice(0, -2) : null;
+    token = entry === null || STANDARD_PROTOCOL_SUBSTITUTION.test(entry) ? entry : `${entry}P`;
+    protocolTokens.set(key, token);
+  }
+  return token;
+}
 
 function protocolExtensionTarget(protocol: ContextDescriptor): MemberTarget | null {
   const fullName = protocol.fullTypeName;
-  const token = SUBSTITUTED_MODULES.has(protocol.moduleName ?? "") ? null : buildMangledTypeToken(protocol);
+  const token = protocolToken(protocol);
   return fullName === null || token === null ? null : { fullName, token, withConstrainedExtensions: true };
 }
 
@@ -903,7 +960,7 @@ function noMethodError(fullName: string, methodName: string): Error {
   const maxDistance = Math.max(1, Math.floor(methodName.length / 3));
   let suggestion: string | null = null;
   let best = maxDistance + 1;
-  for (const name of new Set(enumerateMethods(fullName, "definingModule").map((m) => m.name))) {
+  for (const name of new Set(enumerateMethods(fullName).map((m) => m.name))) {
     const distance = editDistance(methodName, name);
     if (distance > 0 && distance < best) {
       best = distance;
@@ -955,7 +1012,7 @@ function resolveMethodIn(
       continue;
     }
     if (candidates.length > 1) {
-      const overloads = candidates.map((c) => describeOverload(c.signature)).join(", ");
+      const overloads = describeOverloads(candidates);
       throw new Error(
         `ambiguous method ${methodName} on ${className}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
       );
@@ -987,7 +1044,8 @@ function resolveMethodIn(
       }
       asyncFunctionPointer = afp;
     }
-    return { address, argTypes, returnType, throws: signature.throws, isStatic, selector: signature.selector, async: signature.async, asyncFunctionPointer };
+    const origin = memberOrigin(address, className);
+    return { address, argTypes, returnType, throws: signature.throws, isStatic, selector: signature.selector, async: signature.async, asyncFunctionPointer, origin };
   }
   return null;
 }
@@ -1040,6 +1098,10 @@ export class BoundMethod {
 
   get address(): NativePointer {
     return this.resolved.address;
+  }
+
+  get origin(): MemberOrigin | undefined {
+    return this.resolved.origin;
   }
 
   get raw(): SwiftNativeFunction {
@@ -1189,6 +1251,10 @@ export class BoundAsyncMethod {
 
   get address(): NativePointer {
     return this.resolved.address;
+  }
+
+  get origin(): MemberOrigin | undefined {
+    return this.resolved.origin;
   }
 
   call(...args: CallArg[]): Promise<CallResult> {
@@ -1474,6 +1540,10 @@ export class BoundStaticMethod {
     return this.resolved.address;
   }
 
+  get origin(): MemberOrigin | undefined {
+    return this.resolved.origin;
+  }
+
   call(...args: CallArg[]): CallResult {
     const { argTypes, returnType } = this.resolved;
     if (args.length !== argTypes.length) {
@@ -1594,6 +1664,10 @@ export class BoundValueMethod {
     return this.resolved.address;
   }
 
+  get origin(): MemberOrigin | undefined {
+    return this.resolved.origin;
+  }
+
   call(...args: CallArg[]): CallResult {
     const { argTypes, returnType } = this.resolved;
     if (args.length !== argTypes.length) {
@@ -1678,6 +1752,17 @@ function encodeString(value: unknown): NativePointer[] {
 }
 
 // $s manglings feeding the discriminator (verified against the fixture's blraa); Frida type marshals.
+// A class-bound result is returned +1, so the reference handed back is retained.
+const CLASS_REFERENCE_RESULT: LoadableScalar = {
+  token: "-class",
+  nativeType: "pointer",
+  encode: (value) => {
+    const arg = rawArg(value as CallArg);
+    const reference = arg instanceof ClassInstance ? arg.handle : (arg as NativePointer);
+    return getSwiftCoreApi().swift_unknownObjectRetain(reference);
+  },
+};
+
 const LOADABLE_SCALARS: Record<string, LoadableScalar> = {
   "Swift.Int": { token: "$sSi", nativeType: "int64" },
   "Swift.UInt": { token: "$sSu", nativeType: "uint64" },
@@ -1705,9 +1790,15 @@ function closurePlan(paramTokens: string[], resultTokens: string[], shape: Closu
   };
 }
 
-function planClosureType(spelling: FunctionTypeSpelling, genericParams: string[], typeArguments: Metadata[]): ArgPlan {
+function planClosureType(
+  spelling: FunctionTypeSpelling,
+  genericParams: string[],
+  typeArguments: Metadata[],
+  classBoundParams: Set<string>
+): ArgPlan {
   const result = spelling.result.trim();
-  const resultIsGeneric = genericParams.includes(result);
+  const resultIsReference = classBoundParams.has(result);
+  const resultIsGeneric = genericParams.includes(result) && !resultIsReference;
   const resultIsVoid = result === "()" || result === "Swift.Void";
   const takesBuffer = spelling.params.length === 1 && spelling.params[0].trim() === RAW_BUFFER_PARAM;
   if ((spelling.params.length === 0 || takesBuffer) && (resultIsVoid || resultIsGeneric)) {
@@ -1732,7 +1823,7 @@ function planClosureType(spelling: FunctionTypeSpelling, genericParams: string[]
         throws: spelling.throws,
       });
     }
-    const resultScalar = resultIsVoid ? null : LOADABLE_SCALARS[result] ?? null;
+    const resultScalar = resultIsVoid ? null : resultIsReference ? CLASS_REFERENCE_RESULT : LOADABLE_SCALARS[result] ?? null;
     if (resultIsVoid || resultScalar !== null) {
       return closurePlan(paramTokens, resultScalar === null ? [] : [resultScalar.token], {
         mode: "loadable",
@@ -1757,7 +1848,7 @@ function planGenericType(
 ): ArgPlan {
   const fn = parseFunctionTypeSpelling(name);
   if (fn !== null) {
-    return planClosureType(fn, genericParams, typeArguments);
+    return planClosureType(fn, genericParams, typeArguments, classBoundParams);
   }
   const index = genericParams.indexOf(name);
   if (index !== -1) {
@@ -1771,10 +1862,15 @@ function planGenericType(
   if (concrete !== null) {
     return { kind: "concrete", metadata: concrete };
   }
-  return planCompoundType(name, genericParams, typeArguments);
+  return planCompoundType(name, genericParams, typeArguments, classBoundParams);
 }
 
-function planCompoundType(expr: string, genericParams: string[], typeArguments: Metadata[]): ArgPlan {
+function planCompoundType(
+  expr: string,
+  genericParams: string[],
+  typeArguments: Metadata[],
+  classBoundParams: Set<string>
+): ArgPlan {
   const metadata = resolveTypeExpr(expr, (name) => {
     const i = genericParams.indexOf(name);
     return i === -1 ? null : typeArguments[i] ?? null;
@@ -1782,17 +1878,18 @@ function planCompoundType(expr: string, genericParams: string[], typeArguments: 
   if (metadata === null) {
     throw new Error(`cannot resolve generic signature type ${expr}`);
   }
-  return compoundIsAddressOnly(expr, genericParams)
+  return compoundIsAddressOnly(expr, genericParams, classBoundParams)
     ? { kind: "abstractIndirect", metadata }
     : { kind: "concrete", metadata };
 }
 
 // Accepts the demangler's desugared spelling (Swift.Array<A>) and the sugared one ([A]). Array/Set/
-// Dictionary are a fixed-layout buffer (direct); Optional<param> embeds the abstract param (indirect).
-function compoundIsAddressOnly(expr: string, genericParams: string[]): boolean {
+// Dictionary are a fixed-layout buffer (direct); Optional<param> embeds the abstract param (indirect)
+// unless the param is class-bound, which makes it a nullable reference.
+function compoundIsAddressOnly(expr: string, genericParams: string[], classBoundParams: Set<string>): boolean {
   const t = expr.trim();
   if (t.endsWith("?") || t.endsWith("!")) {
-    return optionalIsAddressOnly(t.slice(0, -1), genericParams, expr);
+    return optionalIsAddressOnly(t.slice(0, -1), genericParams, classBoundParams, expr);
   }
   if (t.startsWith("[") && t.endsWith("]")) {
     return false;
@@ -1804,15 +1901,20 @@ function compoundIsAddressOnly(expr: string, genericParams: string[]): boolean {
       return false;
     }
     if (base === "Swift.Optional") {
-      return optionalIsAddressOnly(t.slice(lt + 1, -1), genericParams, expr);
+      return optionalIsAddressOnly(t.slice(lt + 1, -1), genericParams, classBoundParams, expr);
     }
   }
   throw new Error(`unsupported compound generic signature type ${expr} (only [T], [K: V] and T? are supported)`);
 }
 
-function optionalIsAddressOnly(payload: string, genericParams: string[], expr: string): boolean {
+function optionalIsAddressOnly(
+  payload: string,
+  genericParams: string[],
+  classBoundParams: Set<string>,
+  expr: string
+): boolean {
   if (genericParams.includes(payload.trim())) {
-    return true;
+    return !classBoundParams.has(payload.trim());
   }
   throw new Error(`unsupported compound generic signature type ${expr} (Optional payload must be a generic parameter)`);
 }
@@ -1830,29 +1932,49 @@ function swiftArgType(plan: ArgPlan): SwiftArgType {
   }
 }
 
-// An imported ObjC protocol is class-bound and dispatches through objc_msgSend: the callee takes no
-// witness table for it.
-function isObjCRequirement(req: GenericRequirement): boolean {
-  return req.protocol.startsWith("__C.");
+const MARKER_PROTOCOLS = new Set(["Swift.Sendable", "Swift.SendableMetatype", "Swift.BitwiseCopyable"]);
+
+interface RequirementBound {
+  witnessed: ContextDescriptor | null;
+  classBound: boolean;
 }
 
-function isClassBoundRequirement(req: GenericRequirement): boolean {
-  if (isObjCRequirement(req)) {
-    return true;
+// Only a Swift protocol with a descriptor takes a witness table. AnyObject, a superclass and an ObjC
+// protocol (imported, or declared @objc in Swift) make the subject a bare reference.
+function requirementBound(req: GenericRequirement): RequirementBound {
+  const bound = req.protocol;
+  if (bound === "AnyObject" || bound === "Swift.AnyObject" || bound.startsWith("__C.")) {
+    return { witnessed: null, classBound: true };
   }
-  const protocol = findProtocol(req.protocol);
-  return protocol !== null && protocolClassConstraint(protocol) === 0;
+  const protocol = findProtocol(bound);
+  if (protocol !== null) {
+    return { witnessed: protocol, classBound: protocolClassConstraint(protocol) === 0 };
+  }
+  const superclass = resolveType(bound);
+  if ((superclass !== null && isClassType(superclass)) || lookUpObjCProtocol(objCRuntimeName(bound)) !== null) {
+    return { witnessed: null, classBound: true };
+  }
+  if (MARKER_PROTOCOLS.has(bound)) {
+    return { witnessed: null, classBound: false };
+  }
+  throw new Error(`cannot resolve protocol ${bound} for requirement ${req.subject}`);
+}
+
+function objCRuntimeName(swiftName: string): string {
+  return `_TtP${swiftName.split(".").map((part) => `${part.length}${part}`).join("")}_`;
 }
 
 function autoWitnessTables(
   signature: SwiftFunctionSignature,
   typeArguments: Metadata[]
 ): NativePointer[] {
-  const witnessedRequirements = signature.conformanceRequirements.filter((req) => !isObjCRequirement(req));
-  return witnessedRequirements.map((req) => {
+  const witnessed = signature.conformanceRequirements.flatMap((req) => {
+    const protocol = requirementBound(req).witnessed;
+    return protocol === null ? [] : [{ req, protocol }];
+  });
+  return witnessed.map(({ req, protocol }) => {
     const index = signature.genericParams.indexOf(req.subject);
-    const protocol = index === -1 ? null : findProtocol(req.protocol);
-    if (protocol === null) {
+    if (index === -1) {
       throw new Error(`cannot resolve protocol ${req.protocol} for requirement ${req.subject}`);
     }
     const witnessTable = conformsToProtocol(typeArguments[index], protocol);
@@ -1873,6 +1995,7 @@ export interface GenericMethodPlan {
   asyncFunctionPointer?: AsyncFunctionPointer;
   typeArguments: Metadata[];
   witnessTables: NativePointer[];
+  origin: MemberOrigin;
 }
 
 // Type-metadata + witness pointers trail the formal args, so a trailing-exploded value self lands
@@ -1882,6 +2005,7 @@ export class GenericBoundMethod {
   private readonly indirectSelf: boolean;
   readonly address: NativePointer;
   readonly selector: string;
+  readonly origin: MemberOrigin;
 
   constructor(
     private readonly plan: GenericMethodPlan,
@@ -1891,6 +2015,7 @@ export class GenericBoundMethod {
   ) {
     this.address = plan.address;
     this.selector = plan.selector;
+    this.origin = plan.origin;
     this.indirectSelf = routing.indirect;
     const returnType = plan.returnPlan === null ? null : swiftArgType(plan.returnPlan);
     const argTypes = plan.argPlans.map(swiftArgType);
@@ -1957,6 +2082,7 @@ function genericAsyncResultShape(returnPlan: ArgPlan | null): AsyncResultShape |
 export class GenericBoundAsyncMethod {
   readonly address: NativePointer;
   readonly selector: string;
+  readonly origin: MemberOrigin;
   readonly asyncFunctionPointer: AsyncFunctionPointer;
   receiverKeepalive: unknown = null;
   private readonly result: AsyncResultShape | null;
@@ -1975,6 +2101,7 @@ export class GenericBoundAsyncMethod {
     }
     this.address = plan.address;
     this.selector = plan.selector;
+    this.origin = plan.origin;
     this.asyncFunctionPointer = plan.asyncFunctionPointer;
     this.result = genericAsyncResultShape(plan.returnPlan);
   }
@@ -2138,7 +2265,9 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     throw new Error(`${signature.selector} needs ${signature.genericParams.length} type argument(s), got ${typeArguments.length}`);
   }
   assertBorrowingArgs(signature.argTypeNames, signature.selector);
-  const classBoundParams = new Set(signature.conformanceRequirements.filter(isClassBoundRequirement).map((r) => r.subject));
+  const classBoundParams = new Set(
+    signature.conformanceRequirements.filter((r) => requirementBound(r).classBound).map((r) => r.subject)
+  );
   const argPlans = signature.argTypeNames.map((n) =>
     planGenericType(n, signature.genericParams, resolvedTypeArguments, classBoundParams)
   );
@@ -2155,7 +2284,8 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
       throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
     }
   }
-  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables };
+  const origin = memberOrigin(address, fullName);
+  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, origin };
 }
 
 export function bindGenericMethod(
@@ -2183,18 +2313,44 @@ export function bindGenericValueMethod(
     : new GenericBoundMethod(plan, self, routing, consumed);
 }
 
-// A bare type parameter (T) is address-only in the generic context but concretely sized by the
-// instance's type argument; concrete and compound types lower as elsewhere.
-function planTypeMemberArg(name: string, typeParams: string[], typeArguments: Metadata[]): ArgPlan {
+// A bare type parameter (T) is address-only in the generic context, unless class-bound, but concretely
+// sized by the instance's type argument; concrete and compound types lower as elsewhere.
+function planTypeMemberArg(
+  name: string,
+  typeParams: string[],
+  typeArguments: Metadata[],
+  classBoundParams: Set<string>
+): ArgPlan {
   const index = typeParams.indexOf(name.trim());
   if (index !== -1) {
-    return { kind: "abstractIndirect", metadata: typeArguments[index] };
+    const metadata = typeArguments[index];
+    return classBoundParams.has(name.trim()) ? { kind: "concrete", metadata } : { kind: "abstractIndirect", metadata };
   }
   const concrete = resolveType(name);
   if (concrete !== null) {
     return { kind: "concrete", metadata: concrete };
   }
-  return planCompoundType(name, typeParams, typeArguments);
+  return planCompoundType(name, typeParams, typeArguments, classBoundParams);
+}
+
+// Depth-0 generic parameters mangle as x, q_, q0_, q1_...
+function typeParamIndex(mangled: string): number | null {
+  if (mangled === "x") {
+    return 0;
+  }
+  const match = /^q(\d*)_$/.exec(mangled);
+  return match === null ? null : match[1] === "" ? 1 : parseInt(match[1], 10) + 2;
+}
+
+function classBoundTypeParams(descriptor: ContextDescriptor, typeParams: string[]): Set<string> {
+  const bound = new Set<string>();
+  for (const requirement of genericRequirements(descriptor)) {
+    const index = typeParamIndex(mangledParam(requirement));
+    if (index !== null && index < typeParams.length && isClassBound(requirement)) {
+      bound.add(typeParams[index]);
+    }
+  }
+  return bound;
 }
 
 // The enclosing generic type's concrete arguments, recovered from the instance's bound type name
@@ -2226,14 +2382,17 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     throw noMethodError(unboundName, methodName);
   }
   if (candidates.length > 1) {
-    const overloads = candidates.map((c) => describeOverload(c.signature)).join(", ");
+    const overloads = describeOverloads(candidates);
     throw new Error(`ambiguous method ${methodName} on ${unboundName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`);
   }
   const { address, signature, mangled } = candidates[0];
   assertBorrowingArgs(signature.argTypeNames, signature.selector);
-  const argPlans = signature.argTypeNames.map((n) => planTypeMemberArg(n, typeParams, typeArguments));
+  const classBound = classBoundTypeParams(findType(unboundName)!, typeParams);
+  const argPlans = signature.argTypeNames.map((n) => planTypeMemberArg(n, typeParams, typeArguments, classBound));
   const returnPlan =
-    signature.returnTypeName === null ? null : planTypeMemberArg(signature.returnTypeName, typeParams, typeArguments);
+    signature.returnTypeName === null
+      ? null
+      : planTypeMemberArg(signature.returnTypeName, typeParams, typeArguments, classBound);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (signature.async) {
     const module = Process.findModuleByAddress(address.strip());
@@ -2252,6 +2411,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     asyncFunctionPointer,
     typeArguments: trailsSelfMetadata ? [receiver] : [],
     witnessTables: [],
+    origin: memberOrigin(address, unboundName),
   };
 }
 
@@ -2833,6 +2993,7 @@ function resolveExtensionMethod(
     witnessSelf: table,
     witnessTables,
     classBound,
+    origin: { kind: "protocolExtension", protocol: protocolName, module: imageName(matches[0].address) },
   };
 }
 
@@ -3068,8 +3229,7 @@ function classBoundSubjects(protocol: ContextDescriptor): Set<string> {
 
 // "x" is Self; "<len><name><protocol ref>Qz" is Self.<name>.
 function requirementSubject(requirement: GenericRequirementDescriptor): string | null {
-  const { address, length } = requirement.param;
-  const mangled = String.fromCharCode(...new Uint8Array(address.readByteArray(length)!));
+  const mangled = mangledParam(requirement);
   if (mangled === "x") {
     return "A";
   }
@@ -3078,6 +3238,11 @@ function requirementSubject(requirement: GenericRequirementDescriptor): string |
     return null;
   }
   return "A." + mangled.substr(match[1].length, parseInt(match[1], 10));
+}
+
+function mangledParam(requirement: GenericRequirementDescriptor): string {
+  const { address, length } = requirement.param;
+  return String.fromCharCode(...new Uint8Array(address.readByteArray(length)!));
 }
 
 function isClassBound(requirement: GenericRequirementDescriptor): boolean {

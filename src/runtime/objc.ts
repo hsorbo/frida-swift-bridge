@@ -45,6 +45,20 @@ export function lookUpObjCClass(name: string): NativePointer | null {
   return cls.isNull() ? null : cls;
 }
 
+let cachedGetProtocol: NativeFunction<NativePointer, [NativePointerValue]> | null = null;
+
+export function lookUpObjCProtocol(name: string): NativePointer | null {
+  if (cachedGetProtocol === null) {
+    const libobjc = Process.findModuleByName("libobjc.A.dylib");
+    if (libobjc === null) {
+      return null;
+    }
+    cachedGetProtocol = new NativeFunction(libobjc.getExportByName("objc_getProtocol"), "pointer", ["pointer"]);
+  }
+  const protocol = cachedGetProtocol(Memory.allocUtf8String(name));
+  return protocol.isNull() ? null : protocol;
+}
+
 let cachedRetainCountSend: NativeFunction<UInt64, [NativePointerValue, NativePointerValue]> | null = null;
 let cachedRetainCountSelector: NativePointer | null = null;
 

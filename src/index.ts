@@ -104,6 +104,7 @@ export { isSwiftObject } from "./runtime/method.js";
 export type { ModuleRegistry, ModuleNamespace, ModuleMember } from "./runtime/module-namespace.js";
 export type {
   SwiftBoundMethod,
+  MemberOrigin,
   SwiftBoundInitializer,
   SwiftFunction,
   SwiftAsyncFunction,
