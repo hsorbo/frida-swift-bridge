@@ -21,6 +21,7 @@ import {
   ParamLayout,
   splitBoundTypeName,
   SwiftFunctionSignature,
+  GenericRequirement,
   SwiftAccessorSignature,
   ParsedSwiftSignature,
   splitTopLevel,
@@ -1677,7 +1678,13 @@ function planClosureType(spelling: FunctionTypeSpelling, genericParams: string[]
   );
 }
 
-function planGenericType(name: string, genericParams: string[], typeArguments: Metadata[]): ArgPlan {
+// A class-bound generic parameter lowers as a bare reference, not address-only.
+function planGenericType(
+  name: string,
+  genericParams: string[],
+  typeArguments: Metadata[],
+  classBoundParams: Set<string>
+): ArgPlan {
   const fn = parseFunctionTypeSpelling(name);
   if (fn !== null) {
     return planClosureType(fn, genericParams, typeArguments);
@@ -1688,7 +1695,7 @@ function planGenericType(name: string, genericParams: string[], typeArguments: M
     if (metadata === undefined) {
       throw new Error(`missing type argument for generic parameter ${name}`);
     }
-    return { kind: "generic", index, metadata };
+    return classBoundParams.has(name) ? { kind: "concrete", metadata } : { kind: "generic", index, metadata };
   }
   const concrete = resolveType(name);
   if (concrete !== null) {
@@ -1753,11 +1760,26 @@ function swiftArgType(plan: ArgPlan): SwiftArgType {
   }
 }
 
+// An imported ObjC protocol is class-bound and dispatches through objc_msgSend: the callee takes no
+// witness table for it.
+function isObjCRequirement(req: GenericRequirement): boolean {
+  return req.protocol.startsWith("__C.");
+}
+
+function isClassBoundRequirement(req: GenericRequirement): boolean {
+  if (isObjCRequirement(req)) {
+    return true;
+  }
+  const protocol = findProtocol(req.protocol);
+  return protocol !== null && protocolClassConstraint(protocol) === 0;
+}
+
 function autoWitnessTables(
   signature: SwiftFunctionSignature,
   typeArguments: Metadata[]
 ): NativePointer[] {
-  return signature.conformanceRequirements.map((req) => {
+  const witnessedRequirements = signature.conformanceRequirements.filter((req) => !isObjCRequirement(req));
+  return witnessedRequirements.map((req) => {
     const index = signature.genericParams.indexOf(req.subject);
     const protocol = index === -1 ? null : findProtocol(req.protocol);
     if (protocol === null) {
@@ -2044,11 +2066,14 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     throw new Error(`${signature.selector} needs ${signature.genericParams.length} type argument(s), got ${typeArguments.length}`);
   }
   assertBorrowingArgs(signature.argTypeNames, signature.selector);
-  const argPlans = signature.argTypeNames.map((n) => planGenericType(n, signature.genericParams, resolvedTypeArguments));
+  const classBoundParams = new Set(signature.conformanceRequirements.filter(isClassBoundRequirement).map((r) => r.subject));
+  const argPlans = signature.argTypeNames.map((n) =>
+    planGenericType(n, signature.genericParams, resolvedTypeArguments, classBoundParams)
+  );
   const returnPlan =
     signature.returnTypeName === null
       ? null
-      : planGenericType(signature.returnTypeName, signature.genericParams, resolvedTypeArguments);
+      : planGenericType(signature.returnTypeName, signature.genericParams, resolvedTypeArguments, classBoundParams);
   const witnessTables = options.witnessTables ?? autoWitnessTables(signature, resolvedTypeArguments);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (signature.async) {

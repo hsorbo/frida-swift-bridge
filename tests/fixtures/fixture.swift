@@ -449,6 +449,10 @@ public func storeNamed(_ p: UnsafeMutableRawPointer) {
 
 public func makeNamed(_ label: String) -> any Named { Widget(label: label) }
 
+extension Box {
+    public func labelOf<T: Named>(_ x: T) -> String { x.label }
+}
+
 public struct CodedError: Error {
     public let code: Int
 }
@@ -1057,6 +1061,11 @@ import ObjectiveC
 public final class ObjCConformer: NSObject {}
 public struct ObjCProtocolBox<T: NSObjectProtocol> {
     public var value: T
+}
+extension Box {
+    public func scaledIfObject<T: NSObjectProtocol, U: Scalable>(_ x: T, _ u: U, by k: Int) -> Int {
+        x.isEqual(x) ? u.scaled(by: k) : -1
+    }
 }
 #endif
 

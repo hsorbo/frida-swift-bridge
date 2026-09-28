@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
+import { requireDarwin } from "./swift.js";
 
 import { Swift, ClassType, SwiftObject } from "../src/index.js";
 
@@ -34,6 +35,23 @@ describe("generic method invocation", () => {
   test("auto-resolves a witness table for a constrained requirement", () => {
     const Int = metadataFor("Swift.Int")!;
     expect(box().$method("scaled", { typeArguments: [typeOf(Int)] }).call(6, 7)).toEqual(int64(42));
+  });
+
+  test("passes a class-bound generic argument directly", () => {
+    const Widget = typeOf(metadataFor("fixture.Widget")!) as ClassType;
+    const widget = Widget.init("Bee");
+    expect(box().$method("labelOf", { typeArguments: [Widget] }).call(widget)).toBe("Bee");
+    widget.$dispose();
+  });
+
+  test("an Objective-C protocol requirement takes no witness table", (ctx) => {
+    requireDarwin(ctx);
+    const Conformer = typeOf(metadataFor("fixture.ObjCConformer")!) as ClassType;
+    const Int = metadataFor("Swift.Int")!;
+    const conformer = Conformer.init();
+    const method = box().$method("scaledIfObject", { typeArguments: [Conformer, typeOf(Int)] });
+    expect(method.call(conformer, 6, 7)).toEqual(int64(42));
+    conformer.$dispose();
   });
 
   test("passes a class-typed generic argument by reference", () => {
