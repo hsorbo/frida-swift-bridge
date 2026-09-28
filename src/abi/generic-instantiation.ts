@@ -171,11 +171,7 @@ function witnessTableFor(
 }
 
 function resolveRequirementProtocol(field: NativePointer): ContextDescriptor {
-  const raw = field.readS32();
-  if ((raw & PROTOCOL_REF_OBJC_BIT) !== 0) {
-    throw new Error("Objective-C protocol requirements are not supported");
-  }
-  const offset = raw & ~PROTOCOL_REF_OBJC_BIT;
+  const offset = field.readS32() & ~PROTOCOL_REF_OBJC_BIT;
   const address = field.add(offset & ~1);
   const descriptor = (offset & 1) !== 0 ? address.readPointer().strip() : address;
   return new ContextDescriptor(descriptor);

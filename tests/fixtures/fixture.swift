@@ -791,6 +791,14 @@ import CoreGraphics
 public func foreignClassType() -> UnsafeRawPointer { unsafeBitCast(CGColor.self, to: UnsafeRawPointer.self) }
 #endif
 
+#if canImport(ObjectiveC)
+import ObjectiveC
+public final class ObjCConformer: NSObject {}
+public struct ObjCProtocolBox<T: NSObjectProtocol> {
+    public var value: T
+}
+#endif
+
 public protocol Holder<Item> {
     associatedtype Item
     var item: Item { get }
