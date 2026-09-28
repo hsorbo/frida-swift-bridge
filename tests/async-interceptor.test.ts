@@ -11,6 +11,8 @@ const MAKE_QUAD_ASYNC = "$s7fixture13makeQuadAsyncyAA0dC0VSiYaF";
 const MAKE_QUAD_ASYNC_AFP = MAKE_QUAD_ASYNC + "Tu";
 const DIVIDE_ASYNC = "$s7fixture11divideAsyncyS2i_SitYaKF";
 const DIVIDE_ASYNC_AFP = DIVIDE_ASYNC + "Tu";
+const SPILL_INTS_ASYNC = "$s7fixture14spillIntsAsyncyS2i_S7is5Int32VSitYaF";
+const DRIVE_SPILL_INTS_ASYNC = "$s7fixture19driveSpillIntsAsyncSiyF";
 
 function driver(module: Module): (x: number) => number {
   const fn = new NativeFunction(module.getExportByName(DRIVE), "long", ["long"]);
@@ -50,6 +52,29 @@ describe("async interceptor", () => {
       expect(arg).toEqual(int64(21));
       expect(context).toBeDefined();
       expect(context!.isNull()).toBe(false);
+    } finally {
+      listener.detach();
+    }
+  });
+
+  test("onEnter reads arguments spilled past the registers from the caller's stack", () => {
+    requireSwift();
+    const module = loadFixture();
+    const drive = new NativeFunction(module.getExportByName(DRIVE_SPILL_INTS_ASYNC), "long", []);
+
+    let args: unknown;
+    const listener = Swift.Interceptor.attachAsync(module.getExportByName(SPILL_INTS_ASYNC), {
+      onEnter(a) {
+        args = a;
+      },
+    });
+    try {
+      expect(Number(drive())).toBe(2);
+      expect(args).toEqual([
+        int64(1), int64(2), int64(3), int64(4), int64(5), int64(6), int64(7), int64(8),
+        -9,
+        int64(10),
+      ]);
     } finally {
       listener.detach();
     }

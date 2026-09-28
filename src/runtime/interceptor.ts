@@ -1,5 +1,6 @@
 import { Metadata, MetadataKind } from "../abi/metadata.js";
-import { readValue, embedsManagedReference, SwiftValue } from "../abi/instance.js";
+import { readValue, embedsManagedReference, enumerateInstanceFields, SwiftValue } from "../abi/instance.js";
+import { enumerateTupleElements } from "../abi/tuple.js";
 import { ValueInstance } from "../abi/value.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { decodeThrownError } from "./thrown-error.js";
@@ -193,10 +194,8 @@ function gpName(context: CpuContext): Record<string, NativePointer> {
 
 function gpArg(context: CpuContext, n: number): NativePointer {
   if (ARCH === "arm64") {
-    if (n > 7) throw new Error("stack arguments are not supported");
     return gpName(context)[`x${n}`];
   }
-  if (n >= X64_GP_ARGS.length) throw new Error("stack arguments are not supported");
   return gpName(context)[X64_GP_ARGS[n]];
 }
 
@@ -205,11 +204,70 @@ function gpResult(context: CpuContext, n: number): NativePointer {
 }
 
 function fpArg(context: CpuContext, n: number, cls: "double" | "float"): number {
-  if (n > 7) throw new Error("stack floating-point arguments are not supported");
   if (ARCH === "arm64") {
     return (context as unknown as Record<string, number>)[`${cls === "double" ? "d" : "s"}${n}`];
   }
   return readXmm(context, n, cls);
+}
+
+const GP_ARG_REGISTERS = ARCH === "arm64" ? 8 : X64_GP_ARGS.length;
+const FP_ARG_REGISTERS = 8;
+// Darwin arm64 packs a stack-passed scalar at its own size and alignment; AAPCS64 and SysV x86-64
+// give each one an 8-byte slot.
+const PACKS_STACK_ARGS = ARCH === "arm64" && Process.platform === "darwin";
+const I128_STARTS_AT_EVEN_REGISTER = ARCH === "arm64" && !PACKS_STACK_ARGS;
+
+// swiftcc places each lowered scalar on its own, so an aggregate can straddle the last register and
+// the stack. Stack args start at the entry sp on arm64, past the return address on x86-64.
+class ArgumentCursor {
+  private ngrn: number;
+  private nsrn = 0;
+  private stackOffset = 0;
+
+  constructor(private readonly context: CpuContext, startReg: number) {
+    this.ngrn = startReg;
+  }
+
+  gp(width = 8): NativePointer {
+    if (this.ngrn < GP_ARG_REGISTERS) {
+      return gpArg(this.context, this.ngrn++);
+    }
+    return this.stackSlot(width).readPointer();
+  }
+
+  // arm64 passes an i128 in a register pair that never starts at x7, else in a 16-byte-aligned stack
+  // slot that retires x7. x86-64 compilers disagree on where one goes once r8 is taken.
+  gp128(): [NativePointer, NativePointer] {
+    if (ARCH !== "arm64" && this.ngrn > GP_ARG_REGISTERS - 2) {
+      throw new Error("an Int128 argument past r8 is unsupported on x86-64");
+    }
+    if (I128_STARTS_AT_EVEN_REGISTER) {
+      this.ngrn += this.ngrn % 2;
+    }
+    if (this.ngrn < GP_ARG_REGISTERS - 1) {
+      return [gpArg(this.context, this.ngrn++), gpArg(this.context, this.ngrn++)];
+    }
+    this.ngrn = GP_ARG_REGISTERS;
+    const slot = this.stackSlot(16);
+    return [slot.readPointer(), slot.add(8).readPointer()];
+  }
+
+  fp(cls: "double" | "float"): number {
+    if (this.nsrn < FP_ARG_REGISTERS) {
+      return fpArg(this.context, this.nsrn++, cls);
+    }
+    const slot = this.stackSlot(cls === "double" ? 8 : 4);
+    return cls === "double" ? slot.readDouble() : slot.readFloat();
+  }
+
+  private stackSlot(width: number): NativePointer {
+    const size = PACKS_STACK_ARGS ? width : Math.max(width, 8);
+    this.stackOffset = Math.ceil(this.stackOffset / size) * size;
+    const base = ARCH === "arm64" ? this.context.sp : this.context.sp.add(8);
+    const slot = base.add(this.stackOffset);
+    this.stackOffset += size;
+    return slot;
+  }
 }
 
 function fpResult(context: CpuContext, n: number, cls: "double" | "float"): number {
@@ -242,6 +300,63 @@ function words(metadata: Metadata): number {
   return Math.ceil(metadata.valueWitnesses.size / 8);
 }
 
+interface LoweredInteger {
+  offset: number;
+  size: number;
+}
+
+const loweredIntegerCache = new Map<string, LoweredInteger[]>();
+
+// swiftcc lowers a direct value to one integer per 8-byte word holding data, the narrowest power of two
+// covering it (clang SwiftAggLowering): a {Int8, Int} struct passes as (i8, i64), an Int? as (i64, i8).
+// A padding word passes nothing, and a Builtin.Int128 stays one i128.
+function loweredIntegers(metadata: Metadata): LoweredInteger[] {
+  const key = metadata.handle.toString();
+  let lowered = loweredIntegerCache.get(key);
+  if (lowered === undefined) {
+    const dataEnds = new Array<number>(words(metadata)).fill(0);
+    const i128Words = new Set<number>();
+    markDataEnds(metadata, 0, dataEnds, i128Words);
+    lowered = [];
+    for (let w = 0; w < dataEnds.length; w++) {
+      const bytes = dataEnds[w] - w * 8;
+      if (i128Words.has(w)) {
+        lowered.push({ offset: w * 8, size: 16 });
+        w++;
+      } else if (bytes > 0) {
+        lowered.push({ offset: w * 8, size: bytes <= 1 ? 1 : bytes <= 2 ? 2 : bytes <= 4 ? 4 : 8 });
+      }
+    }
+    loweredIntegerCache.set(key, lowered);
+  }
+  return lowered;
+}
+
+function markDataEnds(metadata: Metadata, offset: number, dataEnds: number[], i128Words: Set<number>): void {
+  let members: { type: Metadata | null; offset: number }[] = [];
+  if (metadata.kind === MetadataKind.Struct) {
+    members = [...enumerateInstanceFields(metadata, ptr(offset))].map((f) => ({
+      type: f.type,
+      offset: f.address.toUInt32(),
+    }));
+  } else if (metadata.kind === MetadataKind.Tuple) {
+    members = [...enumerateTupleElements(metadata)].map((e) => ({ type: e.type, offset: offset + e.offset }));
+  }
+  if (members.length > 0 && members.every((m) => m.type !== null)) {
+    for (const m of members) {
+      markDataEnds(m.type!, m.offset, dataEnds, i128Words);
+    }
+    return;
+  }
+  if (typeName(metadata) === "Builtin.Int128") {
+    i128Words.add(offset / 8);
+  }
+  const end = offset + metadata.valueWitnesses.size;
+  for (let w = Math.floor(offset / 8); w * 8 < end; w++) {
+    dataEnds[w] = Math.max(dataEnds[w], Math.min(end, w * 8 + 8));
+  }
+}
+
 interface MaterializedArgs {
   values: SwiftValue[];
   generics: Metadata[];
@@ -254,21 +369,20 @@ function materializeArgs(
   genericParams: string[],
   startReg = 0
 ): MaterializedArgs {
-  let ngrn = startReg;
-  let nsrn = 0;
+  const cursor = new ArgumentCursor(context, startReg);
   const slots: { plan: TypePlan; address: NativePointer }[] = [];
 
   for (const plan of args) {
     if (plan.kind === "metatype") {
-      slots.push({ plan, address: gpArg(context, ngrn++) }); // address IS the metadata pointer
+      slots.push({ plan, address: cursor.gp() }); // address IS the metadata pointer
       continue;
     }
     if (isIndirectPlan(plan)) {
-      slots.push({ plan, address: gpArg(context, ngrn++) });
+      slots.push({ plan, address: cursor.gp() });
       continue;
     }
     if (plan.kind !== "concrete") {
-      slots.push({ plan, address: Memory.alloc(8).writePointer(gpArg(context, ngrn++)) });
+      slots.push({ plan, address: Memory.alloc(8).writePointer(cursor.gp()) });
       continue;
     }
     const metadata = plan.metadata;
@@ -278,19 +392,25 @@ function materializeArgs(
       const scratch = Memory.alloc(Math.max(fl.count * stride, 8));
       for (let k = 0; k < fl.count; k++) {
         const leaf = scratch.add(k * stride);
-        const value = fpArg(context, nsrn++, fl.cls);
+        const value = cursor.fp(fl.cls);
         fl.cls === "double" ? leaf.writeDouble(value) : leaf.writeFloat(value);
       }
       slots.push({ plan, address: scratch });
     } else if (metadata.kind === MetadataKind.Class) {
-      slots.push({ plan, address: Memory.alloc(8).writePointer(gpArg(context, ngrn++)) });
+      slots.push({ plan, address: Memory.alloc(8).writePointer(cursor.gp()) });
     } else if (shouldPassIndirectly(metadata)) {
-      slots.push({ plan, address: gpArg(context, ngrn++) });
+      slots.push({ plan, address: cursor.gp() });
     } else {
-      const count = words(metadata);
-      const scratch = Memory.alloc(Math.max(count, 1) * 8);
-      for (let w = 0; w < count; w++) {
-        scratch.add(w * 8).writePointer(gpArg(context, ngrn++));
+      const scratch = Memory.alloc(Math.max(words(metadata), 1) * 8);
+      for (const { offset, size } of loweredIntegers(metadata)) {
+        const scalar = scratch.add(offset);
+        if (size === 16) {
+          const [low, high] = cursor.gp128();
+          scalar.writePointer(low);
+          scalar.add(8).writePointer(high);
+        } else {
+          scalar.writePointer(cursor.gp(size));
+        }
       }
       slots.push({ plan, address: scratch });
     }
@@ -298,7 +418,7 @@ function materializeArgs(
 
   const generics: Metadata[] = [];
   for (let i = 0; i < genericParams.length; i++) {
-    generics.push(new Metadata(gpArg(context, ngrn++)));
+    generics.push(new Metadata(cursor.gp()));
   }
 
   const values = slots.map((s) =>

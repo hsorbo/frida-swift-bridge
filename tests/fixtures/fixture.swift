@@ -563,6 +563,47 @@ public struct FloatPair { public var u: Float; public var v: Float }
 public func makeFloatPair() -> FloatPair { FloatPair(u: 1.25, v: 3.75) }
 public func sumFloatPair(_ p: FloatPair) -> Float { p.u + p.v }
 
+// Enough arguments to overflow the argument registers onto the caller's stack. The narrow types
+// probe per-scalar slot sizes: TaggedInt lowers to (i8, i64, i1).
+public struct TaggedInt { public var tag: Int8; public var value: Int; public var flag: Bool }
+public func spillInts(_ a0: Int, _ a1: Int, _ a2: Int, _ a3: Int, _ a4: Int, _ a5: Int,
+                      _ split: LoadableStruct, _ flag: Bool, _ tagged: TaggedInt, _ small: Int32,
+                      _ last: Int) -> Int {
+    a0 + split.d + (flag ? 1 : 0) + tagged.value + Int(small) + last
+}
+public func driveSpillInts() -> Int {
+    spillInts(1, 2, 3, 4, 5, 6, LoadableStruct(a: 7, b: 8, c: 9, d: 10), true,
+              TaggedInt(tag: 11, value: 12, flag: true), -13, 14)
+}
+public func spillDoubles(_ i0: Int, _ i1: Int, _ i2: Int, _ i3: Int, _ i4: Int, _ i5: Int, _ i6: Int,
+                         _ d0: Double, _ d1: Double, _ d2: Double, _ d3: Double, _ d4: Double,
+                         _ d5: Double, _ d6: Double, _ split: DoublePair, _ f: Float, _ h: Float,
+                         _ s: String, _ g: Double) -> Double {
+    Double(i0) + d0 + split.y + Double(f) + Double(h) + Double(s.count) + g
+}
+public func driveSpillDoubles() -> Double {
+    spillDoubles(1, 2, 3, 4, 5, 6, 7, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5,
+                 DoublePair(x: 7.5, y: 8.5), 9.25, 10.75, "hi", 11.5)
+}
+
+// Int128 lowers to one i128: a register pair that never starts at x7, else a 16-byte-aligned stack
+// slot. PaddedInt128 lowers to (i64, i128); its padding word takes no register.
+#if compiler(>=6.0)
+@available(macOS 15, iOS 18, *)
+public struct PaddedInt128 { public var head: Int; public var wide: Int128 }
+@available(macOS 15, iOS 18, *)
+public func spillInt128(_ padded: PaddedInt128, _ a0: Int, _ a1: Int, _ a2: Int, _ a3: Int,
+                        _ wide: Int128, _ flag: Bool, _ wider: Int128, _ last: Int) -> Int {
+    padded.head + a3 + Int(truncatingIfNeeded: wide >> 64) + (flag ? 1 : 0)
+        + Int(truncatingIfNeeded: wider) + last
+}
+@available(macOS 15, iOS 18, *)
+public func driveSpillInt128() -> Int {
+    spillInt128(PaddedInt128(head: 1, wide: Int128(2) << 64 | 3), 4, 5, 6, 7, Int128(8) << 64 | 9,
+                true, Int128(10) << 64 | 11, 12)
+}
+#endif
+
 public func boxAnyInt(_ n: Int) -> Any { n }
 public func unboxAnyInt(_ x: Any) -> Int { x as! Int }
 public func makeGreeterExistential() -> any Greeter { PoliteGreeter(name: "Ada") }
@@ -1225,6 +1266,22 @@ public func driveComputeAsync(_ x: Int) -> Int {
     let box = AsyncResultBox()
     Task {
         box.value = await computeAsync(x)
+        sem.signal()
+    }
+    sem.wait()
+    return box.value
+}
+
+public func spillIntsAsync(_ a0: Int, _ a1: Int, _ a2: Int, _ a3: Int, _ a4: Int, _ a5: Int,
+                           _ a6: Int, _ a7: Int, _ small: Int32, _ last: Int) async -> Int {
+    await Task.yield()
+    return a0 + Int(small) + last
+}
+public func driveSpillIntsAsync() -> Int {
+    let sem = DispatchSemaphore(value: 0)
+    let box = AsyncResultBox()
+    Task {
+        box.value = await spillIntsAsync(1, 2, 3, 4, 5, 6, 7, 8, -9, 10)
         sem.signal()
     }
     sem.wait()

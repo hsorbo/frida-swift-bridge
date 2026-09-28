@@ -1,5 +1,5 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { fixtureExport, existentialMetadata, loadFixture } from "./fixtures/load.js";
 
 import { Swift, type SwiftValue, type SwiftObject, type CallResult } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
@@ -254,6 +254,89 @@ describe("SwiftInterceptor.attach", () => {
     listener.detach();
     expect(seenArgs).toEqual([21]);
     expect(seenRet).toBe(42);
+  });
+
+  test("reads GP arguments spilled past the registers from the caller's stack", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const addr = fixtureExport("fixture.spillInts(");
+    let seenArgs: SwiftValue[] | null = null;
+    let seenRet: CallResult = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+      onLeave(ret) {
+        seenRet = ret;
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.driveSpillInts("), Int, [])();
+    listener.detach();
+    expect(seenArgs).toEqual([
+      int64(1), int64(2), int64(3), int64(4), int64(5), int64(6),
+      { a: int64(7), b: int64(8), c: int64(9), d: int64(10) },
+      true,
+      { tag: 11, value: int64(12), flag: true },
+      -13,
+      int64(14),
+    ]);
+    expect(seenRet).toEqual(int64(25));
+  });
+
+  test("reads FP arguments spilled past the registers from the caller's stack", (ctx) => {
+    requireFpRegisterHooks(ctx);
+    const Double_ = metadataFor("Swift.Double")!;
+    const addr = fixtureExport("fixture.spillDoubles");
+    let seenArgs: SwiftValue[] | null = null;
+    let seenRet: CallResult = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+      onLeave(ret) {
+        seenRet = ret;
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.driveSpillDoubles"), Double_, [])();
+    listener.detach();
+    expect(seenArgs).toEqual([
+      int64(1), int64(2), int64(3), int64(4), int64(5), int64(6), int64(7),
+      0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5,
+      { x: 7.5, y: 8.5 },
+      9.25,
+      10.75,
+      "hi",
+      11.5,
+    ]);
+    expect(seenRet).toBe(43.5);
+  });
+
+  test("reads an Int128 as one register pair or 16-byte-aligned stack slot", (ctx) => {
+    if (Process.arch !== "arm64") ctx.skip("x86-64 compilers disagree on where an Int128 past the registers goes");
+    loadFixture();
+    if (metadataFor("fixture.PaddedInt128") === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
+    const Int = metadataFor("Swift.Int")!;
+    const addr = fixtureExport("fixture.spillInt128(");
+    let seenArgs: SwiftValue[] | null = null;
+    let seenRet: CallResult = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+      onLeave(ret) {
+        seenRet = ret;
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.driveSpillInt128("), Int, [])();
+    listener.detach();
+    expect(seenArgs).toEqual([
+      { head: int64(1), wide: { _value: null } },
+      int64(4), int64(5), int64(6), int64(7),
+      { _value: null },
+      true,
+      { _value: null },
+      int64(12),
+    ]);
+    expect(seenRet).toEqual(int64(40));
   });
 
   test("surfaces a thrown error on leave instead of decoding a bogus return", () => {
