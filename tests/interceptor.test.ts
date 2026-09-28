@@ -97,6 +97,44 @@ describe("SwiftInterceptor.attach", () => {
     expect(seen).toEqual({ a: int64(1), b: int64(2), c: int64(3), d: int64(4) });
   });
 
+  test("decodes a concrete Optional argument and return", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const addr = fixtureExport("fixture.unwrapOrZero");
+    let seenArgs: SwiftValue[] | null = null;
+    let seenRet: CallResult = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+      onLeave(ret) {
+        seenRet = ret;
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.makeUnwrapOrZero"), Int, [])();
+    listener.detach();
+    expect(seenArgs).toEqual([{ some: int64(5) }]);
+    expect(seenRet).toEqual({ some: int64(5) });
+  });
+
+  test("hooks a function taking and returning a concrete Array", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const addr = fixtureExport("fixture.sumIntArray");
+    let argCount = 0;
+    let seenRet: SwiftValue[] | null = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        argCount = args.length;
+      },
+      onLeave(ret) {
+        seenRet = (ret as SwiftObject).$container!() as SwiftValue[];
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.makeSumIntArray"), Int, [])();
+    listener.detach();
+    expect(argCount).toBe(1);
+    expect(seenRet).toEqual([int64(6)]);
+  });
+
   test("recovers a generic scalar argument and return from the implicit metadata", () => {
     const Int = metadataFor("Swift.Int")!;
     const identity = fixtureExport("fixture.genericIdentity");

@@ -46,7 +46,7 @@ function planType(name: string, genericParams: string[]): TypePlan {
   if (paramIndex !== -1) {
     return { kind: "param", paramIndex };
   }
-  const metadata = resolveType(name);
+  const metadata = resolveTypeExpr(name, () => null);
   if (metadata !== null) {
     return { kind: "concrete", metadata };
   }

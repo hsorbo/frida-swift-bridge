@@ -69,6 +69,11 @@ public func sumBig(_ s: BigStruct) -> Int {
     return s.a + s.b + s.c + s.d + s.e
 }
 
+public func unwrapOrZero(_ x: Int?) -> Int? { x ?? 0 }
+public func makeUnwrapOrZero() -> Int { unwrapOrZero(5)! }
+public func sumIntArray(_ xs: [Int]) -> [Int] { [xs.reduce(0, +)] }
+public func makeSumIntArray() -> Int { sumIntArray([1, 2, 3])[0] }
+
 public func makeString() -> String {
     return "New Cairo"
 }
