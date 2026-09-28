@@ -1,6 +1,7 @@
 import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { existentialRepresentation } from "../abi/existential.js";
+import { enumerateTupleElements } from "../abi/tuple.js";
 import { SwiftError } from "./thrown-error.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { ContextDescriptorKind } from "../abi/context-descriptor.js";
@@ -8,7 +9,7 @@ import { exportsByPrefix } from "./export-trie.js";
 import { demangle } from "./demangle.js";
 import { signCode } from "../basic/pac.js";
 
-export const MAX_LOADABLE_SIZE = Process.pointerSize * 4;
+const MAX_DIRECT_REGISTERS = 4;
 
 const ARCH = Process.arch;
 
@@ -110,8 +111,7 @@ export function shouldPassIndirectly(metadata: Metadata): boolean {
   if (isResilientValueType(metadata)) {
     return true;
   }
-  const vwt = metadata.valueWitnesses;
-  return !vwt.isBitwiseTakable || vwt.size > MAX_LOADABLE_SIZE;
+  return !metadata.valueWitnesses.isBitwiseTakable || registerCount(loweredScalars(metadata)) > MAX_DIRECT_REGISTERS;
 }
 
 export type FloatClass = "double" | "float";
@@ -163,6 +163,128 @@ export function floatLayout(metadata: Metadata): FloatLayout | null {
   return cls === null ? null : { cls, count };
 }
 
+export interface LoweredScalar {
+  offset: number;
+  size: number;
+  cls: "int" | FloatClass;
+}
+
+interface ScalarLeaf {
+  offset: number;
+  size: number;
+  cls: "bytes" | "i128" | FloatClass;
+}
+
+const CHUNK_SIZE = 8;
+const STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET = 0x18;
+
+const loweredScalarCache = new Map<string, LoweredScalar[]>();
+
+// swiftcc lowers a direct value to scalars the way clang's SwiftAggLowering does: every Float/Double
+// stays its own FP scalar, and the integer bytes between them merge within each 8-byte chunk into the
+// narrowest aligned power of two covering them. {Int8, Int} passes as (i8, i64), {Double, Bool, Bool}
+// as (double, i16), an Int? as (i64, i8). A padding word passes nothing; a Builtin.Int128 stays one i128.
+export function loweredScalars(metadata: Metadata): LoweredScalar[] {
+  const key = metadata.handle.toString();
+  let lowered = loweredScalarCache.get(key);
+  if (lowered === undefined) {
+    lowered = [];
+    let run: { begin: number; end: number } | null = null;
+    for (const leaf of scalarLeaves(metadata, 0)) {
+      if (leaf.cls === "bytes" && run !== null && chunkOf(run.end - 1) === chunkOf(leaf.offset)) {
+        run.end = leaf.offset + leaf.size;
+        continue;
+      }
+      if (run !== null) {
+        pushIntegerUnits(run.begin, run.end, lowered);
+        run = null;
+      }
+      if (leaf.cls === "bytes") {
+        run = { begin: leaf.offset, end: leaf.offset + leaf.size };
+      } else {
+        lowered.push({ offset: leaf.offset, size: leaf.size, cls: leaf.cls === "i128" ? "int" : leaf.cls });
+      }
+    }
+    if (run !== null) {
+      pushIntegerUnits(run.begin, run.end, lowered);
+    }
+    loweredScalarCache.set(key, lowered);
+  }
+  return lowered;
+}
+
+export function registerCount(scalars: LoweredScalar[]): number {
+  return scalars.reduce((n, s) => n + (s.cls === "int" ? Math.ceil(s.size / 8) : 1), 0);
+}
+
+function chunkOf(offset: number): number {
+  return Math.floor(offset / CHUNK_SIZE);
+}
+
+function pushIntegerUnits(begin: number, end: number, out: LoweredScalar[]): void {
+  while (begin < end) {
+    const localEnd = Math.min(end, (chunkOf(begin) + 1) * CHUNK_SIZE);
+    let size = 1;
+    while (Math.floor(begin / size) * size + size < localEnd) {
+      size *= 2;
+    }
+    out.push({ offset: Math.floor(begin / size) * size, size, cls: "int" });
+    begin = localEnd;
+  }
+}
+
+function* scalarLeaves(metadata: Metadata, offset: number): Generator<ScalarLeaf> {
+  const fp = floatClass(metadata);
+  if (fp !== null) {
+    yield { offset, size: metadata.valueWitnesses.size, cls: fp };
+    return;
+  }
+  const members = aggregateMembers(metadata);
+  if (members !== null) {
+    for (const m of members) {
+      yield* scalarLeaves(m.type, offset + m.offset);
+    }
+    return;
+  }
+  const size = metadata.valueWitnesses.size;
+  if (size > 0) {
+    yield { offset, size, cls: typeName(metadata) === "Builtin.Int128" ? "i128" : "bytes" };
+  }
+}
+
+interface AggregateMember {
+  type: Metadata;
+  offset: number;
+}
+
+function aggregateMembers(metadata: Metadata): AggregateMember[] | null {
+  let members: AggregateMember[] | null = null;
+  if (metadata.kind === MetadataKind.Struct) {
+    members = structMembers(metadata);
+  } else if (metadata.kind === MetadataKind.Tuple) {
+    members = [...enumerateTupleElements(metadata)];
+  }
+  return members !== null && members.length > 0 ? members : null;
+}
+
+function structMembers(metadata: Metadata): AggregateMember[] | null {
+  const descriptor = metadata.description;
+  const vectorOffset = descriptor.handle.add(STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET).readU32();
+  if (vectorOffset === 0) {
+    return null;
+  }
+  const offsets = metadata.handle.add(vectorOffset * Process.pointerSize);
+  const members: AggregateMember[] = [];
+  for (const field of enumerateFields(descriptor)) {
+    const type = fieldTypeIn(metadata, field);
+    if (type === null) {
+      return null;
+    }
+    members.push({ type, offset: offsets.add(members.length * 4).readU32() });
+  }
+  return members;
+}
+
 // A generic-typed value is always passed indirectly.
 export interface GenericRef {
   genericParam: number;
@@ -200,44 +322,42 @@ function isClosureRef(arg: SwiftArgType): arg is ClosureRef {
 }
 
 // One physical register's worth of a directly-passed value, read out of the value's bytes.
-type ArgPiece =
-  | { kind: "word"; off: number }
-  | { kind: "double"; off: number }
-  | { kind: "float"; off: number };
+type ArgPiece = LoweredScalar;
+
+const INTEGER_ARG_TYPES: { [size: number]: NativeFunctionArgumentType } = {
+  1: "uint8",
+  2: "uint16",
+  4: "uint32",
+  8: "uint64",
+};
 
 function fridaArgType(piece: ArgPiece): NativeFunctionArgumentType {
-  return piece.kind === "word" ? "uint64" : piece.kind;
+  return piece.cls === "int" ? INTEGER_ARG_TYPES[piece.size] : piece.cls;
 }
 
 function readArgPiece(piece: ArgPiece, base: NativePointer): NativeFunctionArgumentValue {
-  const at = base.add(piece.off);
-  switch (piece.kind) {
-    case "word":
+  const at = base.add(piece.offset);
+  if (piece.cls !== "int") {
+    return piece.cls === "double" ? at.readDouble() : at.readFloat();
+  }
+  switch (piece.size) {
+    case 1:
+      return at.readU8();
+    case 2:
+      return at.readU16();
+    case 4:
+      return at.readU32();
+    default:
       return at.readU64();
-    case "double":
-      return at.readDouble();
-    case "float":
-      return at.readFloat();
   }
 }
 
-// swiftcc spreads a homogeneous-float aggregate with each FP leaf in its own register (≤4), on
-// both arm64 (d/s) and x86-64 (xmm) — it is not packed by the SysV eightbyte rule.
-function floatPieces(fl: FloatLayout): ArgPiece[] {
-  const stride = fl.cls === "double" ? 8 : 4;
-  return Array.from({ length: fl.count }, (_, i) => ({ kind: fl.cls, off: i * stride } as ArgPiece));
-}
-
-function wordPieces(count: number): ArgPiece[] {
-  return Array.from({ length: count }, (_, i) => ({ kind: "word", off: i * 8 }));
+function wordPieces(count: number, base = 0): ArgPiece[] {
+  return Array.from({ length: count }, (_, i) => ({ offset: base + i * 8, size: 8, cls: "int" }));
 }
 
 function directArgPieces(metadata: Metadata): ArgPiece[] {
-  const fl = floatLayout(metadata);
-  if (fl !== null) {
-    return floatPieces(fl);
-  }
-  return wordPieces(Math.ceil(metadata.valueWitnesses.size / 8));
+  return loweredScalars(metadata).flatMap((s) => (s.size === 16 ? wordPieces(2, s.offset) : [s]));
 }
 
 interface LoweredArg {
@@ -259,19 +379,14 @@ function lowerArg(arg: SwiftArgType): LoweredArg {
   return { indirect: false, pieces: directArgPieces(arg) };
 }
 
-// Where each piece of a direct result lands, harvested back into the result buffer by the trampoline.
+// The trampoline stores the register holding each piece of a direct result into that piece's 8-byte
+// slot of a register image; the piece is then copied out at its own width and offset.
 type ResultPiece =
   | { reg: "gp"; off: number } // x0.. / rax,rdx,rcx,r8
   | { reg: "fp"; cls: FloatClass; off: number }; // arm64 d/s register, x86-64 xmm register
 
-function resultPieces(metadata: Metadata): ResultPiece[] {
-  const fl = floatLayout(metadata);
-  if (fl !== null) {
-    const stride = fl.cls === "double" ? 8 : 4;
-    return Array.from({ length: fl.count }, (_, i) => ({ reg: "fp", cls: fl.cls, off: i * stride }));
-  }
-  const words = Math.ceil(metadata.valueWitnesses.size / 8);
-  return Array.from({ length: words }, (_, i) => ({ reg: "gp", off: i * 8 }));
+function resultPieces(pieces: ArgPiece[]): ResultPiece[] {
+  return pieces.map((p, k) => (p.cls === "int" ? { reg: "gp", off: k * 8 } : { reg: "fp", cls: p.cls, off: k * 8 }));
 }
 
 export interface SwiftNativeFunctionOptions {
@@ -342,7 +457,7 @@ export function makeSwiftNativeFunction(
   }
 
   let indirectResult = false;
-  let directResult: ResultPiece[] = [];
+  let directPieces: ArgPiece[] = [];
   let resultSize = 0;
   let resultStride = 0;
   if (returnType !== null) {
@@ -362,7 +477,7 @@ export function makeSwiftNativeFunction(
       if (forcedIndirect || shouldPassIndirectly(returnMetadata)) {
         indirectResult = true;
       } else {
-        directResult = resultPieces(returnMetadata);
+        directPieces = directArgPieces(returnMetadata);
       }
     }
   }
@@ -373,7 +488,7 @@ export function makeSwiftNativeFunction(
   const savesContext = hasSelf || throws;
   const code = Memory.alloc(Process.pageSize);
   const save = Memory.alloc(Process.pointerSize * (savesContext ? 4 : 2));
-  const scratch = resultSize > 0 ? Memory.alloc(Math.max(resultStride, 8)) : ptr(0);
+  const scratch = resultSize > 0 ? Memory.alloc(Math.max(resultStride, directPieces.length * 8, 8)) : ptr(0);
   const selfBuffer = hasSelf ? Memory.alloc(Process.pointerSize) : null;
   const errorBuffer = throws ? Memory.alloc(Process.pointerSize) : null;
   writeTrampoline(code, {
@@ -382,8 +497,8 @@ export function makeSwiftNativeFunction(
     selfBuffer,
     errorBuffer,
     indirectResultBuffer: indirectResult ? scratch : null,
-    resultBuffer: directResult.length > 0 ? scratch : null,
-    resultPieces: directResult,
+    resultBuffer: directPieces.length > 0 ? scratch : null,
+    resultPieces: resultPieces(directPieces),
   });
   const resources = {
     code,
@@ -447,7 +562,11 @@ export function makeSwiftNativeFunction(
       return null;
     }
     const out = Memory.alloc(resultStride);
-    Memory.copy(out, resources.scratch, resultSize);
+    if (directPieces.length === 0) {
+      Memory.copy(out, resources.scratch, resultSize);
+    } else {
+      directPieces.forEach((p, k) => Memory.copy(out.add(p.offset), resources.scratch.add(k * 8), p.size));
+    }
     return out;
   };
 }

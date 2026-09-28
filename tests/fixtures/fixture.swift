@@ -586,6 +586,19 @@ public struct FloatPair { public var u: Float; public var v: Float }
 public func makeFloatPair() -> FloatPair { FloatPair(u: 1.25, v: 3.75) }
 public func sumFloatPair(_ p: FloatPair) -> Float { p.u + p.v }
 
+// Mixed integer/float structs lower per scalar: MixedPair to (double, i64), FloatQuadTagged to five
+// scalars, one past the four swiftcc passes directly.
+public struct MixedPair { public var d: Double; public var i: Int }
+public func scaleMixedPair(_ p: MixedPair, _ factor: Int) -> MixedPair {
+    MixedPair(d: p.d * Double(factor), i: p.i * factor)
+}
+public func driveScaleMixedPair() -> Int {
+    let r = scaleMixedPair(MixedPair(d: 1.5, i: 2), 3)
+    return Int(r.d * 10) + r.i
+}
+public struct FloatQuadTagged { public var a: Float; public var b: Float; public var c: Float; public var d: Float; public var tag: Int }
+public func sumFloatQuadTagged(_ q: FloatQuadTagged) -> Float { q.a + q.b + q.c + q.d + Float(q.tag) }
+
 // Enough arguments to overflow the argument registers onto the caller's stack. The narrow types
 // probe per-scalar slot sizes: TaggedInt lowers to (i8, i64, i1).
 public struct TaggedInt { public var tag: Int8; public var value: Int; public var flag: Bool }

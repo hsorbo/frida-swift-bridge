@@ -32,6 +32,11 @@ describe("shouldPassIndirectly", () => {
     expect(shouldPassIndirectly(metadataFor("fixture.LoadableStruct")!)).toBe(false);
     expect(shouldPassIndirectly(metadataFor("fixture.BigStruct")!)).toBe(true);
   });
+
+  test("more than four lowered scalars is indirect even within four words", () => {
+    expect(shouldPassIndirectly(metadataFor("fixture.MixedPair")!)).toBe(false);
+    expect(shouldPassIndirectly(metadataFor("fixture.FloatQuadTagged")!)).toBe(true);
+  });
 });
 
 describe("makeSwiftNativeFunction", () => {
@@ -169,6 +174,28 @@ describe("makeSwiftNativeFunction", () => {
     const d = Memory.alloc(8);
     d.writeDouble(40);
     expect(fn(intValue(2), d)!.readDouble()).toBe(42);
+  });
+
+  test("passes and returns a mixed Double/Int struct in FP and GP registers", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const MixedPair = metadataFor("fixture.MixedPair")!;
+    const fn = makeSwiftNativeFunction(fixtureExport("fixture.scaleMixedPair"), MixedPair, [MixedPair, Int]);
+    const pair = Memory.alloc(MixedPair.typeLayout.stride);
+    pair.writeDouble(1.5);
+    pair.add(8).writeU64(2);
+    const r = fn(pair, intValue(3))!;
+    expect(r.readDouble()).toBe(4.5);
+    expect(r.add(8).readU64().toNumber()).toBe(6);
+  });
+
+  test("passes a struct of more than four scalars indirectly", () => {
+    const Float_ = metadataFor("Swift.Float")!;
+    const Quad = metadataFor("fixture.FloatQuadTagged")!;
+    const fn = makeSwiftNativeFunction(fixtureExport("fixture.sumFloatQuadTagged"), Float_, [Quad]);
+    const quad = Memory.alloc(Quad.typeLayout.stride);
+    [1, 2, 3, 4].forEach((v, i) => quad.add(i * 4).writeFloat(v));
+    quad.add(16).writeU64(5);
+    expect(fn(quad)!.readFloat()).toBe(15);
   });
 
   test("drives a generic function directly with supplied type metadata", () => {

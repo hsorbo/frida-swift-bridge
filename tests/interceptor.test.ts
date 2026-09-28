@@ -315,6 +315,27 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toBe(42);
   });
 
+  test("decodes a mixed Double/Int struct from the FP and GP registers", (ctx) => {
+    requireFpRegisterHooks(ctx);
+    const Int = metadataFor("Swift.Int")!;
+    const addr = fixtureExport("fixture.scaleMixedPair");
+    let seenArgs: SwiftValue[] | null = null;
+    let seenRet: CallResult = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+      onLeave(ret) {
+        seenRet = ret;
+      },
+    });
+    const driven = makeSwiftNativeFunction(fixtureExport("fixture.driveScaleMixedPair"), Int, [])()!;
+    listener.detach();
+    expect(driven.readU64().toNumber()).toBe(51);
+    expect(seenArgs).toEqual([{ d: 1.5, i: int64(2) }, int64(3)]);
+    expect(seenRet).toEqual({ d: 4.5, i: int64(6) });
+  });
+
   test("reads GP arguments spilled past the registers from the caller's stack", () => {
     const Int = metadataFor("Swift.Int")!;
     const addr = fixtureExport("fixture.spillInts(");
