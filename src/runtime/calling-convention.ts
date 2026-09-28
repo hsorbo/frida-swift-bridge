@@ -8,6 +8,7 @@ import { ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { exportsByPrefix } from "./export-trie.js";
 import { demangle } from "./demangle.js";
 import { signCode } from "../basic/pac.js";
+import { probeValueConvention } from "./value-convention.js";
 
 const MAX_DIRECT_REGISTERS = 4;
 
@@ -75,7 +76,15 @@ function isResilientNominal(metadata: Metadata): boolean {
     return false;
   }
   const isPublic = image.findExportByName(`$s${token}Mn`) !== null;
-  return isPublic && (resilientModules.has(moduleName) || isLibraryEvolutionImage(image));
+  if (!isPublic) {
+    return false;
+  }
+  const inEvolutionModule = resilientModules.has(moduleName) || isLibraryEvolutionImage(image);
+  if (description.isGeneric || metadata.valueWitnesses.size === 0) {
+    return inEvolutionModule;
+  }
+  const convention = probeValueConvention(image, token);
+  return convention === null ? inEvolutionModule : convention === "indirect";
 }
 
 function exportsOwnEnumCase(image: Module, token: string, fullName: string): boolean {

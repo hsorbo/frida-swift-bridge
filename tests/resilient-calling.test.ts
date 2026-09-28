@@ -57,6 +57,11 @@ describe("resilient calling convention (local library-evolution fixture)", () =>
     expect(xy(fn(point(1, 2), int(10), int(20))!)).toEqual([11, 22]);
   });
 
+  test("a @frozen struct is recognized from its getters' self convention", () => {
+    loadResilient();
+    expect(isResilientValueType(metadataFor("resilient.FrozenPoint")!)).toBe(false);
+  });
+
   test("a @frozen struct marked frozen keeps the direct ABI", () => {
     const mod = loadResilient();
     Swift.markFrozen("resilient.FrozenPoint");

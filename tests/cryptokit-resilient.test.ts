@@ -36,6 +36,14 @@ describe("resilience in Apple frameworks", () => {
     expect(key.bitCount).toEqual(int64(256));
   });
 
+  test("a @frozen SDK struct keeps the direct ABI without being marked frozen", (ctx) => {
+    requireDarwin(ctx);
+
+    expect(isResilientValueType(metadataFor("Foundation.Data")!)).toBe(false);
+    const data = Swift.struct("Foundation.Data")!.init({ count: 4 })!;
+    expect(data.count).toEqual(int64(4));
+  });
+
   test("a @frozen struct marked frozen keeps the direct ABI", (ctx) => {
     requireDarwin(ctx);
     for (const name of ["Foundation.Data", "Foundation.Data.InlineData", "Foundation.Data.InlineSlice", "Foundation.Data.LargeSlice"]) {
