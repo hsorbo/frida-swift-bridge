@@ -121,9 +121,8 @@ describe("closure capture layout (synthetic)", () => {
     requireSwift();
     loadFixture();
     const classMetadata = metadataFor("fixture.Base")!.handle;
-    const instance = Memory.alloc(Process.pointerSize);
-    instance.writePointer(classMetadata);
-    pinned.push(instance);
+    // arm64e authenticates the isa, so let the runtime sign it.
+    const instance = Swift.api.swift_allocObject(classMetadata, 2 * Process.pointerSize, Process.pointerSize - 1) as NativePointer;
 
     const context = makeHeapContext(makeCaptureDescriptor(["garbage"]), 0x10);
     context.add(0x10).add(Process.pointerSize).writePointer(instance);
