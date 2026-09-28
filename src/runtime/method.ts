@@ -1215,11 +1215,20 @@ function toReceiverPointer(receiver: AsyncReceiver): NativePointer {
 
 const MODULE_CONTEXT = /^[^.\s]+$/;
 
-// A static method's thin-metatype self is erased (null).
-function resolveReceiverType(signature: SwiftFunctionSignature): Metadata | null {
+interface FunctionReceiver {
+  instanceType: Metadata | null;
+  metatypeSelf: NativePointer | null;
+}
+
+function isClassType(type: Metadata): boolean {
+  return type.kind === MetadataKind.Class || type.kind === MetadataKind.ObjCClassWrapper;
+}
+
+// A static method's self is its metatype: thick (the metadata) for a class, thin (erased) otherwise.
+function resolveReceiver(signature: SwiftFunctionSignature): FunctionReceiver {
   const { context, isStatic } = stripReceiverKeyword(signature.context);
   if (MODULE_CONTEXT.test(context)) {
-    return null;
+    return { instanceType: null, metatypeSelf: null };
   }
   const type = resolveType(context);
   if (type === null) {
@@ -1230,7 +1239,10 @@ function resolveReceiverType(signature: SwiftFunctionSignature): Metadata | null
     }
     throw new Error(`${signature.selector}: cannot resolve receiver type ${context}`);
   }
-  return isStatic ? null : type;
+  if (!isStatic) {
+    return { instanceType: type, metatypeSelf: null };
+  }
+  return { instanceType: null, metatypeSelf: isClassType(type) ? type.handle : null };
 }
 
 // Swift.NativeFunction resolved from a symbol: call() for a free function, bind(self) for a method.
@@ -1240,7 +1252,7 @@ function resolveReceiverType(signature: SwiftFunctionSignature): Metadata | null
 export class SwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]> {
   constructor(
     private readonly resolved: ResolvedMethod,
-    private readonly receiverType: Metadata | null
+    private readonly receiver: FunctionReceiver
   ) {}
 
   get address(): NativePointer {
@@ -1248,18 +1260,19 @@ export class SwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends 
   }
 
   call(...args: Args): Ret {
-    if (this.receiverType !== null) {
+    if (this.receiver.instanceType !== null) {
       throw new Error(`${this.resolved.selector} is an instance method; bind a receiver with .bind(self)`);
     }
-    return this.boundTo(null).call(...args) as Ret;
+    return this.boundTo(this.receiver.metatypeSelf).call(...args) as Ret;
   }
 
   bind(receiver: AsyncReceiver): (...args: Args) => Ret {
-    if (this.receiverType === null) {
+    const { instanceType } = this.receiver;
+    if (instanceType === null) {
       throw new Error(`${this.resolved.selector} takes no receiver`);
     }
-    if (this.receiverType.kind !== MetadataKind.Class && this.receiverType.kind !== MetadataKind.ObjCClassWrapper) {
-      throw new Error(`receiver binding is only supported for class receivers, not ${typeName(this.receiverType)}`);
+    if (!isClassType(instanceType)) {
+      throw new Error(`receiver binding is only supported for class receivers, not ${typeName(instanceType)}`);
     }
     const self = toReceiverPointer(receiver);
     return (...args: Args) => rootAsyncReceiver(this.boundTo(self), receiver).call(...args) as Ret;
@@ -1301,7 +1314,7 @@ export function resolveFunction<Ret = CallResult | Promise<CallResult>, Args ext
   const resolved = signature.async
     ? resolveAsyncSymbol(module, mangled, signature)
     : resolveSyncSymbol(module, mangled, signature);
-  return new SwiftFunction<Ret, Args>(resolved, resolveReceiverType(signature));
+  return new SwiftFunction<Ret, Args>(resolved, resolveReceiver(signature));
 }
 
 export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
@@ -1317,7 +1330,7 @@ export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = 
   }
   return new SwiftAsyncFunction<Ret, Args>(
     resolveAsyncSymbol(module, mangled, signature),
-    resolveReceiverType(signature)
+    resolveReceiver(signature)
   );
 }
 

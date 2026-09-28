@@ -262,4 +262,8 @@ describe("ClassType static invocation", () => {
     expect(made.$owned).toBe(true);
     expect(made.$field("name").read()).toBe("Forged");
   });
+
+  test("an inherited class func sees the subclass as its dynamic Self", () => {
+    expect((typeOf(metadataFor("fixture.RabbitBurrow")!) as ClassType).call("occupant")).toBe("RabbitBurrow");
+  });
 });

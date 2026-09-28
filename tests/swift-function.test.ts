@@ -16,6 +16,7 @@ const ROBOT_METADATA_ACCESSOR = "$s7fixture5RobotCMa";
 const ROBOT_GREET = "$s7fixture5RobotC5greetyS2SF";
 const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
 const ROBOT_ALLOCATING_INIT = "$s7fixture5RobotC4nameACSS_tcfC";
+const BURROW_OCCUPANT = "$s7fixture6BurrowC8occupantSSyFZ";
 const GENERIC_HOLDER_SCALED_STORED = "$s7fixture13GenericHolderC12scaledStored2byS2i_tF";
 const CONSTRAINED_BOX_SCALED_STORED = "$s7fixture14ConstrainedBoxV12scaledStored2byS2i_tF";
 const RESILIENT_BASE_GREETING_DISPATCH_THUNK = "$s9resilient13ResilientBaseC8greetingSSyFTj";
@@ -61,6 +62,10 @@ describe("Swift.function", () => {
     const robot = (typeOf(metadataFor("fixture.Robot")!) as ClassType).init("R2");
     const greet = Swift.function(module, ROBOT_GREET).bind(robot);
     expect(greet("X")).toBe("Hello X, I am R2");
+  });
+
+  test("passes the class metadata as self to a class func: Burrow.occupant() reads Self", () => {
+    expect(Swift.function(module, BURROW_OCCUPANT).call()).toBe("Burrow");
   });
 
   test("calling an instance method without binding a receiver throws", () => {

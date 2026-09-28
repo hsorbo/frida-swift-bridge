@@ -990,6 +990,11 @@ public final class Cat: Animal {
 
 public func describeAnimal(_ a: Animal) -> Int { a.legs() }
 
+public class Burrow {
+    public class func occupant() -> String { "\(self)" }
+}
+public final class RabbitBurrow: Burrow {}
+
 // Subclassing ResilientBase cross-module sets hasResilientSuperclass on ConcreteSub itself.
 public final class ConcreteSub: ResilientBase {
     public var extra: Int
