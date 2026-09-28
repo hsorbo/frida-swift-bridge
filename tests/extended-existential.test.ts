@@ -103,7 +103,7 @@ describe("extended existential shape", () => {
   test("names Self's protocol when there is no generalization signature (any Consumable & ~Copyable)", (ctx) => {
     requireSwift();
     if (loadFixture().findExportByName("$s7fixture25noncopyableConsumableTypeSVyF") === null) {
-      ctx.skip("fixture compiled without ~Copyable compositions (Swift < 6.0)");
+      ctx.skip("fixture compiled without a ~Copyable composition's metadata (Swift < 6.2)");
     }
     const M = existentialMetadata("fixture.noncopyableConsumableType");
     expect(M.kind).toBe(MetadataKind.ExtendedExistential);

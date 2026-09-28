@@ -1070,7 +1070,7 @@ public func hashedBoxHolderType() -> UnsafeRawPointer {
 }
 #endif
 
-#if compiler(>=6.0)
+#if compiler(>=6.2)
 public protocol Consumable: ~Copyable {}
 public func noncopyableConsumableType() -> UnsafeRawPointer {
     unsafeBitCast((any Consumable & ~Copyable).self, to: UnsafeRawPointer.self)
