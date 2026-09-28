@@ -10,7 +10,6 @@ import { AsyncContext } from "../abi/async-context.js";
 import {
   symbolicate,
   parseSwiftSignature,
-  resolveType,
   resolveTypeExpr,
   hasOpaqueLayout,
   parseFunctionTypeSpelling,
@@ -133,7 +132,7 @@ function callShape(target: NativePointer): CallShape {
     };
   }
 
-  const memberType = resolveType(parsed.typeName);
+  const memberType = resolveTypeExpr(parsed.typeName, () => null);
   if (memberType === null) {
     throw new Error(`could not resolve accessor type: ${symbol.demangled}`);
   }

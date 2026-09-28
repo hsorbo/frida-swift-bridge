@@ -135,6 +135,27 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toEqual([int64(6)]);
   });
 
+  test("decodes the Optional value of a hooked property getter and setter", () => {
+    const Int = metadataFor("Swift.Int")!;
+    let setterArgs: SwiftValue[] | null = null;
+    let getterRet: CallResult = null;
+    const setter = SwiftInterceptor.attach(fixtureExport("fixture.IntSource.maybe.setter"), {
+      onEnter(args) {
+        setterArgs = args;
+      },
+    });
+    const getter = SwiftInterceptor.attach(fixtureExport("fixture.IntSource.maybe.getter"), {
+      onLeave(ret) {
+        getterRet = ret;
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.roundTripIntSourceMaybe"), Int, [])();
+    setter.detach();
+    getter.detach();
+    expect(setterArgs).toEqual([{ some: int64(7) }]);
+    expect(getterRet).toEqual({ some: int64(7) });
+  });
+
   test("recovers a generic scalar argument and return from the implicit metadata", () => {
     const Int = metadataFor("Swift.Int")!;
     const identity = fixtureExport("fixture.genericIdentity");

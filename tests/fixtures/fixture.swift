@@ -910,6 +910,11 @@ public struct IntSource: ItemSource {
     }
     public var items: [Int] { [value, value] }
 }
+public func roundTripIntSourceMaybe() -> Int {
+    var source = IntSource(value: 4)
+    source.maybe = 7
+    return source.maybe!
+}
 
 public protocol Pack: AnyObject {
     associatedtype Pet: AnyObject
