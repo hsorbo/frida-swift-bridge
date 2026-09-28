@@ -3,7 +3,8 @@ import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
 import { Protocol, ProtocolConformance, ProtocolRequirementKind, readProtocolRequirements, readAssociatedTypeNames, ValueInstance, metadataFor, typeName } from "../src/abi.js";
 
-import { Swift } from "../src/index.js";
+import { Swift, ClassType, SwiftObject } from "../src/index.js";
+import { typeOf } from "../src/abi.js";
 describe("associated type / associated conformance resolution", () => {
   beforeEach(() => { loadFixture(); });
 
@@ -67,5 +68,40 @@ describe("associated type / associated conformance resolution", () => {
     const item = ValueInstance.fromJS(itemType, { a: 2, b: 3, c: 5, d: 7, e: 11 });
     // (2+3+5+7+11) * 3 = 84
     expect(nested.method(item.handle, "scaled").call(3)).toEqual(int64(84));
+  });
+
+  test("a setter of a generic struct over Item takes it indirectly even when the instantiation is loadable", () => {
+    loadFixtureSyms();
+    const source = metadataFor("fixturesyms.IntSource")!;
+    const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
+    const value = ValueInstance.fromJS(source, { value: 5 });
+    table.set(value.handle, "tagged", { inner: 4, tag: 3 });
+    expect((value.read() as { value: number }).value).toEqual(int64(12));
+  });
+
+  test("an Item? setter takes it indirectly", () => {
+    loadFixtureSyms();
+    const source = metadataFor("fixturesyms.IntSource")!;
+    const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
+    const value = ValueInstance.fromJS(source, { value: 5 });
+    table.set(value.handle, "maybe", { some: 9 });
+    expect((value.read() as { value: number }).value).toEqual(int64(9));
+  });
+
+  test("an [Item] getter returns directly", () => {
+    loadFixtureSyms();
+    const source = metadataFor("fixturesyms.IntSource")!;
+    const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
+    const value = ValueInstance.fromJS(source, { value: 5 });
+    expect((table.get(value.handle, "items") as SwiftObject).$container!()).toEqual([int64(5), int64(5)]);
+  });
+
+  test("Self and a class-constrained associated type return directly in a class-constrained protocol", () => {
+    loadFixtureSyms();
+    const token = (typeOf(metadataFor("fixturesyms.Token")!) as ClassType).init(3) as SwiftObject;
+    const pack = (typeOf(metadataFor("fixturesyms.TokenPack")!) as ClassType).init(token) as SwiftObject;
+    const table = Protocol.find("fixturesyms.Pack")!.conformanceFor(metadataFor("fixturesyms.TokenPack")!)!;
+    expect((table.get(pack.$handle, "leader") as SwiftObject).$handle.equals(pack.$handle)).toBe(true);
+    expect((table.get(pack.$handle, "pet") as SwiftObject).$handle.equals(token.$handle)).toBe(true);
   });
 });

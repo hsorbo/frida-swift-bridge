@@ -17,6 +17,8 @@ import {
   voidMetadata,
   resolveType,
   resolveTypeExpr,
+  hasOpaqueLayout,
+  ParamLayout,
   splitBoundTypeName,
   SwiftFunctionSignature,
   SwiftAccessorSignature,
@@ -51,7 +53,17 @@ import {
   conformingTypes,
   ProtocolConformance,
 } from "../abi/protocol-conformance.js";
-import { ProtocolRequirement, ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
+import {
+  ProtocolRequirement,
+  ProtocolRequirementKind,
+  readProtocolRequirements,
+  readRequirementSignature,
+} from "../abi/protocol-descriptor.js";
+import {
+  GenericRequirementDescriptor,
+  GenericRequirementKind,
+  GenericRequirementLayoutKind,
+} from "../abi/generic-requirement-descriptor.js";
 import { WitnessTable } from "../abi/witness-table.js";
 import type { SwiftType } from "./swift-type.js";
 import { metadataOf } from "./swift-type.js";
@@ -2557,7 +2569,7 @@ interface ResolvedWitnessAccessor {
   type: Metadata;
   kind: AccessorKind;
   // Self ("A") and associated types ("A.<name>") are opaque at the protocol level, so the witness
-  // thunk passes/returns them indirectly even when the concrete type is loadable.
+  // thunk passes/returns any type storing one inline indirectly, even when the concrete type is loadable.
   abstract: boolean;
   table: WitnessTable;
 }
@@ -2607,8 +2619,52 @@ function witnessAccessor(
   if (type === null) {
     throw new Error(`cannot resolve ${kind} type ${typeName} of ${member}`);
   }
-  const abstract = typeName === "A" || typeName.startsWith("A.");
+  const classBound = classBoundSubjects(protocolOf(table));
+  const abstract = hasOpaqueLayout(typeName, (name): ParamLayout | null => {
+    if (name !== "A" && !name.startsWith("A.")) {
+      return null;
+    }
+    return classBound.has(name) ? "reference" : "opaque";
+  });
   return { address, type, kind, abstract, table };
+}
+
+function classBoundSubjects(protocol: ContextDescriptor): Set<string> {
+  const subjects = new Set<string>();
+  for (const requirement of readRequirementSignature(protocol)) {
+    const subject = requirementSubject(requirement);
+    if (subject !== null && isClassBound(requirement)) {
+      subjects.add(subject);
+    }
+  }
+  return subjects;
+}
+
+// "x" is Self; "<len><name><protocol ref>Qz" is Self.<name>.
+function requirementSubject(requirement: GenericRequirementDescriptor): string | null {
+  const { address, length } = requirement.param;
+  const mangled = String.fromCharCode(...new Uint8Array(address.readByteArray(length)!));
+  if (mangled === "x") {
+    return "A";
+  }
+  const match = /^(\d+)/.exec(mangled);
+  if (match === null || !mangled.endsWith("Qz")) {
+    return null;
+  }
+  return "A." + mangled.substr(match[1].length, parseInt(match[1], 10));
+}
+
+function isClassBound(requirement: GenericRequirementDescriptor): boolean {
+  switch (requirement.kind) {
+    case GenericRequirementKind.Layout:
+      return requirement.layoutKind === GenericRequirementLayoutKind.Class;
+    case GenericRequirementKind.BaseClass:
+      return true;
+    case GenericRequirementKind.Protocol:
+      return requirement.isObjCProtocol || (requirement.protocol !== null && protocolClassConstraint(requirement.protocol) === 0);
+    default:
+      return false;
+  }
 }
 
 function invokerForWitnessAccessor(accessor: ResolvedWitnessAccessor): SwiftNativeFunction {

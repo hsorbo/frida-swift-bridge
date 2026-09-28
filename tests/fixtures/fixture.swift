@@ -281,6 +281,29 @@ public func makeGenericPair() -> Int {
     return genericFirst(11, "ignored")
 }
 
+@inline(never)
+public func genericDoubled<T>(_ xs: [T]) -> [T] {
+    return xs + xs
+}
+
+public func makeGenericDoubled() -> Int {
+    return genericDoubled([3, 4]).count
+}
+
+public final class Cell<T> {
+    public let value: T
+    public init(_ value: T) { self.value = value }
+}
+
+@inline(never)
+public func genericCellIdentity<T>(_ cell: Cell<T>) -> Cell<T> {
+    return cell
+}
+
+public func makeGenericCell() -> Int {
+    return genericCellIdentity(Cell(5)).value
+}
+
 // Constrained generic: the requirement dispatches through the appended witness table.
 public protocol Scalable {
     func scaled(by factor: Int) -> Int
@@ -630,6 +653,43 @@ public protocol ConstrainedContainer {
 public struct ScalableBox: ConstrainedContainer {
     public let item: WideScalar
     public init(item: WideScalar) { self.item = item }
+}
+
+// Witness getters whose types depend on Item: address-only at protocol level unless the
+// wrapper stays loadable for any element (Array) or the leaf is class-constrained.
+public struct Tagged<T> {
+    public var inner: T
+    public var tag: Int
+}
+public protocol ItemSource {
+    associatedtype Item
+    var tagged: Tagged<Item> { get set }
+    var maybe: Item? { get set }
+    var items: [Item] { get }
+}
+public struct IntSource: ItemSource {
+    public var value: Int
+    public init(value: Int) { self.value = value }
+    public var tagged: Tagged<Int> {
+        get { Tagged(inner: value, tag: 2) }
+        set { value = newValue.inner * newValue.tag }
+    }
+    public var maybe: Int? {
+        get { value }
+        set { value = newValue ?? -1 }
+    }
+    public var items: [Int] { [value, value] }
+}
+
+public protocol Pack: AnyObject {
+    associatedtype Pet: AnyObject
+    var leader: Self { get }
+    var pet: Pet { get }
+}
+public final class TokenPack: Pack {
+    public let pet: Token
+    public init(pet: Token) { self.pet = pet }
+    public var leader: TokenPack { self }
 }
 
 // Method invocation: String/labelled/void/static methods, a class arg, an arity overload, a computed property.

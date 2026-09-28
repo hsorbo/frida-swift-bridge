@@ -157,6 +157,44 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toEqual(int64(11));
   });
 
+  test("decodes an array over a generic param returned in a register, not through x8", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const doubled = fixtureExport("fixture.genericDoubled");
+    const driver = fixtureExport("fixture.makeGenericDoubled");
+    let seen: SwiftValue[] | null = null;
+    const listener = SwiftInterceptor.attach(doubled, {
+      onLeave(ret) {
+        seen = (ret as SwiftObject).$container!() as SwiftValue[];
+      },
+    });
+    makeSwiftNativeFunction(driver, Int, [])();
+    listener.detach();
+    expect(seen).toEqual([int64(3), int64(4), int64(3), int64(4)]);
+  });
+
+  test("decodes a generic class argument and return from their registers", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const identity = fixtureExport("fixture.genericCellIdentity");
+    const driver = fixtureExport("fixture.makeGenericCell");
+    const heapObjectHeaderSize = 2 * Process.pointerSize;
+    let seenValue: number | null = null;
+    let cell: NativePointer | null = null;
+    let returned: NativePointer | null = null;
+    const listener = SwiftInterceptor.attach(identity, {
+      onEnter(args) {
+        cell = args[0] as NativePointer;
+        seenValue = cell.add(heapObjectHeaderSize).readS64().toNumber();
+      },
+      onLeave(ret) {
+        returned = (ret as SwiftObject).$handle;
+      },
+    });
+    makeSwiftNativeFunction(driver, Int, [])();
+    listener.detach();
+    expect(seenValue).toBe(5);
+    expect(String(returned)).toBe(String(cell));
+  });
+
   test("decodes a generic function taking a metatype argument", () => {
     const Int = metadataFor("Swift.Int")!;
     const identity = fixtureExport("fixture.metatypeIdentity");

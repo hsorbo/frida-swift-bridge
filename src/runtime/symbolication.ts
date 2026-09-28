@@ -1,7 +1,7 @@
 import { demangle } from "./demangle.js";
 import { findType } from "../reflection/registry.js";
 import { findProtocol } from "../abi/protocol-conformance.js";
-import { ContextDescriptor } from "../abi/context-descriptor.js";
+import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { getMetadata, Metadata } from "../abi/metadata.js";
 import { buildGenericMetadata } from "../abi/generic-instantiation.js";
 import { getExistentialTypeMetadata } from "../abi/existential.js";
@@ -422,6 +422,62 @@ function resolveTupleExpr(
     return elements[0];
   }
   return getUnlabelledTupleTypeMetadata(elements);
+}
+
+export type ParamLayout = "opaque" | "reference";
+
+export const REFERENCE_CONTAINERS = new Set(["Swift.Array", "Swift.Dictionary", "Swift.Set"]);
+
+// Whether a type is address-only where its params are opaque, as in a protocol witness thunk or an
+// unspecialized generic: an opaque param is, and so is a value type storing one inline. A tuple
+// mentioning one is lowered per element, which a single verdict can't express.
+export function hasOpaqueLayout(expr: string, paramLayout: (name: string) => ParamLayout | null): boolean {
+  expr = expr.trim().replace(/^(?:__shared|borrowing)\s+/, "");
+  if (!isTupleExpr(expr)) {
+    return embedsOpaqueParam(expr, paramLayout);
+  }
+  const elements = tupleElementTypes(expr);
+  if (elements.length === 1) {
+    return hasOpaqueLayout(elements[0], paramLayout);
+  }
+  if (elements.some((e) => embedsOpaqueParam(e, paramLayout))) {
+    throw new Error(`unsupported tuple with an opaque element: ${expr}`);
+  }
+  return false;
+}
+
+function embedsOpaqueParam(expr: string, paramLayout: (name: string) => ParamLayout | null): boolean {
+  if (expr.endsWith("?") || expr.endsWith("!")) {
+    return embedsOpaqueParam(expr.slice(0, -1), paramLayout);
+  }
+  if (expr.startsWith("[") || expr.endsWith(".Type") || parseFunctionTypeSpelling(expr) !== null) {
+    return false;
+  }
+  if (isTupleExpr(expr)) {
+    return tupleElementTypes(expr).some((e) => embedsOpaqueParam(e, paramLayout));
+  }
+  const { base, arguments: args } = splitBoundTypeName(expr);
+  if (args.length === 0) {
+    return paramLayout(expr) === "opaque";
+  }
+  if (base === "Swift.Optional") {
+    return embedsOpaqueParam(args[0], paramLayout);
+  }
+  if (REFERENCE_CONTAINERS.has(base) || findType(base)?.kind === ContextDescriptorKind.Class) {
+    return false;
+  }
+  return args.some((a) => embedsOpaqueParam(a, paramLayout));
+}
+
+function isTupleExpr(expr: string): boolean {
+  return expr.startsWith("(") && matchingBracket(expr, 0) === expr.length - 1;
+}
+
+function tupleElementTypes(expr: string): string[] {
+  return splitTopLevel(expr.slice(1, -1), ",").map((part) => {
+    const colon = topLevelIndexOf(part, ": ");
+    return colon === -1 ? part : part.slice(colon + 2).trim();
+  });
 }
 
 const OPEN: Record<string, string> = { "(": ")", "<": ">", "[": "]" };

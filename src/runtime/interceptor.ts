@@ -6,7 +6,18 @@ import { decodeThrownError } from "./thrown-error.js";
 import { shouldPassIndirectly, floatLayout } from "./calling-convention.js";
 import { AsyncFunctionPointer, isAsyncFunctionPointerSymbol } from "../abi/async-function-pointer.js";
 import { AsyncContext } from "../abi/async-context.js";
-import { symbolicate, parseSwiftSignature, resolveType, resolveTypeExpr } from "./symbolication.js";
+import {
+  symbolicate,
+  parseSwiftSignature,
+  resolveType,
+  resolveTypeExpr,
+  hasOpaqueLayout,
+  parseFunctionTypeSpelling,
+  splitBoundTypeName,
+  REFERENCE_CONTAINERS,
+} from "./symbolication.js";
+import { findType } from "../reflection/registry.js";
+import { ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject } from "./object-facade.js";
 import { CallResult } from "./method.js";
@@ -19,7 +30,7 @@ export interface SwiftInvocationCallbacks {
 type TypePlan =
   | { kind: "concrete"; metadata: Metadata }
   | { kind: "param"; paramIndex: number }
-  | { kind: "use"; expr: string } // param-referencing expression: A?, [A], Array<A>
+  | { kind: "use"; expr: string; indirect: boolean } // param-referencing expression: A?, [A], Array<A>
   | { kind: "metatype" }; // T.Type: one GP holding the metadata pointer directly (loadable POD)
 
 interface CallShape {
@@ -42,9 +53,31 @@ function planType(name: string, genericParams: string[]): TypePlan {
     return { kind: "metatype" };
   }
   if (genericParams.some((p) => new RegExp(`\\b${p}\\b`).test(name))) {
-    return { kind: "use", expr: name };
+    const indirect = hasOpaqueLayout(name, (n) => (genericParams.includes(n) ? "opaque" : null));
+    if (!indirect && !isSingleReference(name)) {
+      throw new Error(`unsupported direct generic use: ${name}`);
+    }
+    return { kind: "use", expr: name, indirect };
   }
   throw new Error(`could not resolve type: ${name}`);
+}
+
+// Array/Dictionary/Set, a class, or an Optional of one: one register whatever the generic arguments.
+function isSingleReference(expr: string): boolean {
+  if (expr.endsWith("?")) {
+    return isSingleReference(expr.slice(0, -1));
+  }
+  if (expr.startsWith("[")) {
+    return true;
+  }
+  if (parseFunctionTypeSpelling(expr) !== null) {
+    return false;
+  }
+  const { base, arguments: args } = splitBoundTypeName(expr);
+  if (base === "Swift.Optional") {
+    return isSingleReference(args[0]);
+  }
+  return REFERENCE_CONTAINERS.has(base) || findType(base)?.kind === ContextDescriptorKind.Class;
 }
 
 function planMetadata(
@@ -70,11 +103,10 @@ function planMetadata(
   }
 }
 
-// param/use values are address-only → passed indirectly (one GP pointer, or x8 for a return).
-function isIndirectPlan(
-  plan: TypePlan
-): plan is { kind: "param"; paramIndex: number } | { kind: "use"; expr: string } {
-  return plan.kind === "param" || plan.kind === "use";
+// param values and uses storing one inline are address-only → passed indirectly (one GP pointer, or
+// x8 for a return); other uses are a single reference.
+function isIndirectPlan(plan: TypePlan): boolean {
+  return plan.kind === "param" || (plan.kind === "use" && plan.indirect);
 }
 
 function callShape(target: NativePointer): CallShape {
@@ -127,8 +159,8 @@ function returnIsIndirect(ret: TypePlan | null): boolean {
   if (ret.kind === "metatype") {
     return false;
   }
-  if (isIndirectPlan(ret)) {
-    return true;
+  if (ret.kind !== "concrete") {
+    return isIndirectPlan(ret);
   }
   const md = ret.metadata;
   return (
@@ -235,6 +267,10 @@ function materializeArgs(
       slots.push({ plan, address: gpArg(context, ngrn++) });
       continue;
     }
+    if (plan.kind !== "concrete") {
+      slots.push({ plan, address: Memory.alloc(8).writePointer(gpArg(context, ngrn++)) });
+      continue;
+    }
     const metadata = plan.metadata;
     const fl = floatLayout(metadata);
     if (fl !== null) {
@@ -304,6 +340,13 @@ function materializeReturn(
     }
     return decodeReturnValue(planMetadata(ret, generics, genericParams), indirectReturn);
   }
+  if (ret.kind !== "concrete") {
+    const metadata = planMetadata(ret, generics, genericParams);
+    if (metadata.kind === MetadataKind.Class) {
+      return asSwiftObject(new ClassInstance(gpResult(context, 0)));
+    }
+    return decodeReturnValue(metadata, Memory.alloc(8).writePointer(gpResult(context, 0)));
+  }
 
   const returnType = ret.metadata;
   if (returnType.valueWitnesses.size === 0) {
@@ -348,7 +391,7 @@ interface SwiftInvocationState {
 function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks): InvocationListener {
   const { args, ret, genericParams, throws } = callShape(target);
   const captureIndirect = returnIsIndirect(ret);
-  const returnNeedsGenerics = ret !== null && isIndirectPlan(ret) && genericParams.length > 0;
+  const returnNeedsGenerics = ret !== null && (ret.kind === "param" || ret.kind === "use") && genericParams.length > 0;
   const wantsArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
 
   const onEnter =
@@ -593,7 +636,7 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks): Inv
   const wantsCompletion = callbacks.onComplete !== undefined;
   const indirectReturn = returnIsIndirect(ret);
   const argRegBase = indirectReturn ? 1 : 0; // an @out result takes x0
-  const returnNeedsGenerics = wantsCompletion && ret !== null && isIndirectPlan(ret) && genericParams.length > 0;
+  const returnNeedsGenerics = wantsCompletion && ret !== null && (ret.kind === "param" || ret.kind === "use") && genericParams.length > 0;
   const wantsArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
   const liveEntries = new Set<CompletionEntry>();
 
