@@ -267,3 +267,22 @@ describe("ClassType static invocation", () => {
     expect((typeOf(metadataFor("fixture.RabbitBurrow")!) as ClassType).call("occupant")).toBe("RabbitBurrow");
   });
 });
+
+describe("static properties", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("a value type reads its computed, stored and let static properties", () => {
+    const duckling = Swift.type("fixture.Duckling") as StructType;
+    expect(duckling.get("species")).toBe("duck");
+    expect(duckling.get("flockSize")).toEqual(int64(12));
+    expect(duckling.get("motto")).toBe("quack");
+  });
+
+  test("a class reads its static property with the metatype as self", () => {
+    expect((Swift.type("fixture.Owlet") as ClassType).get("species")).toBe("owl");
+  });
+
+  test("an instance property is not a static one", () => {
+    expect(() => (Swift.type("fixture.Duckling") as StructType).get("weight")).toThrow(/no static getter for weight/);
+  });
+});

@@ -2296,11 +2296,11 @@ function resolveAccessor(typeName: string, member: string, kind: AccessorKind): 
   return resolved;
 }
 
-function findAccessor(typeName: string, member: string, kind: AccessorKind): ResolvedAccessor | null {
+function findAccessor(typeName: string, member: string, kind: AccessorKind, isStatic = false): ResolvedAccessor | null {
   const fullName = canonicalTypeName(typeName);
   return (
-    resolveAccessorIn(fullName, member, kind, definingModuleMembers) ??
-    resolveAccessorIn(fullName, member, kind, allLoadedModuleMembers)
+    resolveAccessorIn(fullName, member, kind, isStatic, definingModuleMembers) ??
+    resolveAccessorIn(fullName, member, kind, isStatic, allLoadedModuleMembers)
   );
 }
 
@@ -2308,11 +2308,12 @@ function resolveAccessorIn(
   fullName: string,
   member: string,
   kind: AccessorKind,
+  isStatic: boolean,
   members: MemberSource
 ): ResolvedAccessor | null {
   for (const className of classChainNames(fullName)) {
     const candidate = members(className).accessors.find(
-      (a) => a.member === member && a.kind === kind && !a.isStatic
+      (a) => a.member === member && a.kind === kind && a.isStatic === isStatic
     );
     if (candidate === undefined) {
       continue;
@@ -2359,6 +2360,16 @@ export function getProperty(self: NativePointer, typeName: string, member: strin
     return conformanceGetProperty(canonicalTypeName(typeName), self, member);
   }
   return decodeReturn(accessor.type, invokerForAccessor(accessor, getterSelfByValue(typeName))(self));
+}
+
+// Self is the metatype: thick (the metadata) for a class or a protocol extension, erased for a value type.
+export function getStaticProperty(receiver: Metadata, member: string): CallResult {
+  const name = typeName(receiver);
+  const accessor = findAccessor(name, member, "getter", true);
+  if (accessor === null) {
+    return conformanceGetProperty(canonicalTypeName(name), receiver.handle, member, true);
+  }
+  return decodeReturn(accessor.type, invokerForAccessor(accessor, null)(receiver.handle));
 }
 
 // Setter self is inout (mutating), so it stays indirect; newValue is +1/owned and the callee consumes
@@ -2575,15 +2586,15 @@ export function bindConformanceMethod(
   return resolved.async === true ? new BoundAsyncMethod(resolved, receiver) : new BoundMethod(resolved, receiver);
 }
 
-function conformanceGetProperty(fullName: string, self: NativePointer, member: string): CallResult {
+function conformanceGetProperty(fullName: string, self: NativePointer, member: string, isStatic = false): CallResult {
   const conformance = conformanceDeclaring(fullName, member, (m) =>
-    m.accessors.some((a) => a.member === member && a.kind === "getter" && !a.isStatic)
+    m.accessors.some((a) => a.member === member && a.kind === "getter" && a.isStatic === isStatic)
   );
   if (conformance === null) {
-    throw new Error(`no getter for ${member} on ${fullName}`);
+    throw new Error(`no ${isStatic ? "static " : ""}getter for ${member} on ${fullName}`);
   }
-  const accessor = resolveExtensionAccessor(conformance.table, member, "getter");
-  const receiver = witnessReceiver(conformance.table, accessor.classBound, self);
+  const accessor = resolveExtensionAccessor(conformance.table, member, "getter", isStatic);
+  const receiver = isStatic ? self : witnessReceiver(conformance.table, accessor.classBound, self);
   return decodeReturn(accessor.type, invokerForWitnessAccessor(accessor)(receiver));
 }
 
@@ -2983,12 +2994,17 @@ function resolveWitnessAccessor(table: WitnessTable, member: string, kind: Acces
   return witnessAccessor(table, address, member, kind, match.signature.typeName, selfSignature(table, [])!);
 }
 
-function resolveExtensionAccessor(table: WitnessTable, member: string, kind: AccessorKind): ResolvedWitnessAccessor {
+function resolveExtensionAccessor(
+  table: WitnessTable,
+  member: string,
+  kind: AccessorKind,
+  isStatic = false
+): ResolvedWitnessAccessor {
   const protocol = protocolOf(table);
   const protocolName = protocol.fullTypeName ?? "protocol";
   const [match] = unshadowedMembers(
     applicableMembers(protocolExtensionMembers(protocol), table).accessors.filter(
-      (a) => a.member === member && a.kind === kind && !a.isStatic
+      (a) => a.member === member && a.kind === kind && a.isStatic === isStatic
     ),
     (a) => a.typeName
   );
@@ -2998,7 +3014,7 @@ function resolveExtensionAccessor(table: WitnessTable, member: string, kind: Acc
   const requirementKind = kind === "getter" ? ProtocolRequirementKind.Getter : ProtocolRequirementKind.Setter;
   const requirement = requirementImplementedBy(
     table,
-    (r) => r.kind === requirementKind,
+    (r) => r.kind === requirementKind && r.isInstance !== isStatic,
     (s) => s.kind === kind && s.member === member
   );
   if (requirement === "undecodable") {

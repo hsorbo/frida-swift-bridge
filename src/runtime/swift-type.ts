@@ -28,6 +28,7 @@ import {
   enumerateMethods,
   ModuleScope,
   enumerateProperties,
+  getStaticProperty,
   lowerResolveOptions,
   findMethod,
   bindConformanceMethod,
@@ -158,6 +159,10 @@ export class SwiftType {
 
   get properties(): PropertyInfo[] {
     return enumerateProperties(this.name);
+  }
+
+  get(name: string): CallResult {
+    return getStaticProperty(metadataOf(this), name);
   }
 }
 

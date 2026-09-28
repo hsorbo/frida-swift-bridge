@@ -228,6 +228,11 @@ describe("static protocol-extension members", () => {
     });
   });
 
+  test("a static extension property reads through the type", () => {
+    expect((Swift.type("fixture.Duckling") as StructType).get("nursery")).toBe("duck nursery");
+    expect((Swift.type("fixture.Owlet") as ClassType).get("nursery")).toBe("owl nursery");
+  });
+
   test("an instance does not reach a static extension method", () => {
     const duckling = (Swift.type("fixture.Duckling") as StructType).new({ weight: 1 });
     expect(duckling.hatch).toBeUndefined();

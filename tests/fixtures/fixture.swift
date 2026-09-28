@@ -937,6 +937,8 @@ extension Hatchable {
 public struct Duckling: Hatchable {
     public let weight: Int
     public static var species: String { "duck" }
+    public static var flockSize = 12
+    public static let motto = "quack"
 }
 public final class Owlet: Hatchable {
     public init() {}

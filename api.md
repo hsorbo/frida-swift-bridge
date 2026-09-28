@@ -190,6 +190,7 @@ Every wrapper extends `SwiftType`:
 - `type.methods(query?)`: the callable selectors, e.g. `["greet(_:)", …]`.
   `query` is `{ static?, inherited? }`.
 - `type.properties`: the properties as `{ name, typeName, isStatic, writable }`.
+- `type.get(name)`: reads a static property.
 
 Both lists span every loaded module: they include members that other modules
 add in extensions, and members a conformed-to protocol provides through a
@@ -517,6 +518,13 @@ throws.
 
 ```js
 Swift.type("MyApp.Robot").properties.map(p => p.name);   // ["name", "badge"]
+```
+
+Static properties, including those a protocol extension provides, read through
+the type:
+
+```js
+Swift.type("MyApp.Robot").get("fleetSize");   // 12
 ```
 
 For direct access to a stored field's storage, `$field(name)` returns a live
