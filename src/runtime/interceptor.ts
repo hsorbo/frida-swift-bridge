@@ -407,7 +407,7 @@ function materializeReturn(
   // Direct multi-register return: the bytes live only in the result registers, so a non-POD value is
   // borrowed over this private reassembly — readable/callable in the callback, not write-through.
   const scratch = Memory.alloc(Math.max(words(returnType), 1) * 8);
-  const allocator = new ArgumentAllocator();
+  const allocator = new ArgumentAllocator(0, true);
   for (const scalar of loweredScalars(returnType)) {
     writeRegisterScalar(
       scratch,

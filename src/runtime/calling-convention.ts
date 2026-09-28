@@ -313,7 +313,7 @@ export class ArgumentAllocator {
   private nsrn = 0;
   stackSize = 0;
 
-  constructor(startReg = 0) {
+  constructor(startReg = 0, private readonly placesResult = false) {
     this.ngrn = startReg;
   }
 
@@ -325,12 +325,13 @@ export class ArgumentAllocator {
   }
 
   // arm64 passes an i128 in a register pair that never starts at x7, else in a 16-byte-aligned stack
-  // slot that retires x7. x86-64 compilers disagree on where one goes once r8 is taken.
+  // slot that retires x7. AAPCS64 also starts an argument pair at an even register, but not a result.
+  // x86-64 compilers disagree on where one goes once r8 is taken.
   gp128(): ArgLocation {
     if (ARCH !== "arm64" && this.ngrn > GP_ARG_REGISTERS - 2) {
       throw new Error("an Int128 argument past r8 is unsupported on x86-64");
     }
-    if (I128_STARTS_AT_EVEN_REGISTER) {
+    if (I128_STARTS_AT_EVEN_REGISTER && !this.placesResult) {
       this.ngrn += this.ngrn % 2;
     }
     if (this.ngrn < GP_ARG_REGISTERS - 1) {
@@ -536,7 +537,7 @@ export function makeSwiftNativeFunction(
       if (forcedIndirect || shouldPassIndirectly(returnMetadata)) {
         indirectResult = true;
       } else {
-        const resultAllocator = new ArgumentAllocator();
+        const resultAllocator = new ArgumentAllocator(0, true);
         directResult = loweredScalars(returnMetadata).map((scalar) => ({
           scalar,
           location: resultAllocator.scalar(scalar),
