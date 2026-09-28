@@ -131,6 +131,18 @@ describe("constrained protocol-extension members", () => {
     expect(type.new({ egg: 21 }).eggCount()).toEqual(int64(42));
   });
 
+  test("a constraint on an associated type declared by a base protocol is checked", () => {
+    const type = Swift.type("fixture.IntClutch") as StructType;
+    expect(type.methods()).toContain("clutchCount()");
+    expect(type.new({ egg: 5 }).clutchCount()).toEqual(int64(15));
+    expect((Swift.type("fixture.WordClutch") as StructType).methods()).not.toContain("clutchCount()");
+  });
+
+  test("an accessor typed by an associated type declared by a base protocol resolves", () => {
+    expect((Swift.type("fixture.IntClutch") as StructType).new({ egg: 5 }).firstEgg).toEqual(int64(5));
+    expect((Swift.type("fixture.WordClutch") as StructType).new({ egg: "wren" }).firstEgg).toBe("wren");
+  });
+
   test("an associated type made class-bound by the where clause passes and returns directly", () => {
     const nightjar = (Swift.type("fixture.Nightjar") as ClassType).init() as SwiftObject;
     const nightjarNest = (Swift.type("fixture.NightjarNest") as StructType).init(nightjar)!;

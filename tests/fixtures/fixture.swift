@@ -927,6 +927,21 @@ extension Nest where Egg: Rookery {
     public func rookeryEcho(_ x: Egg) -> Egg { x }
 }
 
+// Egg is declared by the base protocol Nest, not by Clutch.
+public protocol Clutch: Nest {}
+public struct IntClutch: Clutch {
+    public let egg: Int
+}
+public struct WordClutch: Clutch {
+    public let egg: String
+}
+extension Clutch where Egg: BinaryInteger {
+    public func clutchCount() -> Int { Int(egg) * 3 }
+}
+extension Clutch {
+    public var firstEgg: Egg { egg }
+}
+
 public protocol Hatchable {
     static var species: String { get }
 }

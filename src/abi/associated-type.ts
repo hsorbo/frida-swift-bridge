@@ -1,13 +1,15 @@
 import { getSwiftCoreApi } from "../runtime/api.js";
 import { Metadata } from "./metadata.js";
-import { ProtocolConformance } from "./protocol-conformance.js";
+import { ProtocolConformance, conformsToProtocol } from "./protocol-conformance.js";
 import {
   ProtocolRequirement,
   ProtocolRequirementKind,
   readAssociatedTypeNames,
   readProtocolRequirements,
+  readRequirementSignature,
   requirementBaseDescriptor,
 } from "./protocol-descriptor.js";
+import { GenericRequirementDescriptor, GenericRequirementKind } from "./generic-requirement-descriptor.js";
 import { WitnessTable } from "./witness-table.js";
 import { ContextDescriptor } from "./context-descriptor.js";
 
@@ -23,16 +25,29 @@ function protocolOf(table: WitnessTable): ContextDescriptor {
 const REQUEST_BLOCKING_COMPLETE = 0;
 
 export function resolveAssociatedType(table: WitnessTable, name: string): Metadata {
-  const protocol = protocolOf(table);
-  const requirements = readProtocolRequirements(protocol).filter(
-    (r) => r.kind === ProtocolRequirementKind.AssociatedTypeAccessFunction
-  );
-  const names = readAssociatedTypeNames(protocol);
-  const index = names.indexOf(name);
-  if (index === -1) {
-    throw new Error(`no associated type ${name} on ${protocol.fullTypeName ?? "protocol"}`);
+  const resolved = findAssociatedType(table, name);
+  if (resolved === null) {
+    throw new Error(`no associated type ${name} on ${protocolOf(table).fullTypeName ?? "protocol"}`);
   }
-  const requirement = requirements[index];
+  return resolved;
+}
+
+function findAssociatedType(table: WitnessTable, name: string): Metadata | null {
+  const protocol = protocolOf(table);
+  const index = readAssociatedTypeNames(protocol).indexOf(name);
+  if (index === -1) {
+    for (const base of baseProtocols(protocol)) {
+      const baseTable = conformsToProtocol(table.conformingType, base);
+      const resolved = baseTable === null ? null : findAssociatedType(new WitnessTable(baseTable, table.conformingType), name);
+      if (resolved !== null) {
+        return resolved;
+      }
+    }
+    return null;
+  }
+  const requirement = readProtocolRequirements(protocol).filter(
+    (r) => r.kind === ProtocolRequirementKind.AssociatedTypeAccessFunction
+  )[index];
   const [value] = getSwiftCoreApi().swift_getAssociatedTypeWitness(
     REQUEST_BLOCKING_COMPLETE,
     table.handle,
@@ -44,6 +59,18 @@ export function resolveAssociatedType(table: WitnessTable, name: string): Metada
     throw new Error(`failed to resolve associated type ${name}`);
   }
   return new Metadata(value);
+}
+
+function baseProtocols(protocol: ContextDescriptor): ContextDescriptor[] {
+  return readRequirementSignature(protocol)
+    .filter((r) => r.kind === GenericRequirementKind.Protocol && !r.isObjCProtocol && constrainsSelf(r))
+    .map((r) => r.protocol)
+    .filter((p): p is ContextDescriptor => p !== null);
+}
+
+function constrainsSelf(requirement: GenericRequirementDescriptor): boolean {
+  const { address, length } = requirement.param;
+  return length === 1 && address.readU8() === "x".charCodeAt(0);
 }
 
 export function resolveAssociatedConformance(

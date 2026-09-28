@@ -199,8 +199,7 @@ protocol extension. A constrained extension (`extension P where Self: Base`,
 and its members shadow the same members of a less constrained extension. An
 extension whose clause the bridge can't check is left out: one with a same-type
 (`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
-requirement on a nested associated type (`Item.Index`) or on one inherited from
-a refined protocol.
+requirement on a nested associated type (`Item.Index`).
 - `type.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
 - `type.toJSON()`: cheap identity `{ kind, name, module }`.
 
