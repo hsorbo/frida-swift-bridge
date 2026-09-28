@@ -7,6 +7,7 @@ import { layoutCaptures, readCaptures, unwrapReabstractionThunk, writeCaptures }
 import { captureDescriptorOf, offsetToFirstCapture } from "../src/abi/capture-descriptor.js";
 import { resolveTypeByMangledName } from "../src/abi/field-descriptor.js";
 import { MetadataKind } from "../src/abi/metadata.js";
+import { typeName } from "../src/runtime/type-name.js";
 import { fixtureExport } from "./fixtures/load.js";
 
 import { Swift } from "../src/index.js";
@@ -195,6 +196,37 @@ describe("closure capture values (live runtime)", () => {
     expect(values[0]).toBe(true);
     expect(values[1]).toEqual(int64(5));
     expect(readObject(values[2] as NativePointer)).toEqual({ kind: int64(9) });
+  });
+
+  test("places small enums after a spare-bit-carrying capture without folding them into its bits", () => {
+    requireSwift();
+    const storeSpareBitsCapturing = new NativeFunction(fixtureExport("storeSpareBitsCapturing"), "void", [
+      "int64",
+      "int64",
+    ]);
+    const spareBitsCapturingContext = new NativeFunction(fixtureExport("spareBitsCapturingContext"), "pointer", []);
+
+    storeSpareBitsCapturing(3, 7);
+    const context = spareBitsCapturingContext() as NativePointer;
+
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual([
+      "fixture.Base",
+      "Swift.Optional<Swift.Bool>",
+      "fixture.Tint",
+      "fixture.OwnerSlot",
+      "Swift.Optional<Swift.Int>",
+      "Swift.Bool",
+    ]);
+    expect(slots.map(({ address }) => address.sub(slots[0].address).toInt32())).toEqual([0, 8, 9, 16, 24, 33]);
+
+    const [owner, flag, tint, slot, count, last] = readCaptures(context)!;
+    expect(readObject(owner as NativePointer)).toEqual({ kind: int64(3) });
+    expect(flag).toEqual({ some: true });
+    expect(tint).toBe("blue");
+    expect((slot as { backup: NativePointer }).backup.equals(owner as NativePointer)).toBeTruthy();
+    expect(count).toEqual({ some: int64(7) });
+    expect(last).toBe(true);
   });
 
   test("returns null for a closure whose captures depend on a generic parameter", () => {

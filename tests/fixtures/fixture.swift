@@ -969,6 +969,28 @@ public func mixedCapturingContext() -> UnsafeMutableRawPointer {
     }
 }
 
+public enum Tint { case red, green, blue }
+public enum OwnerSlot { case primary(Base), backup(Base) }
+
+var spareBitsCapturingBody: () -> Int = { 0 }
+public func storeSpareBitsCapturing(_ kind: Int, _ n: Int) {
+    let owner = Base(kind: kind)
+    let flag: Bool? = true
+    let tint = Tint.blue
+    let slot = OwnerSlot.backup(owner)
+    let count: Int? = n
+    let last = true
+    spareBitsCapturingBody = {
+        guard owner.kind > 0, flag == true, tint == .blue, case .backup = slot else { return 0 }
+        return (count ?? 0) + (last ? 1 : 0)
+    }
+}
+public func spareBitsCapturingContext() -> UnsafeMutableRawPointer {
+    return withUnsafePointer(to: &spareBitsCapturingBody) { p in
+        UnsafeRawPointer(p).load(fromByteOffset: MemoryLayout<Int>.size, as: UnsafeMutableRawPointer.self)
+    }
+}
+
 var genericCapturingBody: () -> Void = {}
 public func storeGenericCapturing<T>(_ value: T) {
     genericCapturingBody = { _ = value }
