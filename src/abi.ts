@@ -209,8 +209,10 @@ export {
   WitnessOrigin,
   classifyWitnessOrigin,
   NamedRequirement,
+  SwiftFunction,
   SwiftAsyncFunction,
   AsyncReceiver,
+  resolveFunction,
   resolveAsyncFunction,
 } from "./runtime/method.js";
 

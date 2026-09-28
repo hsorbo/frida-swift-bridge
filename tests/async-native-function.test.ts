@@ -11,6 +11,7 @@ const MAKE_PAIR_ASYNC = "$s7fixture13makePairAsyncyAA0dC0VSi_SitYaF";
 const MAKE_TUPLE_ASYNC = "$s7fixture14makeTupleAsyncySi_SStSi_SitYaF";
 const ADD_ASYNC = "$s7fixture9AsyncCalcC03addB0yS2iYaF";
 const ADD_INTS_SYNC = "$s7fixture7addIntsyS2i_SitF";
+const GENERIC_HOLDER_SCALED_STORED_ASYNC = "$s7fixture13GenericHolderC17scaledStoredAsync2byS2i_tYaF";
 
 describe("Swift.asyncFunction", () => {
   let module: Module;
@@ -73,6 +74,12 @@ describe("Swift.asyncFunction", () => {
 
   test("rejects a non-async symbol", () => {
     expect(() => Swift.asyncFunction(module, ADD_INTS_SYNC)).toThrow(/not async/);
+  });
+
+  test("rejects a method of a generic type", () => {
+    expect(() => Swift.asyncFunction(module, GENERIC_HOLDER_SCALED_STORED_ASYNC)).toThrow(
+      /scaledStoredAsync\(by:\) is a member of generic type fixture\.GenericHolder/
+    );
   });
 
   test("validates argument count", () => {

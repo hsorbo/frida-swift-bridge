@@ -1202,53 +1202,72 @@ function toReceiverPointer(receiver: AsyncReceiver): NativePointer {
   throw new Error("receiver must be a Swift object, an ObjC.Object, or a NativePointer");
 }
 
+const MODULE_CONTEXT = /^[^.\s]+$/;
+
 // A static method's thin-metatype self is erased (null).
-function resolveReceiverType(context: string): Metadata | null {
-  const { context: base, isStatic } = stripReceiverKeyword(context);
-  return isStatic ? null : resolveType(base);
+function resolveReceiverType(signature: SwiftFunctionSignature): Metadata | null {
+  const { context, isStatic } = stripReceiverKeyword(signature.context);
+  if (MODULE_CONTEXT.test(context)) {
+    return null;
+  }
+  const type = resolveType(context);
+  if (type === null) {
+    if (findType(context)?.isGeneric === true) {
+      throw new Error(
+        `${signature.selector} is a member of generic type ${context}; generic functions are not supported here`
+      );
+    }
+    throw new Error(`${signature.selector}: cannot resolve receiver type ${context}`);
+  }
+  return isStatic ? null : type;
 }
 
-// The async sibling of Swift.NativeFunction: call() for a free function, bind(self) for a method.
-// Generic like NativeFunction<Ret, Args>: the caller annotates the marshalled return and argument
-// types so a call site is typed without casting; both default to the untyped CallResult/CallArg.
-export class SwiftAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]> {
-  private readonly unbound: BoundAsyncMethod;
-
+// Swift.NativeFunction resolved from a symbol: call() for a free function, bind(self) for a method.
+// An async symbol's calls return a Promise, as method calls do. Generic like NativeFunction<Ret, Args>:
+// the caller annotates the marshalled return and argument types so a call site is typed without
+// casting; both default to the untyped CallResult/CallArg.
+export class SwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]> {
   constructor(
     private readonly resolved: ResolvedMethod,
     private readonly receiverType: Metadata | null
-  ) {
-    this.unbound = new BoundAsyncMethod(resolved, null);
-  }
+  ) {}
 
   get address(): NativePointer {
     return this.resolved.address;
   }
 
-  call(...args: Args): Promise<Ret> {
+  call(...args: Args): Ret {
     if (this.receiverType !== null) {
       throw new Error(`${this.resolved.selector} is an instance method; bind a receiver with .bind(self)`);
     }
-    return this.unbound.call(...args) as Promise<Ret>;
+    return this.boundTo(null).call(...args) as Ret;
   }
 
-  bind(receiver: AsyncReceiver): (...args: Args) => Promise<Ret> {
+  bind(receiver: AsyncReceiver): (...args: Args) => Ret {
     if (this.receiverType === null) {
       throw new Error(`${this.resolved.selector} takes no receiver`);
     }
     if (this.receiverType.kind !== MetadataKind.Class && this.receiverType.kind !== MetadataKind.ObjCClassWrapper) {
       throw new Error(`receiver binding is only supported for class receivers, not ${typeName(this.receiverType)}`);
     }
-    const bound = new BoundAsyncMethod(this.resolved, toReceiverPointer(receiver), { indirect: true });
-    rootAsyncReceiver(bound, receiver);
-    return (...args: Args) => bound.call(...args) as Promise<Ret>;
+    const self = toReceiverPointer(receiver);
+    return (...args: Args) => rootAsyncReceiver(this.boundTo(self), receiver).call(...args) as Ret;
+  }
+
+  private boundTo(self: NativePointer | null): BoundMethod | BoundStaticMethod | BoundAsyncMethod {
+    if (this.resolved.async === true) {
+      return new BoundAsyncMethod(this.resolved, self);
+    }
+    return self === null ? new BoundStaticMethod(this.resolved) : new BoundMethod(this.resolved, self);
   }
 }
 
-export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
-  module: Module,
-  mangled: string
-): SwiftAsyncFunction<Ret, Args> {
+export class SwiftAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]> extends SwiftFunction<
+  Promise<Ret>,
+  Args
+> {}
+
+function parseFunctionSymbol(mangled: string): SwiftFunctionSignature {
   const demangled = demangle(mangled);
   if (demangled === null) {
     throw new Error(`not a Swift symbol: ${mangled}`);
@@ -1257,15 +1276,76 @@ export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = 
   if (signature === null || signature.kind !== "function") {
     throw new Error(`cannot parse a function signature from ${demangled}`);
   }
+  return signature;
+}
+
+export function resolveFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]>(
+  module: Module,
+  mangled: string
+): SwiftFunction<Ret, Args> {
+  const signature = parseFunctionSymbol(mangled);
+  if (signature.genericParams.length > 0) {
+    throw new Error(`${signature.selector} is generic; generic functions are not supported here`);
+  }
+  const resolved = signature.async
+    ? resolveAsyncSymbol(module, mangled, signature)
+    : resolveSyncSymbol(module, mangled, signature);
+  return new SwiftFunction<Ret, Args>(resolved, resolveReceiverType(signature));
+}
+
+export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
+  module: Module,
+  mangled: string
+): SwiftAsyncFunction<Ret, Args> {
+  const signature = parseFunctionSymbol(mangled);
   if (!signature.async) {
     throw new Error(`${signature.selector} is not async; use Swift.NativeFunction`);
   }
   if (signature.genericParams.length > 0) {
     throw new Error(`${signature.selector} is generic; async generics are not supported here`);
   }
+  return new SwiftAsyncFunction<Ret, Args>(
+    resolveAsyncSymbol(module, mangled, signature),
+    resolveReceiverType(signature)
+  );
+}
+
+function resolveSyncSymbol(module: Module, mangled: string, signature: SwiftFunctionSignature): ResolvedMethod {
+  const address = module.findExportByName(mangled) ?? module.findSymbolByName(mangled);
+  if (address === null) {
+    throw new Error(`no symbol ${mangled} in ${module.name}`);
+  }
+  return {
+    address: address.strip(),
+    ...resolveSignatureTypes(signature),
+    throws: signature.throws,
+    isStatic: false,
+    selector: signature.selector,
+    async: false,
+  };
+}
+
+function resolveAsyncSymbol(module: Module, mangled: string, signature: SwiftFunctionSignature): ResolvedMethod {
   const afp = findAsyncFunctionPointer(module, mangled);
   if (afp === null) {
     throw new Error(`no async function pointer for ${mangled} in ${module.name}`);
+  }
+  return {
+    address: afp.code,
+    ...resolveSignatureTypes(signature),
+    throws: signature.throws,
+    isStatic: false,
+    selector: signature.selector,
+    async: true,
+    asyncFunctionPointer: afp,
+  };
+}
+
+function resolveSignatureTypes(signature: SwiftFunctionSignature): { argTypes: Metadata[]; returnType: Metadata | null } {
+  if (methodKind(signature.name) === "init") {
+    throw new Error(
+      `${signature.selector} is an initializer, which consumes its arguments; construct through Swift.type(...).init`
+    );
   }
   assertBorrowingArgs(signature.argTypeNames, signature.selector);
   const argTypes = signature.argTypeNames.map((name) => {
@@ -1282,17 +1362,7 @@ export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = 
       throw new Error(`cannot resolve return type ${signature.returnTypeName} of ${signature.selector}`);
     }
   }
-  const resolved: ResolvedMethod = {
-    address: afp.code,
-    argTypes,
-    returnType,
-    throws: signature.throws,
-    isStatic: false,
-    selector: signature.selector,
-    async: true,
-    asyncFunctionPointer: afp,
-  };
-  return new SwiftAsyncFunction<Ret, Args>(resolved, resolveReceiverType(signature.context));
+  return { argTypes, returnType };
 }
 
 function staticInvokerFor(resolved: ResolvedMethod): SwiftNativeFunction {

@@ -82,6 +82,9 @@ The default export is the whole facade. Its members:
   look up protocols. See [Protocols](#protocols).
 - `Swift.NativeFunction(address, returnType, argTypes, options?)`: wrap a free
   Swift function as a callable. See [Free functions](#free-functions).
+- `Swift.function(module, mangledName)`: wrap a Swift function, sync or
+  `async`, resolved from its mangled symbol, with its types derived from the
+  signature. See [Free functions](#free-functions).
 - `Swift.asyncFunction(module, mangledName)`: wrap an `async` Swift function,
   resolved from its mangled symbol, as an awaitable callable. See
   [Async and actors](#async-and-actors).
@@ -452,9 +455,10 @@ await addAsync(5);    // 105
 
 An `async throws` function rejects its promise with a `SwiftError` (see
 [Errors](#errors)); a tuple return decodes to a destructurable array. Misuse
-fails fast: a non-async symbol is rejected (use `Swift.NativeFunction`),
+fails fast: a non-async symbol is rejected (use `Swift.function`),
 calling an unbound instance method throws, as does binding a receiver to a
-free function. Generic async functions are not supported.
+free function. Generic async functions and methods of generic types are not
+supported.
 
 In TypeScript the wrapper is generic like `NativeFunction<Ret, Args>`: annotate
 the marshalled return (and optionally argument) types once and the call site is
@@ -603,9 +607,41 @@ Finding an address is ordinary Frida work: `Module.getGlobalExportByName` with a
 mangled symbol, a scan of `module.enumerateExports()` filtered through
 `Swift.demangle`, or `Swift.symbolicate` on an address you already have.
 
-`Swift.NativeFunction` is synchronous. For an `async` function resolved from
-its mangled symbol, use `Swift.asyncFunction` — see
-[Async and actors](#async-and-actors).
+When you hold the mangled symbol, `Swift.function(module, mangledName)` looks
+it up in `module` and derives the argument and return types, and `throws`,
+from the demangled signature, so there is nothing to annotate. A free function
+is invoked with `.call(...)`:
+
+```js
+const app = Process.getModuleByName("MyApp");
+
+const addInts = Swift.function(app, "$s5MyApp7addIntsyS2i_SitF");
+addInts.call(20, 22);     // 42
+
+const mightThrow = Swift.function(app, "$s5MyApp10mightThrowyS2iKF");
+mightThrow.call(1);       // throws SwiftError
+```
+
+It has the same shape as `Swift.asyncFunction` (see
+[Async and actors](#async-and-actors)): an instance method binds a class
+receiver with `.bind(self)` and returns a plain function, and the TypeScript
+wrapper is generic over the return and argument types. It also accepts an
+`async` symbol, whose calls return a `Promise`: sync and async share one call
+site, as with methods.
+
+```js
+const robot = Swift.type("MyApp.Robot").init("R2");
+const greet = Swift.function(app, "$s5MyApp5RobotC5greetyS2SF").bind(robot);
+greet("X");               // "Hello X, I am R2"
+
+const computeAsync = Swift.function(app, "$s5MyApp12computeAsyncyS2iYaF");
+await computeAsync.call(21);    // 42
+```
+
+Generic functions and methods of generic types are rejected, as are consuming
+(`__owned`) and `inout` parameters; reach for `/abi` for those. An initializer
+consumes its arguments, so it is rejected too: construct through
+`Swift.type(...).init`.
 
 ## Closures
 
@@ -713,8 +749,10 @@ try {
 }
 ```
 
-An `async throws` call — a facade method or a `Swift.asyncFunction` — rejects
-its promise with the same `SwiftError`.
+`Swift.function` reads `throws` from the symbol, so it raises the same
+`SwiftError` without the option. An `async throws` call — a facade method,
+`Swift.function` or `Swift.asyncFunction` — rejects its promise with the same
+`SwiftError`.
 
 Inside an [interceptor](#intercepting), a thrown error surfaces as the second
 argument to `onLeave` (sync) or `onComplete` (async) instead of a return value.
