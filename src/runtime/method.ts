@@ -1384,7 +1384,7 @@ export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = 
 ): SwiftAsyncFunction<Ret, Args> {
   const signature = parseFunctionSymbol(mangled);
   if (!signature.async) {
-    throw new Error(`${signature.selector} is not async; use Swift.NativeFunction`);
+    throw new Error(`${signature.selector} is not async; use Swift.function`);
   }
   if (signature.genericParams.length > 0) {
     throw new Error(`${signature.selector} is generic; async generics are not supported here`);

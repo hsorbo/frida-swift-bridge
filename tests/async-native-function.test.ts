@@ -115,7 +115,7 @@ describe("Swift.asyncFunction", () => {
   });
 
   test("rejects a non-async symbol", () => {
-    expect(() => Swift.asyncFunction(module, ADD_INTS_SYNC)).toThrow(/not async/);
+    expect(() => Swift.asyncFunction(module, ADD_INTS_SYNC)).toThrow("not async; use Swift.function");
   });
 
   test("rejects a method of a generic type", () => {
