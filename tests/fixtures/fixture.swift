@@ -539,12 +539,14 @@ public final class Kennel {
     public var occupant: Token
     public init(_ w: Wrapper, occupant: Token) { self.w = w; self.occupant = occupant }
 }
+#if compiler(>=5.9)
 extension TokenBox {
     public consuming func take() -> Int { token.id }
 }
 extension Wrapper {
     public consuming func take() -> Int { token.id }
 }
+#endif
 public func makeToken(_ id: Int) -> Token { Token(id: id) }
 public func makeWrapper(_ t: Token) -> Wrapper { Wrapper(token: t, a: 1, b: 2, c: 3, d: 4) }
 @inline(never)
@@ -1062,14 +1064,18 @@ public func storeRefInt(_ p: UnsafeMutableRawPointer) {
 open class HashedBox<Key: Hashable> {
     public init() {}
 }
+#if compiler(>=6.2)
 public func hashedBoxHolderType() -> UnsafeRawPointer {
     unsafeBitCast((any HashedBox<Int> & Holder<String>).self as Any.Type, to: UnsafeRawPointer.self)
 }
+#endif
 
+#if compiler(>=6.0)
 public protocol Consumable: ~Copyable {}
 public func noncopyableConsumableType() -> UnsafeRawPointer {
     unsafeBitCast((any Consumable & ~Copyable).self, to: UnsafeRawPointer.self)
 }
+#endif
 
 // Method-name rendering: an operator and a generic return.
 public struct Selectors {

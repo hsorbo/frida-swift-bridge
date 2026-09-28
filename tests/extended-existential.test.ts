@@ -1,6 +1,6 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift } from "./swift.js";
-import { fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { fixtureExport, existentialMetadata, loadFixture } from "./fixtures/load.js";
 
 import {
   Metadata,
@@ -88,8 +88,11 @@ describe("extended existential shape", () => {
     expect(signature[1].protocol!.fullTypeName).toBe("fixture.Holder");
   });
 
-  test("separates a generic superclass's arguments and conformances from Self's protocols", () => {
+  test("separates a generic superclass's arguments and conformances from Self's protocols", (ctx) => {
     requireSwift();
+    if (loadFixture().findExportByName("$s7fixture19hashedBoxHolderTypeSVyF") === null) {
+      ctx.skip("fixture compiled without class & parameterized-protocol compositions (Swift < 6.2)");
+    }
     const M = existentialMetadata("fixture.hashedBoxHolderType");
     expect(existentialProtocols(M).map((p) => p.fullTypeName)).toEqual(["fixture.Holder"]);
     expect(extendedExistentialGeneralizationArguments(M).map((m) => typeName(m))).toEqual(["Swift.Int", "Swift.String"]);
@@ -97,8 +100,11 @@ describe("extended existential shape", () => {
     expect(kinds).toContain(GenericRequirementKind.BaseClass);
   });
 
-  test("names Self's protocol when there is no generalization signature (any Consumable & ~Copyable)", () => {
+  test("names Self's protocol when there is no generalization signature (any Consumable & ~Copyable)", (ctx) => {
     requireSwift();
+    if (loadFixture().findExportByName("$s7fixture25noncopyableConsumableTypeSVyF") === null) {
+      ctx.skip("fixture compiled without ~Copyable compositions (Swift < 6.0)");
+    }
     const M = existentialMetadata("fixture.noncopyableConsumableType");
     expect(M.kind).toBe(MetadataKind.ExtendedExistential);
     expect(existentialProtocols(M).map((p) => p.fullTypeName)).toEqual(["fixture.Consumable"]);

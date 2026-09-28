@@ -112,7 +112,8 @@ describe("consuming methods on value types", () => {
     return { facade, view: new ClassInstance(facade.$handle) };
   }
 
-  test("a consuming method on a small loadable struct leaves the caller's self intact", () => {
+  test("a consuming method on a small loadable struct leaves the caller's self intact", (ctx) => {
+    if (loadFixture().findExportByName("$s7fixture8TokenBoxV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(7);
     const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
       .initializer({ labels: [null, "tag"] })
@@ -124,7 +125,8 @@ describe("consuming methods on value types", () => {
     expect(view.retainCount).toBe(before);
   });
 
-  test("a consuming method on a large struct leaves the caller's self intact", () => {
+  test("a consuming method on a large struct leaves the caller's self intact", (ctx) => {
+    if (loadFixture().findExportByName("$s7fixture7WrapperV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(9);
     const wrapper = (typeOf(metadataFor("fixture.Wrapper")!) as StructType).call("make", facade) as SwiftObject;
     const before = view.retainCount;

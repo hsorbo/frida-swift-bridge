@@ -150,8 +150,9 @@ describe("constrained protocol-extension members", () => {
     expect(type.init().objcChirp()).toBe("objc whistle");
   });
 
-  test("a protocol nested in a type comes after top-level ones in the witness tables", () => {
+  test("a protocol nested in a type comes after top-level ones in the witness tables", (ctx) => {
     const type = Swift.type("fixture.Kestrel") as StructType;
+    if (type === null) ctx.skip("fixture compiled without nested protocols (Swift < 5.10)");
     expect(type.methods()).toContain("totalHeight()");
     expect(type.new({ perch: 4 }).totalHeight()).toEqual(int64(43));
   });
