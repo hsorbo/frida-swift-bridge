@@ -1,8 +1,9 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { requireSwift } from "./swift.js";
+import { requireDarwin, requireSwift } from "./swift.js";
 import { arenaAlloc, arenaString, writeRelativeDirectPointer } from "./arena.js";
 
 import { readObject } from "../src/abi/instance.js";
+import { metadataFor } from "../src/abi.js";
 import { layoutCaptures, readCaptures, unwrapReabstractionThunk, writeCaptures } from "../src/abi/closure-capture.js";
 import { captureDescriptorOf, offsetToFirstCapture } from "../src/abi/capture-descriptor.js";
 import { resolveTypeByMangledName } from "../src/abi/field-descriptor.js";
@@ -13,6 +14,7 @@ import { fixtureExport, loadFixture } from "./fixtures/load.js";
 import { Swift } from "../src/index.js";
 const HEAP_LOCAL_VARIABLE = 0x400;
 const NOT_A_CLOSURE = 0x0;
+const CF_NUMBER_SINT64_TYPE = 4;
 
 // keeps helper-allocated buffers from being GC'd once their local variable goes out of scope.
 const pinned: NativePointer[] = [];
@@ -116,11 +118,12 @@ describe("closure capture layout (synthetic)", () => {
 
   // a bare class-reference capture has no CaptureDescriptor of its own; see layoutSoleClassCapture.
   test("finds a class reference held directly in place of a nested closure box", () => {
-    const classMetadata = Memory.alloc(0x8);
-    classMetadata.writeU64(uint64(MetadataKind.Class));
+    requireSwift();
+    loadFixture();
+    const classMetadata = metadataFor("fixture.Base")!.handle;
     const instance = Memory.alloc(Process.pointerSize);
     instance.writePointer(classMetadata);
-    pinned.push(classMetadata, instance);
+    pinned.push(instance);
 
     const context = makeHeapContext(makeCaptureDescriptor(["garbage"]), 0x10);
     context.add(0x10).add(Process.pointerSize).writePointer(instance);
@@ -130,6 +133,32 @@ describe("closure capture layout (synthetic)", () => {
     expect(slots!.length).toBe(1);
     expect(slots![0].type.kind).toBe(MetadataKind.Class);
     expect(slots![0].address.readPointer().equals(instance)).toBeTruthy();
+  });
+
+  test("types a tagged-pointer ObjC class capture without reading an isa from it", (ctx) => {
+    requireDarwin(ctx);
+    requireSwift();
+    const coreFoundation = Module.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
+    const CFNumberCreate = new NativeFunction(coreFoundation.getExportByName("CFNumberCreate"), "pointer", [
+      "pointer",
+      "long",
+      "pointer",
+    ]);
+    const value = Memory.alloc(8);
+    value.writeS64(42);
+    const number = CFNumberCreate(NULL, CF_NUMBER_SINT64_TYPE, value) as NativePointer;
+    const libobjc = Process.getModuleByName("libobjc.A.dylib");
+    const taggedPointerMask = libobjc.getExportByName("objc_debug_taggedpointer_mask").readPointer();
+    expect(number.and(taggedPointerMask).isNull()).toBe(false);
+
+    const context = makeHeapContext(makeCaptureDescriptor(["garbage"]), 0x10);
+    context.add(0x10).add(Process.pointerSize).writePointer(number);
+
+    const slots = layoutCaptures(context);
+    expect(slots).not.toBeNull();
+    const objectGetClass = new NativeFunction(libobjc.getExportByName("object_getClass"), "pointer", ["pointer"]);
+    expect(slots![0].type.handle.equals(objectGetClass(number) as NativePointer)).toBeTruthy();
+    expect(slots![0].address.readPointer().equals(number)).toBeTruthy();
   });
 });
 

@@ -83,13 +83,6 @@ export interface SwiftCoreApi {
 }
 
 let cachedSwiftCore: SwiftCoreApi | null = null;
-let cachedIsaMask: NativePointer | null = null;
-
-export function getSwiftIsaMask(): NativePointer {
-  ensureSwiftHost();
-  cachedIsaMask ??= loadLibswiftCore().getExportByName("swift_isaMask").readPointer();
-  return cachedIsaMask;
-}
 
 export function getSwiftCoreApi(): SwiftCoreApi {
   ensureSwiftHost();
