@@ -15,7 +15,6 @@ const ARCH = Process.arch;
 const resilientModules = new Set<string>();
 const frozenTypes = new Set<string>();
 
-// Built with library evolution, yet nearly every public type is @frozen.
 const FROZEN_BY_DEFAULT_MODULES = new Set(["Swift", "Synchronization"]);
 
 export function markResilientModule(name: string): void {
@@ -30,9 +29,6 @@ export function markFrozenType(name: string): void {
 
 const resilientValueCache = new Map<string, boolean>();
 
-// Resilience isn't recorded in metadata: a public type is resilient when its module is built with
-// library evolution and the type isn't @frozen. A value embedding a resilient field or payload is
-// address-only too (Optional<URL> because URL is).
 export function isResilientValueType(metadata: Metadata): boolean {
   const kind = metadata.kind;
   if (kind !== MetadataKind.Struct && kind !== MetadataKind.Enum && kind !== MetadataKind.Optional) {
@@ -59,8 +55,6 @@ function embedsResilientValue(metadata: Metadata): boolean {
   return false;
 }
 
-// Library evolution shows in the exports: dispatch thunks, and case symbols that only non-frozen
-// enums get. A @frozen struct leaves no trace, so it has to be marked.
 function isResilientNominal(metadata: Metadata): boolean {
   const description = metadata.description;
   const moduleName = description.moduleName;

@@ -17,7 +17,7 @@ public func translate(_ p: ResilientPoint, dx: Int, dy: Int) -> ResilientPoint {
     return ResilientPoint(x: p.x + dx, y: p.y + dy)
 }
 
-// @frozen ⇒ visible layout ⇒ direct ABI even in a resilient module; leaves no trace, so it must be marked
+// @frozen ⇒ visible layout ⇒ direct ABI even in a resilient module
 @frozen public struct FrozenPoint {
     public var x: Int
     public var y: Int
