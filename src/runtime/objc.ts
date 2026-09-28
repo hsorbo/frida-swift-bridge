@@ -44,3 +44,23 @@ export function lookUpObjCClass(name: string): NativePointer | null {
   const cls = getLookUpClass()(Memory.allocUtf8String(name));
   return cls.isNull() ? null : cls;
 }
+
+let cachedRetainCountSend: NativeFunction<UInt64, [NativePointerValue, NativePointerValue]> | null = null;
+let cachedRetainCountSelector: NativePointer | null = null;
+
+export function objcRetainCount(object: NativePointer): number {
+  if (cachedRetainCountSend === null) {
+    const libobjc = Process.getModuleByName("libobjc.A.dylib");
+    cachedRetainCountSend = new NativeFunction(libobjc.getExportByName("objc_msgSend"), "size_t", [
+      "pointer",
+      "pointer",
+    ]);
+    const selRegisterName = new NativeFunction(
+      libobjc.getExportByName("sel_registerName"),
+      "pointer",
+      ["pointer"]
+    );
+    cachedRetainCountSelector = selRegisterName(Memory.allocUtf8String("retainCount")) as NativePointer;
+  }
+  return Number(cachedRetainCountSend(object, cachedRetainCountSelector!));
+}

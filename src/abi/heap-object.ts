@@ -4,6 +4,7 @@ import { isActor, isDefaultActor, readVTableChain, VTableEntry } from "./class-d
 import { enumerateClassInstanceFields, readObject, SwiftValue } from "./instance.js";
 import { ValueInstance } from "./value.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
+import { objcRetainCount } from "../runtime/objc.js";
 import { SwiftType, typeOf } from "../runtime/swift-type.js";
 import { typeName } from "../runtime/type-name.js";
 import {
@@ -94,6 +95,9 @@ export class ClassInstance implements RawInstance {
   }
 
   get retainCount(): number {
+    if (!classMetadataOf(this.handle).usesSwiftRefcounting) {
+      return objcRetainCount(this.handle);
+    }
     return Number(getSwiftCoreApi().swift_retainCount(this.handle));
   }
 

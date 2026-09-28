@@ -77,4 +77,17 @@ describe("ClassInstance", () => {
     expect(object.field("pitch").read()).toEqual(int64(5));
     starling.$dispose();
   });
+
+  test("counts retains of a Swift subclass of an ObjC class through ObjC", (ctx) => {
+    requireDarwin(ctx);
+    loadFixture();
+    const starling = (Swift.type("fixture.Starling") as ClassType).init();
+    const object = new ClassInstance(starling.$handle);
+    const before = object.retainCount;
+    object.retain();
+    expect(object.retainCount).toBe(before + 1);
+    object.release();
+    expect(object.retainCount).toBe(before);
+    starling.$dispose();
+  });
 });

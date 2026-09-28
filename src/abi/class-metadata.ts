@@ -12,6 +12,7 @@ const OBJC_INTEROP_PREFIX = Process.platform === "darwin" ? 0x18 : 0;
 
 const OFFSETOF_SUPERCLASS = 0x8;
 const OFFSETOF_DATA = 0x20; // Darwin only (isSwift bit)
+const OFFSETOF_FLAGS = 0x10 + OBJC_INTEROP_PREFIX;
 const OFFSETOF_INSTANCE_SIZE = 0x18 + OBJC_INTEROP_PREFIX;
 const OFFSETOF_INSTANCE_ALIGN_MASK = 0x1c + OBJC_INTEROP_PREFIX;
 const OFFSETOF_DESCRIPTION = 0x28 + OBJC_INTEROP_PREFIX;
@@ -19,6 +20,7 @@ const OFFSETOF_DESCRIPTION = 0x28 + OBJC_INTEROP_PREFIX;
 export const ROOT_CLASS_METADATA_SIZE = OFFSETOF_DESCRIPTION + 2 * Process.pointerSize;
 
 const SWIFT_CLASS_IS_SWIFT_MASK = 2; // Darwin (ObjC interop)
+const CLASS_FLAGS_USES_SWIFT_REFCOUNTING = 0x2;
 
 const DESC_OFFSETOF_FIELD_OFFSET_VECTOR_OFFSET = 0x28;
 
@@ -30,6 +32,13 @@ export class ClassMetadata {
       return true; // no ObjC/foreign classes: any Class-kind metadata is Swift-native
     }
     return (this.handle.add(OFFSETOF_DATA).readU8() & SWIFT_CLASS_IS_SWIFT_MASK) !== 0;
+  }
+
+  get usesSwiftRefcounting(): boolean {
+    if (Process.platform !== "darwin") {
+      return true;
+    }
+    return this.isTypeMetadata && (this.handle.add(OFFSETOF_FLAGS).readU32() & CLASS_FLAGS_USES_SWIFT_REFCOUNTING) !== 0;
   }
 
   get superclass(): ClassMetadata | null {
