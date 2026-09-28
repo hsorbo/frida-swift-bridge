@@ -843,11 +843,15 @@ corrupts memory instead of failing cleanly.
   the result of a closure argument is inferred as `Void`.
 - **Whether a struct is `@frozen`.** A public struct in a module built with
   library evolution is passed by address unless it is `@frozen`, and `@frozen`
-  leaves no trace in metadata or symbols. The bridge detects library evolution
-  from the module's exports and a non-frozen enum from its case symbols, then
-  treats every public struct in such a module as resilient. Mark the frozen ones
-  with `Swift.markFrozen("Module.Type")`, including frozen structs they store.
-  A module whose exports show no sign of library evolution (only structs and
+  leaves no trace in metadata or symbols. The bridge reads the convention from
+  the struct's own exported code: its getters, and functions that return it.
+  When that gives no verdict, and for generic structs, it falls back to the
+  module: library evolution is detected from the module's exports and a
+  non-frozen enum from its case symbols, and every public struct in such a
+  module is treated as resilient. Mark frozen structs the bridge misses (e.g.
+  `System.FileDescriptor`, which exports no getters) with
+  `Swift.markFrozen("Module.Type")`, including frozen structs they store. A
+  module whose exports show no sign of library evolution (only structs and
   frozen enums) needs `Swift.markResilient("Module")`.
 
 **Things the bridge cannot recover**
