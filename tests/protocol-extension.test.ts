@@ -26,7 +26,7 @@ describe("protocol-extension members on a conforming type", () => {
   test("the type's own implementation shadows the protocol's default", () => {
     const type = Swift.type("fixture.CustomDescriber") as StructType;
     expect(type.methods().filter((m) => m === "describe()").length).toBe(1);
-    expect(type.new({ displayName: "Ada" }).$method("describe", { mutating: false }).call()).toBe("custom:Ada");
+    expect(type.new({ displayName: "Ada" }).$method("describe", { self: "borrowing" }).call()).toBe("custom:Ada");
   });
 
   test("a class reaches an extension method of a protocol that is not class-bound", () => {
@@ -64,8 +64,8 @@ describe("protocol-extension members on a conforming type", () => {
 
   test("an extension method differing from a requirement only in return type is not called through its witness", () => {
     const c = (Swift.type("fixture.IntChooser") as StructType).new({ n: 4 });
-    expect(c.$method("choose", { returnType: "Swift.String", mutating: false }).call()).toBe("ext");
-    expect(c.$method("choose", { returnType: "Swift.Int", mutating: false }).call()).toEqual(int64(4));
+    expect(c.$method("choose", { returnType: "Swift.String", self: "borrowing" }).call()).toBe("ext");
+    expect(c.$method("choose", { returnType: "Swift.Int", self: "borrowing" }).call()).toEqual(int64(4));
   });
 
   test("an extension method resolves on a stripped binary by naming the requirement from another conformance's witness", () => {

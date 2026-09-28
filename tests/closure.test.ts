@@ -239,7 +239,7 @@ describe("closure through the $call facade", () => {
     const source = asSwiftObject(ValueInstance.borrow(ByteSource, self));
 
     let seen: number[] | null = null;
-    source.$method("withBytes", { mutating: false, typeArguments: [] }).call(
+    source.$method("withBytes", { self: "borrowing", typeArguments: [] }).call(
       Swift.closure((buf) => {
         seen = Array.from(new Uint8Array(buf.readBytes()));
       })
@@ -264,7 +264,7 @@ describe("closure through the $call facade", () => {
     const source = asSwiftObject(ValueInstance.borrow(ByteSource, self));
 
     let seen: number[] | null = null;
-    source.$method("eachByte", { mutating: false, typeArguments: [] }).call(
+    source.$method("eachByte", { self: "borrowing", typeArguments: [] }).call(
       Swift.closure((buf) => {
         seen = Array.from(new Uint8Array(buf.readBytes()));
       })
@@ -281,7 +281,7 @@ describe("closure through the $call facade", () => {
     const source = asSwiftObject(ValueInstance.borrow(ByteSource, self));
 
     let called = false;
-    source.$method("run", { mutating: false, typeArguments: [] }).call(
+    source.$method("run", { self: "borrowing", typeArguments: [] }).call(
       Swift.closure(() => {
         called = true;
       })
@@ -375,14 +375,14 @@ describe("loadable closure through the $call facade", () => {
   }
 
   test("Swift.closure (Int) -> Int returns the mapped value", () => {
-    const result = byteSource().$method("apply", { mutating: false, typeArguments: [] }).call(7, Swift.closure((n: number) => Number(n) * 6));
+    const result = byteSource().$method("apply", { self: "borrowing", typeArguments: [] }).call(7, Swift.closure((n: number) => Number(n) * 6));
     expect(result).toEqual(int64(42));
   });
 
   test("Swift.closure (Int) -> Bool returns the predicate result", () => {
     const source = byteSource();
-    expect(source.$method("check", { mutating: false, typeArguments: [] }).call(9, Swift.closure((n: number) => Number(n) > 5))).toBe(true);
-    expect(source.$method("check", { mutating: false, typeArguments: [] }).call(2, Swift.closure((n: number) => Number(n) > 5))).toBe(false);
+    expect(source.$method("check", { self: "borrowing", typeArguments: [] }).call(9, Swift.closure((n: number) => Number(n) > 5))).toBe(true);
+    expect(source.$method("check", { self: "borrowing", typeArguments: [] }).call(2, Swift.closure((n: number) => Number(n) > 5))).toBe(false);
   });
 });
 
@@ -445,8 +445,8 @@ describe("throwing loadable closures", () => {
     self.add(Process.pointerSize).writeU64(0);
     const source = asSwiftObject(ValueInstance.borrow(ByteSource, self));
 
-    expect(source.$method("tryCheck", { mutating: false, typeArguments: [] }).call(9, Swift.closure((n: number) => Number(n) > 5))).toBe(true);
-    expect(source.$method("tryCheck", { mutating: false, typeArguments: [] }).call(2, Swift.closure((n: number) => Number(n) > 5))).toBe(false);
+    expect(source.$method("tryCheck", { self: "borrowing", typeArguments: [] }).call(9, Swift.closure((n: number) => Number(n) > 5))).toBe(true);
+    expect(source.$method("tryCheck", { self: "borrowing", typeArguments: [] }).call(2, Swift.closure((n: number) => Number(n) > 5))).toBe(false);
   });
 });
 
@@ -489,7 +489,7 @@ describe("sized-int and pointer loadable closures", () => {
     self.add(Process.pointerSize).writeU64(0);
     const source = asSwiftObject(ValueInstance.borrow(ByteSource, self));
 
-    expect(source.$method("mapI32", { mutating: false, typeArguments: [] }).call(5, Swift.closure((n: number) => Number(n) + 100))).toBe(105);
+    expect(source.$method("mapI32", { self: "borrowing", typeArguments: [] }).call(5, Swift.closure((n: number) => Number(n) + 100))).toBe(105);
   });
 });
 
@@ -531,7 +531,7 @@ describe("loadable param with an indirect result", () => {
     const source = asSwiftObject(ValueInstance.borrow(ByteSource, self));
 
     const result = source
-      .$method("produce", { typeArguments: [typeOf(Int)], mutating: false })
+      .$method("produce", { typeArguments: [typeOf(Int)], self: "borrowing" })
       .call(6, Swift.closure((n: number) => Number(n) * 7));
     expect(result).toEqual(int64(42));
   });
@@ -549,28 +549,28 @@ describe("String loadable closures through the facade", () => {
   }
 
   test("(String) -> String round-trips a small inline string", () => {
-    const result = byteSource().$method("mapStr", { mutating: false, typeArguments: [] }).call("frida", Swift.closure((s: string) => s.toUpperCase()));
+    const result = byteSource().$method("mapStr", { self: "borrowing", typeArguments: [] }).call("frida", Swift.closure((s: string) => s.toUpperCase()));
     expect(result).toBe("FRIDA");
   });
 
   test("(String) -> String preserves all 16 bytes of a 12-char inline string", () => {
     // 9–15 char strings store content in the high word; pointer-typed words avoid double precision loss.
-    const result = byteSource().$method("mapStr", { mutating: false, typeArguments: [] }).call("abcdefghijkl", Swift.closure((s: string) => s.split("").reverse().join("")));
+    const result = byteSource().$method("mapStr", { self: "borrowing", typeArguments: [] }).call("abcdefghijkl", Swift.closure((s: string) => s.split("").reverse().join("")));
     expect(result).toBe("lkjihgfedcba");
   });
 
   test("(String) -> String round-trips a heap-allocated string", () => {
     const long = "the quick brown fox jumps over the lazy dog";
-    const result = byteSource().$method("mapStr", { mutating: false, typeArguments: [] }).call(long, Swift.closure((s: string) => s.toUpperCase()));
+    const result = byteSource().$method("mapStr", { self: "borrowing", typeArguments: [] }).call(long, Swift.closure((s: string) => s.toUpperCase()));
     expect(result).toBe(long.toUpperCase());
   });
 
   test("(String) -> Int passes the string and returns a scalar", () => {
-    expect(byteSource().$method("strLen", { mutating: false, typeArguments: [] }).call("héllo", Swift.closure((s: string) => s.length))).toEqual(int64(5));
+    expect(byteSource().$method("strLen", { self: "borrowing", typeArguments: [] }).call("héllo", Swift.closure((s: string) => s.length))).toEqual(int64(5));
   });
 
   test("(Int) -> String returns a synthesized string", () => {
-    expect(byteSource().$method("label", { mutating: false, typeArguments: [] }).call(7, Swift.closure((n: number) => `n=${n}`))).toBe("n=7");
+    expect(byteSource().$method("label", { self: "borrowing", typeArguments: [] }).call(7, Swift.closure((n: number) => `n=${n}`))).toBe("n=7");
   });
 });
 

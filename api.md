@@ -354,9 +354,9 @@ robot.at(5, 6);     // calls at(_:_:)
 When bare-name resolution is ambiguous — same arity, different labels; or a
 generic method — use `$method(name, options)` to get an explicit bound method.
 Options: `arity`, `labels`, `argTypes`, `returnType`, `static`, `typeArguments`,
-and (value types only) `mutating` and `consuming`. `argTypes` and `returnType`
-match the demangled type names exactly; `returnType: null` selects the overload
-returning `Void`.
+and (value types only) `self`: `"borrowing"`, `"mutating"` or `"consuming"`,
+how the method takes `self`. `argTypes` and `returnType` match the demangled
+type names exactly; `returnType: null` selects the overload returning `Void`.
 
 ```js
 robot.$method("move", { labels: ["to"] }).call(5);   // move(to:)
@@ -393,18 +393,18 @@ acc.total;       // 8
 ```
 
 A generic method on a small value type (`String`, `Int`, small structs) still
-needs `{ mutating: true | false }`, since there the bridge can't tell how `self`
-is passed:
+needs `{ self: "borrowing" }` or `{ self: "mutating" }`, since there the bridge
+can't tell how `self` is passed:
 
 ```js
-box.$method("echo", { typeArguments: [Swift.type("Swift.Int")], mutating: false }).call(7);
+box.$method("echo", { typeArguments: [Swift.type("Swift.Int")], self: "borrowing" }).call(7);
 ```
 
 A `consuming` method takes ownership of `self` and destroys it. Pass
-`{ consuming: true }` so the bridge hands it a copy and the value stays usable:
+`{ self: "consuming" }` so the bridge hands it a copy and the value stays usable:
 
 ```js
-box.$method("take", { consuming: true }).call();
+box.$method("take", { self: "consuming" }).call();
 ```
 
 **Sync and async share one call site.** A call returns a decoded value for a
@@ -831,11 +831,11 @@ corrupts memory instead of failing cleanly.
   not record it. For a small loadable receiver (`String`, `Int`, small structs),
   it decides whether `self` is passed as a pointer or in registers. Plain
   methods, sync or async, don't need it, because the bridge passes `self` both
-  ways; for generic ones pass `{ mutating: true | false }` to `$method` (see
+  ways; for generic ones pass `{ self: "borrowing" | "mutating" }` to `$method` (see
   [Calling methods](#calling-methods)). Large receivers are unaffected.
 - **Whether a value-type method is `consuming`.** The mangled name does not
   record it either, and here the bridge can't detect it and throw: without
-  `{ consuming: true }`, the callee destroys `self` while the value still owns
+  `{ self: "consuming" }`, the callee destroys `self` while the value still owns
   it, which is a double free for any value holding a reference. Plain sync
   methods only for now.
 - **Generic type arguments.** A JavaScript value does not identify a Swift type

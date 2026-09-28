@@ -13,23 +13,23 @@ describe("generic methods on value receivers", () => {
 
   test("small loadable receiver: generic arg/return with self as a trailing exploded arg", () => {
     const Int = metadataFor("Swift.Int")!;
-    expect(box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int], mutating: false }).call(7)).toEqual(int64(7));
+    expect(box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int], self: "borrowing" }).call(7)).toEqual(int64(7));
   });
 
-  test("small loadable receiver: a generic method still requires the mutating flag", () => {
+  test("small loadable receiver: a generic method still requires the self option", () => {
     const Int = metadataFor("Swift.Int")!;
-    expect(() => box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int] })).toThrow('$method("echo", { mutating: false }).call(...)');
+    expect(() => box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int] })).toThrow('$method("echo", { self: "borrowing" }).call(...)');
   });
 
   test("small receiver: a String generic argument routes through the value self", () => {
     const Str = metadataFor("Swift.String")!;
-    expect(box("fixture.SmallGenericBox", { base: 1 }).method("echo", { typeArguments: [Str], mutating: false }).call("hi")).toBe("hi");
+    expect(box("fixture.SmallGenericBox", { base: 1 }).method("echo", { typeArguments: [Str], self: "borrowing" }).call("hi")).toBe("hi");
   });
 
   test("small receiver: self + generic arg + witness combine (trailing-self ordering)", () => {
     const Int = metadataFor("Swift.Int")!;
     // base 10 + 3.scaled(by: 7) = 31; a wrong self/metadata order corrupts base or the witness call.
-    expect(box("fixture.SmallGenericBox", { base: 10 }).method("scaledBy", { typeArguments: [Int], mutating: false }).call(3, 7)).toEqual(int64(31));
+    expect(box("fixture.SmallGenericBox", { base: 10 }).method("scaledBy", { typeArguments: [Int], self: "borrowing" }).call(3, 7)).toEqual(int64(31));
   });
 
   test("large receiver: self passed indirectly in x20 alongside trailing metadata", () => {

@@ -161,11 +161,12 @@ export interface MethodResolveOptions extends BaseResolveOptions {
   typeArguments?: SwiftType[]; // one entry per generic parameter
 }
 
-// mutating and consuming are unrecoverable from the symbol; the caller supplies them. mutating only
-// changes self routing for small loadable receivers: required for generic methods, optional for async ones.
+export type SelfOwnership = "borrowing" | "mutating" | "consuming";
+
+// How self is taken is unrecoverable from the symbol; the caller supplies it. It only changes self
+// routing for small loadable receivers: required for generic methods, optional for async ones.
 export interface ValueMethodResolveOptions extends MethodResolveOptions {
-  mutating?: boolean;
-  consuming?: boolean;
+  self?: SelfOwnership;
 }
 
 export interface RawMethodResolveOptions extends BaseResolveOptions {
@@ -174,13 +175,12 @@ export interface RawMethodResolveOptions extends BaseResolveOptions {
 }
 
 export interface RawValueMethodResolveOptions extends RawMethodResolveOptions {
-  mutating?: boolean;
-  consuming?: boolean;
+  self?: SelfOwnership;
 }
 
 export function lowerResolveOptions(stable: ValueMethodResolveOptions): RawValueMethodResolveOptions {
-  const { arity, labels, argTypes, returnType, static: isStatic, mutating, consuming, typeArguments } = stable;
-  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, mutating, consuming };
+  const { arity, labels, argTypes, returnType, static: isStatic, self, typeArguments } = stable;
+  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, self };
   if (typeArguments !== undefined) {
     raw.typeArguments = typeArguments.map((t) => metadataOf(t));
   }
@@ -1169,7 +1169,7 @@ export class BoundAsyncMethod {
           const { selector } = this.resolved;
           throw new Error(
             `${selector} on ${typeName(this.selfRouting.receiver)}: args plus a trailing self exceed the async ` +
-              `argument registers; if it mutates, call it as $method("${selector.split("(")[0]}", { mutating: true }).call(...)`
+              `argument registers; if it mutates, call it as $method("${selector.split("(")[0]}", { self: "mutating" }).call(...)`
           );
         }
       }
@@ -1485,18 +1485,18 @@ export type SelfRouting = { indirect: true } | { indirect: false; receiver: Meta
 // arg. Only a small loadable receiver's routing depends on `mutating`, which isn't recoverable from the
 // symbol. Plain calls pass self both ways (valueInvoker, BoundAsyncMethod); generic ones can't, since a
 // trailing self shifts the metadata args, so there the caller must state it.
-function valueSelfRouting(receiver: Metadata, selector: string, mutating: boolean | undefined): SelfRouting {
+function valueSelfRouting(receiver: Metadata, selector: string, ownership: SelfOwnership | undefined): SelfRouting {
   if (shouldPassIndirectly(receiver)) {
     return { indirect: true };
   }
-  if (mutating === undefined) {
+  if (ownership === undefined) {
     const baseName = selector.split("(")[0];
     throw new Error(
       `${selector} on small loadable ${typeName(receiver)}: self routing depends on whether it mutates; ` +
-        `call it as $method("${baseName}", { mutating: false }).call(...), or { mutating: true } if it mutates`
+        `call it as $method("${baseName}", { self: "borrowing" }).call(...), or { self: "mutating" } if it mutates`
     );
   }
-  return mutating ? { indirect: true } : { indirect: false, receiver };
+  return ownership === "mutating" ? { indirect: true } : { indirect: false, receiver };
 }
 
 // A small loadable self rides as trailing args if the method doesn't mutate, or by address in x20 if
@@ -1562,10 +1562,10 @@ export function bindValueMethod(
   if (resolved === null) {
     return bindConformanceMethod(typeName(receiver), self, name, options);
   }
-  // Both ways unless { mutating: true }, which keeps self out of the async trampoline's scarce arg registers.
+  // Both ways unless { self: "mutating" }, which keeps self out of the async trampoline's scarce arg registers.
   return resolved.async === true
-    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.mutating ?? false))
-    : new BoundValueMethod(resolved, receiver, self, options.consuming === true);
+    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.self ?? "borrowing"))
+    : new BoundValueMethod(resolved, receiver, self, options.self === "consuming");
 }
 
 // buffer: (UnsafeRawBufferPointer) -> @out, via an asm trampoline. loadable: register params and
@@ -2104,7 +2104,7 @@ export function bindGenericValueMethod(
   options: RawValueMethodResolveOptions = {}
 ): GenericBoundMethod | GenericBoundAsyncMethod {
   const plan = planGenericMethod(typeName(receiver), methodName, options);
-  const routing = valueSelfRouting(receiver, plan.selector, options.mutating);
+  const routing = valueSelfRouting(receiver, plan.selector, options.self);
   return plan.async ? new GenericBoundAsyncMethod(plan, self, routing) : new GenericBoundMethod(plan, self, routing);
 }
 

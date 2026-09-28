@@ -272,6 +272,7 @@ export {
   MethodKind,
   MethodResolveOptions,
   ValueMethodResolveOptions,
+  SelfOwnership,
   RawMethodResolveOptions,
   RawValueMethodResolveOptions,
   PropertyInfo,

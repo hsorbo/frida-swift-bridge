@@ -64,9 +64,9 @@ function facadeKindContractsHoldAtCompileTime(
   type: SwiftType,
 ) {
   cls.$method("m");
-  val.$method("m", { mutating: true });
-  // @ts-expect-error mutating is value-only
-  cls.$method("m", { mutating: true });
+  val.$method("m", { self: "mutating" });
+  // @ts-expect-error self is value-only
+  cls.$method("m", { self: "mutating" });
 
   if (either.$kind === "value") {
     either.$container();

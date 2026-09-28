@@ -114,6 +114,7 @@ export type {
   MethodKind,
   MethodResolveOptions,
   ValueMethodResolveOptions,
+  SelfOwnership,
   AccessorKind,
   PropertyInfo,
 } from "./runtime/method.js";

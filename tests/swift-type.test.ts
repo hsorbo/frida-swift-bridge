@@ -184,7 +184,7 @@ describe("type wrappers", () => {
     const inner = typeFromDescriptor(desc!) as StructType;
     expect(inner.name).toBe("fixture.Outer.Inner");
     const v = inner.new({ value: 21 });
-    expect(v.$method("doubled", { mutating: false }).call()).toEqual(int64(42));
+    expect(v.$method("doubled", { self: "borrowing" }).call()).toEqual(int64(42));
   });
 
   test("a type nested in an extension keeps its extended parent in the full path", () => {
@@ -194,6 +194,6 @@ describe("type wrappers", () => {
     expect(fromExt.name).toBe("fixture.Outer.FromExt");
     expect(fromExt.moduleName).toBe("fixture");
     const v = fromExt.new({ mark: 7 });
-    expect(v.$method("tripled", { mutating: false }).call()).toEqual(int64(21));
+    expect(v.$method("tripled", { self: "borrowing" }).call()).toEqual(int64(21));
   });
 });
