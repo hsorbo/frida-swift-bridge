@@ -16,6 +16,11 @@ describe("generic methods on value receivers", () => {
     expect(box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int], mutating: false }).call(7)).toEqual(int64(7));
   });
 
+  test("small loadable receiver: a generic method still requires the mutating flag", () => {
+    const Int = metadataFor("Swift.Int")!;
+    expect(() => box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int] })).toThrow('$method("echo", { mutating: false }).call(...)');
+  });
+
   test("small receiver: a String generic argument routes through the value self", () => {
     const Str = metadataFor("Swift.String")!;
     expect(box("fixture.SmallGenericBox", { base: 1 }).method("echo", { typeArguments: [Str], mutating: false }).call("hi")).toBe("hi");

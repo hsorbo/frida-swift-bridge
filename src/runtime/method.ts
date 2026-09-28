@@ -143,7 +143,7 @@ export interface MethodResolveOptions extends BaseResolveOptions {
 }
 
 // mutating is unrecoverable from the symbol; the caller supplies it. It only changes self routing
-// for small loadable receivers, where it is required — large/non-POD receivers pass self in x20 either way.
+// for small loadable receivers of generic or async methods, where it is required.
 export interface ValueMethodResolveOptions extends MethodResolveOptions {
   mutating?: boolean;
 }
@@ -1356,7 +1356,8 @@ export type SelfRouting = { indirect: true } | { indirect: false; receiver: Meta
 
 // Value-type self is indirect (x20) when mutating/inout or large/non-POD; else it rides as a trailing
 // arg. Only a small loadable receiver's routing depends on `mutating`, which isn't recoverable from the
-// symbol, so there the caller must state it rather than have us guess non-mutating and corrupt self.
+// symbol. Plain sync calls pass self both ways (valueInvoker); generic ones can't, since a trailing self
+// shifts the metadata args, and async ones don't yet, so there the caller must state it.
 function valueSelfRouting(receiver: Metadata, selector: string, mutating: boolean | undefined): SelfRouting {
   if (shouldPassIndirectly(receiver)) {
     return { indirect: true };
@@ -1371,18 +1372,18 @@ function valueSelfRouting(receiver: Metadata, selector: string, mutating: boolea
   return mutating ? { indirect: true } : { indirect: false, receiver };
 }
 
-function valueInvoker(resolved: ResolvedMethod, receiver: Metadata, indirectSelf: boolean): SwiftNativeFunction {
-  const key = `${resolved.address}:${indirectSelf ? "i" : "d"}`;
+// A small loadable self rides as trailing args if the method doesn't mutate, or by address in x20 if
+// it does, and the symbol doesn't say which. Pass it both ways: each callee reads only its own, and the
+// other is an unused arg or a callee-saved register.
+function valueInvoker(resolved: ResolvedMethod, receiver: Metadata): SwiftNativeFunction {
+  const key = `${resolved.address}:value-self`;
   let fn = invokerCache.get(key);
   if (fn === undefined) {
-    fn = indirectSelf
-      ? makeSwiftNativeFunction(resolved.address, resolved.returnType, resolved.argTypes, {
-          hasSelf: true,
-          throws: resolved.throws,
-        })
-      : makeSwiftNativeFunction(resolved.address, resolved.returnType, [...resolved.argTypes, receiver], {
-          throws: resolved.throws,
-        });
+    const argTypes = shouldPassIndirectly(receiver) ? resolved.argTypes : [...resolved.argTypes, receiver];
+    fn = makeSwiftNativeFunction(resolved.address, resolved.returnType, argTypes, {
+      hasSelf: true,
+      throws: resolved.throws,
+    });
     invokerCache.set(key, fn);
   }
   return fn;
@@ -1390,16 +1391,15 @@ function valueInvoker(resolved: ResolvedMethod, receiver: Metadata, indirectSelf
 
 export class BoundValueMethod {
   private readonly fn: SwiftNativeFunction;
-  private readonly indirectSelf: boolean;
+  private readonly trailingSelf: boolean;
 
   constructor(
     readonly resolved: ResolvedMethod,
-    private readonly receiver: Metadata,
-    private readonly self: NativePointer,
-    routing: SelfRouting
+    receiver: Metadata,
+    private readonly self: NativePointer
   ) {
-    this.indirectSelf = routing.indirect;
-    this.fn = valueInvoker(resolved, receiver, this.indirectSelf);
+    this.trailingSelf = !shouldPassIndirectly(receiver);
+    this.fn = valueInvoker(resolved, receiver);
   }
 
   get address(): NativePointer {
@@ -1412,7 +1412,7 @@ export class BoundValueMethod {
       throw new Error(`${this.resolved.selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
     return callBorrowingArgs(argTypes, args, returnType, (argPtrs) =>
-      this.indirectSelf ? this.fn(this.self, ...argPtrs) : this.fn(...argPtrs, this.self)
+      this.trailingSelf ? this.fn(this.self, ...argPtrs, this.self) : this.fn(this.self, ...argPtrs)
     );
   }
 }
@@ -1427,10 +1427,9 @@ export function bindValueMethod(
   if (resolved === null) {
     return bindConformanceMethod(typeName(receiver), self, name, options);
   }
-  const routing = valueSelfRouting(receiver, resolved.selector, options.mutating);
   return resolved.async === true
-    ? new BoundAsyncMethod(resolved, self, routing)
-    : new BoundValueMethod(resolved, receiver, self, routing);
+    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.mutating))
+    : new BoundValueMethod(resolved, receiver, self);
 }
 
 // buffer: (UnsafeRawBufferPointer) -> @out, via an asm trampoline. loadable: register params and

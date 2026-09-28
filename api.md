@@ -340,7 +340,7 @@ robot.at(5, 6);     // calls at(_:_:)
 ```
 
 When bare-name resolution is ambiguous — same arity, different labels; a
-generic method; or a mutating value method — use `$method(name, options)` to get
+generic method; or a generic or async method on a small value — use `$method(name, options)` to get
 an explicit bound method. Options: `arity`, `labels`, `argTypes`, `static`,
 `typeArguments`, and (value types only) `mutating`.
 
@@ -367,16 +367,22 @@ const box = Swift.type("MyApp.Box").init();
 box.$method("echo", { typeArguments: [Swift.type("Swift.Int")] }).call(21);   // 21
 ```
 
-Mutating value methods must declare their intent. A small loadable value type is
-ambiguous about `self` routing, so the bridge refuses to guess: bare invocation
-throws, and you pass `{ mutating: true | false }`:
+Value methods work the same whether or not they are `mutating`; a mutating one
+writes back into the value:
 
 ```js
 const acc = Swift.type("MyApp.Accumulator").new({ total: 5 });
-acc.peek(10);                                   // throws: needs a mutating flag
-acc.$method("peek", { mutating: false }).call(10);   // 15
-acc.$method("add",  { mutating: true  }).call(3);    // writes back through self
-acc.total;                                      // 8
+acc.peek(10);    // 15
+acc.add(3);      // writes back through self
+acc.total;       // 8
+```
+
+A generic or async method on a small value type (`String`, `Int`, small structs)
+still needs `{ mutating: true | false }`, since there the bridge can't tell how
+`self` is passed:
+
+```js
+box.$method("echo", { typeArguments: [Swift.type("Swift.Int")], mutating: false }).call(7);
 ```
 
 **Sync and async share one call site.** A call returns a decoded value for a
@@ -763,13 +769,12 @@ corrupts memory instead of failing cleanly.
 
 **Things you have to state**
 
-- **Whether a value-type method is `mutating`.** The mangled name does not
-  record it. For a small loadable receiver (`String`, `Int`, small structs), it
-  decides whether `self` is passed as a pointer or in registers. Pass
-  `{ mutating: true | false }` to `$method` (see
-  [Calling methods](#calling-methods)). This often shows up with an app's own
-  extensions on standard types, such as `extension String { func trim() }`.
-  Large or non-trivial receivers are unaffected.
+- **Whether a generic or async value-type method is `mutating`.** The mangled
+  name does not record it. For a small loadable receiver (`String`, `Int`, small
+  structs), it decides whether `self` is passed as a pointer or in registers.
+  Plain methods don't need it, because the bridge passes `self` both ways; for
+  generic and async ones pass `{ mutating: true | false }` to `$method` (see
+  [Calling methods](#calling-methods)). Large receivers are unaffected.
 - **Generic type arguments.** A JavaScript value does not identify a Swift type
   (`5` could be `Int`, `Int32` or `Double`), so a generic method needs
   `{ typeArguments }`. The one exception: a type parameter that appears only as

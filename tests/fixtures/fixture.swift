@@ -40,6 +40,9 @@ public struct NoncopyableStruct: ~Copyable {
 
 extension LoadableStruct {
     public func dot(_ k: Int) -> Int { (a + b + c + d) * k }
+    public func weighted(_ p: Int, _ q: Int, _ r: Int, _ s: Int, _ t: Int, _ u: Int) -> Int {
+        a + 10 * b + 100 * c + 1000 * d + 10000 * (p + q + r + s + t + u)
+    }
 }
 
 extension BigStruct {
@@ -85,6 +88,9 @@ public struct Accumulator {
         total += amount
     }
     public func peek(_ x: Int) -> Int { total + x }
+    public mutating func addEight(_ a: Int, _ b: Int, _ c: Int, _ d: Int, _ e: Int, _ f: Int, _ g: Int, _ h: Int) {
+        total += a + b + c + d + e + f + g + h
+    }
     public func peekAsync(_ x: Int) async -> Int {
         await Task.yield()
         return total + x
@@ -96,6 +102,11 @@ public struct Accumulator {
         await Task.yield()
         return a + b
     }
+}
+
+public struct Ledger {
+    public var entry: Accumulator
+    public var id: Int
 }
 
 // Nested type; full name fixture.Outer.Inner.

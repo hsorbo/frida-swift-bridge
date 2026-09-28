@@ -27,3 +27,9 @@ public extension Labeled {
 
     func whisperLabeled() -> String { "labeled " + displayName.lowercased() }
 }
+
+public extension String {
+    func shouted() -> String { uppercased() + "!" }
+
+    mutating func exclaim() { self += "!" }
+}
