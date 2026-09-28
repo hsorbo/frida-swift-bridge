@@ -551,7 +551,17 @@ public final class Kennel {
 #if compiler(>=5.9)
 extension TokenBox {
     public consuming func take() -> Int { token.id }
+    public consuming func takeTagged<T>(_ x: T) -> Int { token.id }
+    public consuming func takeAsync() async -> Int { token.id }
 }
+public struct TokenCrate<T> {
+    public var token: Token
+    public var value: T
+    public init(_ token: Token, _ value: T) { self.token = token; self.value = value }
+    public consuming func take() -> Int { token.id }
+    public consuming func takeAsync() async -> Int { token.id }
+}
+public func packTokenCrate(_ token: Token, _ value: Int) -> TokenCrate<Int> { TokenCrate(token, value) }
 extension Wrapper {
     public consuming func take() -> Int { token.id }
 }

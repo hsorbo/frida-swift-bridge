@@ -1159,7 +1159,8 @@ export class BoundAsyncMethod {
     readonly resolved: ResolvedMethod,
     private readonly self: NativePointer | null,
     private readonly selfRouting: SelfRouting = { indirect: true },
-    private readonly executor: SerialExecutorRef | null = null
+    private readonly executor: SerialExecutorRef | null = null,
+    private readonly consumedSelf: Metadata | null = null
   ) {
     if (resolved.asyncFunctionPointer === undefined) {
       throw new Error(`${resolved.selector} is not async`);
@@ -1190,13 +1191,18 @@ export class BoundAsyncMethod {
     if (this.executor !== null) {
       options.onActor = this.executor;
     }
-    if (this.self !== null) {
-      options.receiver = this.self;
+    const self = this.self !== null && this.consumedSelf !== null ? copyOfValue(this.consumedSelf, this.self) : this.self;
+    const discardSelf = (): void => {
+      if (self !== this.self) this.consumedSelf!.valueWitnesses.destroy(self!);
+    };
+    if (self !== null) {
+      options.receiver = self;
       if (!this.selfRouting.indirect) {
         const argsFit = !lowered.spills;
-        lowered.push(this.selfRouting.receiver, this.self); // both ways, as in valueInvoker
+        lowered.push(this.selfRouting.receiver, self); // both ways, as in valueInvoker
         if (argsFit && lowered.spills) {
           cleanup();
+          discardSelf();
           const { selector } = this.resolved;
           throw new Error(
             `${selector} on ${typeName(this.selfRouting.receiver)}: args plus a trailing self exceed the async ` +
@@ -1213,6 +1219,7 @@ export class BoundAsyncMethod {
     }
     if (lowered.spills) {
       cleanup();
+      discardSelf();
       throw new Error("too many register arguments");
     }
     const { gp, fp } = lowered;
@@ -1228,6 +1235,7 @@ export class BoundAsyncMethod {
           return decodeReturn(returnType, this.result === null ? null : ret);
         } finally {
           cleanup();
+          void self; // the trampoline embeds its address; keep it allocated until settle
         }
       },
       (error) => {
@@ -1577,17 +1585,22 @@ export class BoundValueMethod {
     if (args.length !== argTypes.length) {
       throw new Error(`${this.resolved.selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
-    const self = this.consuming ? this.copyOfSelf() : this.self;
-    return callBorrowingArgs(argTypes, args, returnType, (argPtrs) =>
-      this.trailingSelf ? this.fn(self, ...argPtrs, self) : this.fn(self, ...argPtrs)
-    );
+    return callBorrowingArgs(argTypes, args, returnType, (argPtrs) => {
+      const self = this.consuming ? copyOfValue(this.receiver, this.self) : this.self;
+      return this.trailingSelf ? this.fn(self, ...argPtrs, self) : this.fn(self, ...argPtrs);
+    });
   }
+}
 
-  private copyOfSelf(): NativePointer {
-    const copy = Memory.alloc(this.receiver.typeLayout.stride);
-    this.receiver.valueWitnesses.initializeWithCopy(copy, this.self);
-    return copy;
-  }
+// A consuming method takes ownership of self, so it gets a +1 copy and the caller's value survives.
+function copyOfValue(type: Metadata, value: NativePointer): NativePointer {
+  const copy = Memory.alloc(type.typeLayout.stride);
+  type.valueWitnesses.initializeWithCopy(copy, value);
+  return copy;
+}
+
+function consumedSelf(receiver: Metadata, options: RawValueMethodResolveOptions): Metadata | null {
+  return options.self === "consuming" ? receiver : null;
 }
 
 export function bindValueMethod(
@@ -1602,7 +1615,7 @@ export function bindValueMethod(
   }
   // Both ways unless { self: "mutating" }, which keeps self out of the async trampoline's scarce arg registers.
   return resolved.async === true
-    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.self ?? "borrowing"))
+    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.self ?? "borrowing"), null, consumedSelf(receiver, options))
     : new BoundValueMethod(resolved, receiver, self, options.self === "consuming");
 }
 
@@ -1854,7 +1867,8 @@ export class GenericBoundMethod {
   constructor(
     private readonly plan: GenericMethodPlan,
     private readonly self: NativePointer,
-    routing: SelfRouting
+    routing: SelfRouting,
+    private readonly consumedSelf: Metadata | null = null
   ) {
     this.address = plan.address;
     this.selector = plan.selector;
@@ -1896,7 +1910,8 @@ export class GenericBoundMethod {
     }
     const returnType = this.plan.returnPlan === null ? null : planMetadata(this.plan.returnPlan);
     try {
-      const ret = this.indirectSelf ? this.fn(this.self, ...argPtrs) : this.fn(...argPtrs, this.self);
+      const self = this.consumedSelf === null ? this.self : copyOfValue(this.consumedSelf, this.self);
+      const ret = this.indirectSelf ? this.fn(self, ...argPtrs) : this.fn(...argPtrs, self);
       return decodeReturn(returnType, ret);
     } finally {
       for (const b of borrowed) {
@@ -1930,7 +1945,8 @@ export class GenericBoundAsyncMethod {
   constructor(
     private readonly plan: GenericMethodPlan,
     private readonly self: NativePointer,
-    routing: SelfRouting
+    routing: SelfRouting,
+    private readonly consumedSelf: Metadata | null = null
   ) {
     if (plan.asyncFunctionPointer === undefined) {
       throw new Error(`${plan.selector} is not async`);
@@ -1970,7 +1986,8 @@ export class GenericBoundAsyncMethod {
       throw new Error("too many register arguments");
     }
     const { gp, fp } = lowered;
-    const options: AsyncCallOptions = { throws: this.plan.throws, receiver: this.self };
+    const self = this.consumedSelf === null ? this.self : copyOfValue(this.consumedSelf, this.self);
+    const options: AsyncCallOptions = { throws: this.plan.throws, receiver: self };
     if (fp.length > 0) {
       options.floatArgs = fp;
     }
@@ -1984,6 +2001,7 @@ export class GenericBoundAsyncMethod {
           return decodeReturn(returnType, this.result === null ? null : ret);
         } finally {
           cleanup();
+          void self; // the trampoline embeds its address; keep it allocated until settle
         }
       },
       (error) => {
@@ -2141,7 +2159,10 @@ export function bindGenericValueMethod(
 ): GenericBoundMethod | GenericBoundAsyncMethod {
   const plan = planGenericMethod(typeName(receiver), methodName, options);
   const routing = valueSelfRouting(receiver, plan.selector, options.self);
-  return plan.async ? new GenericBoundAsyncMethod(plan, self, routing) : new GenericBoundMethod(plan, self, routing);
+  const consumed = consumedSelf(receiver, options);
+  return plan.async
+    ? new GenericBoundAsyncMethod(plan, self, routing, consumed)
+    : new GenericBoundMethod(plan, self, routing, consumed);
 }
 
 // A bare type parameter (T) is address-only in the generic context but concretely sized by the
@@ -2220,12 +2241,13 @@ export function bindGenericTypeValueMethod(
   receiver: Metadata,
   self: NativePointer,
   methodName: string,
-  options: RawMethodResolveOptions = {}
+  options: RawValueMethodResolveOptions = {}
 ): GenericBoundMethod | GenericBoundAsyncMethod {
   const plan = planGenericTypeMethod(receiver, methodName, options, true);
+  const consumed = consumedSelf(receiver, options);
   return plan.async
-    ? new GenericBoundAsyncMethod(plan, self, { indirect: true })
-    : new GenericBoundMethod(plan, self, { indirect: true });
+    ? new GenericBoundAsyncMethod(plan, self, { indirect: true }, consumed)
+    : new GenericBoundMethod(plan, self, { indirect: true }, consumed);
 }
 
 export function bindGenericTypeClassMethod(

@@ -836,8 +836,7 @@ corrupts memory instead of failing cleanly.
 - **Whether a value-type method is `consuming`.** The mangled name does not
   record it either, and here the bridge can't detect it and throw: without
   `{ self: "consuming" }`, the callee destroys `self` while the value still owns
-  it, which is a double free for any value holding a reference. Plain sync
-  methods only for now.
+  it, which is a double free for any value holding a reference.
 - **Generic type arguments.** A JavaScript value does not identify a Swift type
   (`5` could be `Int`, `Int32` or `Double`), so a generic method needs
   `{ typeArguments }`. The one exception: a type parameter that appears only as

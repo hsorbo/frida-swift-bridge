@@ -104,6 +104,8 @@ describe("facade method routing on a small loadable value", () => {
   });
 });
 
+const PACK_TOKEN_CRATE = "$s7fixture14packTokenCrateyAA0cD0VySiGAA0C0C_SitF";
+
 describe("consuming methods on value types", () => {
   beforeEach(() => { loadFixture(); });
 
@@ -133,6 +135,46 @@ describe("consuming methods on value types", () => {
     const take = wrapper.$method("take", { self: "consuming" });
     expect(take.call()).toEqual(int64(9));
     expect(take.call()).toEqual(int64(9));
+    expect(view.retainCount).toBe(before);
+  });
+
+  test("a consuming generic method on a small loadable struct leaves the caller's self intact", (ctx) => {
+    if (loadFixture().findExportByName("$s7fixture8TokenBoxV10takeTaggedySixlF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
+    const { facade, view } = token(11);
+    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
+      .initializer({ labels: [null, "tag"] })
+      .call(facade, 5) as SwiftObject;
+    const before = view.retainCount;
+    const take = box.$method("takeTagged", { typeArguments: [Swift.type("Swift.Int")!], self: "consuming" });
+    expect(take.call(1)).toEqual(int64(11));
+    expect(take.call(2)).toEqual(int64(11));
+    expect(view.retainCount).toBe(before);
+  });
+
+  test("a consuming async method on a small loadable struct leaves the caller's self intact", async (ctx) => {
+    if (loadFixture().findExportByName("$s7fixture8TokenBoxV9takeAsyncSiyYaF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
+    const { facade, view } = token(13);
+    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
+      .initializer({ labels: [null, "tag"] })
+      .call(facade, 5) as SwiftObject;
+    const before = view.retainCount;
+    const take = box.$method("takeAsync", { self: "consuming" });
+    expect(await take.call()).toEqual(int64(13));
+    expect(await take.call()).toEqual(int64(13));
+    expect(view.retainCount).toBe(before);
+  });
+
+  test("consuming methods on a generic struct leave the caller's self intact", async (ctx) => {
+    if (loadFixture().findExportByName(PACK_TOKEN_CRATE) === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
+    const { facade, view } = token(17);
+    const crate = Swift.function(loadFixture(), PACK_TOKEN_CRATE).call(facade, 3) as SwiftObject;
+    const before = view.retainCount;
+    const take = crate.$method("take", { self: "consuming" });
+    expect(take.call()).toEqual(int64(17));
+    expect(take.call()).toEqual(int64(17));
+    const takeAsync = crate.$method("takeAsync", { self: "consuming" });
+    expect(await takeAsync.call()).toEqual(int64(17));
+    expect(await takeAsync.call()).toEqual(int64(17));
     expect(view.retainCount).toBe(before);
   });
 });
