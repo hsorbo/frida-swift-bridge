@@ -144,6 +144,8 @@ export interface ResolvedMethod {
   asyncFunctionPointer?: AsyncFunctionPointer;
   witnessSelf?: WitnessTable;
   witnessTables?: NativePointer[];
+  abstractArgs?: boolean[];
+  abstractReturn?: boolean;
 }
 
 interface BaseResolveOptions {
@@ -989,8 +991,8 @@ function resolveMethodIn(
 // Keyed by full signature, not bare address: an index invocation must not reuse a symbol-route
 // invoker built for different types at the same impl.
 function instanceInvokerKey(resolved: ResolvedMethod): string {
-  const ret = resolved.returnType === null ? "v" : resolved.returnType.handle.toString();
-  const args = resolved.argTypes.map((t) => t.handle.toString()).join(",");
+  const ret = resolved.returnType === null ? "v" : `${resolved.returnType.handle}${resolved.abstractReturn ? "@" : ""}`;
+  const args = resolved.argTypes.map((t, i) => `${t.handle}${resolved.abstractArgs?.[i] ? "@" : ""}`).join(",");
   const witness = resolved.witnessSelf === undefined ? "" : `|${resolved.witnessSelf.handle}`;
   return `${resolved.address}|self|${ret}|${args}|${resolved.throws ? "t" : "n"}${witness}`;
 }
@@ -1009,7 +1011,10 @@ function invokerFor(resolved: ResolvedMethod): SwiftNativeFunction {
   const key = instanceInvokerKey(resolved);
   let fn = invokerCache.get(key);
   if (fn === undefined) {
-    fn = makeSwiftNativeFunction(resolved.address, resolved.returnType, resolved.argTypes, {
+    const { abstractArgs, abstractReturn } = resolved;
+    const argTypes = resolved.argTypes.map((t, i): SwiftArgType => (abstractArgs?.[i] ? indirect(t) : t));
+    const returnType = resolved.returnType !== null && abstractReturn ? indirect(resolved.returnType) : resolved.returnType;
+    fn = makeSwiftNativeFunction(resolved.address, returnType, argTypes, {
       hasSelf: true,
       throws: resolved.throws,
       ...witnessSelfArgs(resolved.witnessSelf, resolved.witnessTables),
@@ -1089,11 +1094,15 @@ function pushAsyncArg(metadata: Metadata, buffer: NativePointer, gp: NativePoint
   }
 }
 
-function lowerAsyncArgs(argTypes: Metadata[], buffers: NativePointer[]): LoweredAsyncArgs {
+function lowerAsyncArgs(argTypes: Metadata[], buffers: NativePointer[], abstractArgs: boolean[] = []): LoweredAsyncArgs {
   const gp: NativePointer[] = [];
   const fp: AsyncFloatArg[] = [];
   for (let i = 0; i < argTypes.length; i++) {
-    pushAsyncArg(argTypes[i], buffers[i], gp, fp);
+    if (abstractArgs[i]) {
+      gp.push(buffers[i]);
+    } else {
+      pushAsyncArg(argTypes[i], buffers[i], gp, fp);
+    }
   }
   return { gp, fp };
 }
@@ -1124,7 +1133,11 @@ export class BoundAsyncMethod {
       throw new Error(`${resolved.selector} is not async`);
     }
     this.asyncFunctionPointer = resolved.asyncFunctionPointer;
-    this.result = asyncResultShape(resolved.returnType);
+    const { returnType, abstractReturn } = resolved;
+    this.result =
+      returnType !== null && abstractReturn === true && returnType.valueWitnesses.size > 0
+        ? { kind: "indirect", stride: returnType.valueWitnesses.stride }
+        : asyncResultShape(returnType);
   }
 
   get address(): NativePointer {
@@ -1140,7 +1153,7 @@ export class BoundAsyncMethod {
     const cleanup = (): void => {
       buffers.forEach((ptr, i) => destroyArgTemp(argTypes[i], ptr));
     };
-    const { gp, fp } = lowerAsyncArgs(argTypes, buffers);
+    const { gp, fp } = lowerAsyncArgs(argTypes, buffers, this.resolved.abstractArgs);
     const options: AsyncCallOptions = { throws };
     if (this.executor !== null) {
       options.onActor = this.executor;
@@ -2609,7 +2622,7 @@ export function resolveWitnessMethod(table: WitnessTable, methodName: string): R
   const address = table.requirement(requirement.witnessIndex);
   return {
     address,
-    ...resolveWitnessSignature(table, signature),
+    ...resolveWitnessSignature(table, signature, false),
     isStatic: !requirement.isInstance,
     // An async requirement's slot holds the …Tu record (GenProto.cpp getAddrOfAsyncFunctionPointer).
     async: requirement.isAsync,
@@ -2670,7 +2683,7 @@ function resolveExtensionMethod(
   const { witnessTables, classBoundSelf } = selfSignature(table, requirement === null ? constraints : [])!;
   return {
     address,
-    ...resolveWitnessSignature(table, signature),
+    ...resolveWitnessSignature(table, signature, classBoundSelf),
     isStatic,
     async: signature.async,
     asyncFunctionPointer,
@@ -2756,8 +2769,9 @@ function witnessThunkSignature(table: WitnessTable, requirement: ProtocolRequire
 
 function resolveWitnessSignature(
   table: WitnessTable,
-  signature: SwiftFunctionSignature
-): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector"> {
+  signature: SwiftFunctionSignature,
+  classBoundSelf: boolean
+): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector" | "abstractArgs" | "abstractReturn"> {
   assertBorrowingArgs(signature.argTypeNames, signature.selector);
   const argTypes = signature.argTypeNames.map((name) => {
     const metadata = resolveTypeExpr(name, (n) => resolveWitnessSelfOrAssociatedType(table, n));
@@ -2773,7 +2787,15 @@ function resolveWitnessSignature(
       throw new Error(`cannot resolve return type ${signature.returnTypeName} of ${signature.selector}`);
     }
   }
-  return { argTypes, returnType, throws: signature.throws, selector: signature.selector };
+  const isAbstract = protocolLevelOpaque(table, classBoundSelf);
+  return {
+    argTypes,
+    returnType,
+    throws: signature.throws,
+    selector: signature.selector,
+    abstractArgs: signature.argTypeNames.map(isAbstract),
+    abstractReturn: signature.returnTypeName !== null && isAbstract(signature.returnTypeName),
+  };
 }
 
 export function bindWitnessMethod(
@@ -2869,17 +2891,22 @@ function witnessAccessor(
   if (type === null) {
     throw new Error(`cannot resolve ${kind} type ${typeName} of ${member}`);
   }
+  const abstract = protocolLevelOpaque(table, signature.classBoundSelf)(typeName);
+  return { address, type, kind, abstract, table, ...signature };
+}
+
+function protocolLevelOpaque(table: WitnessTable, classBoundSelf: boolean): (typeName: string) => boolean {
   const classBound = classBoundSubjects(protocolOf(table));
-  if (signature.classBoundSelf) {
+  if (classBoundSelf) {
     classBound.add("A");
   }
-  const abstract = hasOpaqueLayout(typeName, (name): ParamLayout | null => {
-    if (name !== "A" && !name.startsWith("A.")) {
-      return null;
-    }
-    return classBound.has(name) ? "reference" : "opaque";
-  });
-  return { address, type, kind, abstract, table, ...signature };
+  return (typeName) =>
+    hasOpaqueLayout(typeName, (name): ParamLayout | null => {
+      if (name !== "A" && !name.startsWith("A.")) {
+        return null;
+      }
+      return classBound.has(name) ? "reference" : "opaque";
+    });
 }
 
 function classBoundSubjects(protocol: ContextDescriptor): Set<string> {

@@ -78,6 +78,12 @@ describe("protocol-extension members on a conforming type", () => {
     expect(() => t.tag()).toThrow(/cannot tell whether tag\(\) is a requirement of optimized\.Tagged/);
   });
 
+  test("an extension method returns Self and passes an associated type indirectly for a loadable conformer", () => {
+    const source = (Swift.type("fixture.IntSource") as StructType).new({ value: 5 });
+    expect(source.me().value).toEqual(int64(5));
+    expect(source.echo(9)).toEqual(int64(9));
+  });
+
   test("an extension method still ambiguous after filtering lists its overloads", () => {
     const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
     expect(() => n.scaledTwice(3)).toThrow(

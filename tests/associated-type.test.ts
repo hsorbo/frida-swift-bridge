@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
-import { Protocol, ProtocolConformance, ProtocolRequirementKind, readProtocolRequirements, readAssociatedTypeNames, ValueInstance, metadataFor, typeName } from "../src/abi.js";
+import { Protocol, ProtocolConformance, BoundAsyncMethod, ProtocolRequirementKind, readProtocolRequirements, readAssociatedTypeNames, ValueInstance, metadataFor, typeName } from "../src/abi.js";
 
 import { Swift, ClassType, SwiftObject } from "../src/index.js";
 import { typeOf } from "../src/abi.js";
@@ -94,6 +94,30 @@ describe("associated type / associated conformance resolution", () => {
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
     const value = ValueInstance.fromJS(source, { value: 5 });
     expect((table.get(value.handle, "items") as SwiftObject).$container!()).toEqual([int64(5), int64(5)]);
+  });
+
+  test("a requirement passes and returns Self indirectly for a loadable conformer", () => {
+    loadFixtureSyms();
+    const source = metadataFor("fixturesyms.IntSource")!;
+    const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
+    const value = ValueInstance.fromJS(source, { value: 5 });
+    expect(table.method(value.handle, "merged").call({ value: 7 })).toEqual({ value: int64(12) });
+  });
+
+  test("a requirement passes and returns an associated type indirectly for a loadable conformer", () => {
+    loadFixtureSyms();
+    const source = metadataFor("fixturesyms.IntSource")!;
+    const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
+    const value = ValueInstance.fromJS(source, { value: 5 });
+    expect(table.method(value.handle, "shifted").call(4)).toEqual(int64(9));
+  });
+
+  test("an async requirement passes and returns an associated type indirectly for a loadable conformer", async () => {
+    loadFixtureSyms();
+    const source = metadataFor("fixturesyms.IntSource")!;
+    const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
+    const value = ValueInstance.fromJS(source, { value: 5 });
+    expect(await (table.method(value.handle, "shiftedLater") as BoundAsyncMethod).call(4)).toEqual(int64(9));
   });
 
   test("Self and a class-constrained associated type return directly in a class-constrained protocol", () => {

@@ -867,7 +867,7 @@ public struct ScalableBox: ConstrainedContainer {
     public init(item: WideScalar) { self.item = item }
 }
 
-// Witness getters whose types depend on Item: address-only at protocol level unless the
+// Witnesses whose types depend on Item: address-only at protocol level unless the
 // wrapper stays loadable for any element (Array) or the leaf is class-constrained.
 public struct Tagged<T> {
     public var inner: T
@@ -878,10 +878,20 @@ public protocol ItemSource {
     var tagged: Tagged<Item> { get set }
     var maybe: Item? { get set }
     var items: [Item] { get }
+    func merged(with other: Self) -> Self
+    func shifted(_ x: Item) -> Item
+    func shiftedLater(_ x: Item) async -> Item
+}
+extension ItemSource {
+    public func me() -> Self { self }
+    public func echo(_ x: Item) -> Item { x }
 }
 public struct IntSource: ItemSource {
     public var value: Int
     public init(value: Int) { self.value = value }
+    public func merged(with other: IntSource) -> IntSource { IntSource(value: value + other.value) }
+    public func shifted(_ x: Int) -> Int { x + value }
+    public func shiftedLater(_ x: Int) async -> Int { x + value }
     public var tagged: Tagged<Int> {
         get { Tagged(inner: value, tag: 2) }
         set { value = newValue.inner * newValue.tag }
