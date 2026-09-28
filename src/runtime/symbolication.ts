@@ -525,7 +525,7 @@ function matchingBracket(s: string, open: number): number {
   return -1;
 }
 
-function splitTopLevel(s: string, sep: string): string[] {
+export function splitTopLevel(s: string, sep: string): string[] {
   if (s.trim() === "") {
     return [];
   }

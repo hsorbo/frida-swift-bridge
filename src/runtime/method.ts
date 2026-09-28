@@ -23,6 +23,7 @@ import {
   SwiftFunctionSignature,
   SwiftAccessorSignature,
   ParsedSwiftSignature,
+  splitTopLevel,
 } from "./symbolication.js";
 import {
   makeSwiftNativeFunction,
@@ -44,6 +45,7 @@ import {
   projectErrorExistential,
   projectOpaqueExistential,
   protocolClassConstraint,
+  compareProtocolDescriptors,
 } from "../abi/existential.js";
 import { exportsByPrefix, PrefixedExport } from "./export-trie.js";
 import {
@@ -141,6 +143,7 @@ export interface ResolvedMethod {
   async?: boolean;
   asyncFunctionPointer?: AsyncFunctionPointer;
   witnessSelf?: WitnessTable;
+  witnessTables?: NativePointer[];
 }
 
 interface BaseResolveOptions {
@@ -187,6 +190,7 @@ interface MethodCandidate {
   mangled: string;
   isStatic: boolean;
   signature: SwiftFunctionSignature;
+  constraints: string[];
 }
 
 export type AccessorKind = "getter" | "setter";
@@ -197,6 +201,7 @@ interface AccessorCandidate {
   kind: AccessorKind | "modify";
   typeName: string;
   isStatic: boolean;
+  constraints: string[];
 }
 
 interface TypeMembers {
@@ -546,7 +551,7 @@ function foreignMembers(fullName: string, mayName: SymbolFilter | null = null): 
     if (module.base.equals(owner.base)) {
       continue;
     }
-    forEachExportedMembers(module, [{ fullName, token }], mayName, (_, found) => {
+    forEachExportedMembers(module, [{ fullName, token, withConstrainedExtensions: false }], mayName, (_, found) => {
       methods.push(...found.methods);
       accessors.push(...found.accessors);
     });
@@ -557,6 +562,7 @@ function foreignMembers(fullName: string, mayName: SymbolFilter | null = null): 
 interface MemberTarget {
   fullName: string;
   token: string;
+  withConstrainedExtensions: boolean;
 }
 
 interface ModuleExportScan {
@@ -598,24 +604,24 @@ function forEachExportedMembers(
       return;
     }
     if (mayName !== null) {
-      visit(i, membersAmong(exports.filter((e) => mayName(e.name)), target.fullName));
+      visit(i, membersAmong(exports.filter((e) => mayName(e.name)), target));
       return;
     }
     const key = `${moduleKey}|${target.token}`;
     let members = foreignScans.get(key);
     if (members === undefined) {
-      members = membersAmong(exports, target.fullName);
+      members = membersAmong(exports, target);
       foreignScans.set(key, members);
     }
     visit(i, members);
   });
 }
 
-function membersAmong(exports: PrefixedExport[], fullName: string): TypeMembers {
+function membersAmong(exports: PrefixedExport[], target: MemberTarget): TypeMembers {
   const members: TypeMembers = { methods: [], accessors: [] };
   const seen = new Set<string>();
   for (const e of exports) {
-    considerMember(members, seen, fullName, e.name, e.address, false);
+    considerMember(members, seen, target.fullName, e.name, e.address, false, target.withConstrainedExtensions);
   }
   return members;
 }
@@ -665,7 +671,7 @@ const SUBSTITUTED_MODULES = new Set(["Swift", "__C"]);
 function protocolExtensionTarget(protocol: ContextDescriptor): MemberTarget | null {
   const fullName = protocol.fullTypeName;
   const token = SUBSTITUTED_MODULES.has(protocol.moduleName ?? "") ? null : buildMangledTypeToken(protocol);
-  return fullName === null || token === null ? null : { fullName, token };
+  return fullName === null || token === null ? null : { fullName, token, withConstrainedExtensions: true };
 }
 
 function protocolExtensionMembersOfAll(protocols: ContextDescriptor[], mayName: SymbolFilter | null = null): TypeMembers[] {
@@ -740,7 +746,7 @@ function scanMembers(
   // via the vtable, not the symbol route. The export trie carries everything else.
   const consider = (name: string, address: NativePointer, initsOnly: boolean): void => {
     if (token === null || name.includes(token)) {
-      considerMember(members, seen, fullName, name, address, initsOnly);
+      considerMember(members, seen, fullName, name, address, initsOnly, false);
     }
   };
   for (const module of modules) {
@@ -763,7 +769,8 @@ function considerMember(
   fullName: string,
   name: string,
   address: NativePointer,
-  initsOnly: boolean
+  initsOnly: boolean,
+  withConstrainedExtensions: boolean
 ): void {
   const key = address.strip().toString();
   if (address.isNull() || seen.has(key)) {
@@ -785,16 +792,28 @@ function considerMember(
     if (initsOnly && signature.name !== "init") {
       return;
     }
-    const { context, isStatic } = stripReceiverKeyword(signature.context);
+    const { context, isStatic, constraints } = memberContext(signature.context, withConstrainedExtensions);
     if (context === fullName) {
-      members.methods.push({ address, name: signature.name, mangled: name, isStatic, signature });
+      members.methods.push({ address, name: signature.name, mangled: name, isStatic, signature, constraints });
     }
   } else if (!initsOnly) {
-    const { context, isStatic } = stripReceiverKeyword(signature.context);
+    const { context, isStatic, constraints } = memberContext(signature.context, withConstrainedExtensions);
     if (context === fullName) {
-      members.accessors.push({ address, member: signature.member, kind: signature.kind, typeName: signature.typeName, isStatic });
+      members.accessors.push({ address, member: signature.member, kind: signature.kind, typeName: signature.typeName, isStatic, constraints });
     }
   }
+}
+
+// A constrained protocol extension's members demangle under `P< where A: Q, A.T == U>`.
+function memberContext(
+  context: string,
+  withConstrainedExtensions: boolean
+): { context: string; isStatic: boolean; constraints: string[] } {
+  const receiver = stripReceiverKeyword(context);
+  const constrained = withConstrainedExtensions ? /^([^<]*)< where (.*)>$/.exec(receiver.context) : null;
+  return constrained === null
+    ? { ...receiver, constraints: [] }
+    : { context: constrained[1], isStatic: receiver.isStatic, constraints: splitTopLevel(constrained[2], ",") };
 }
 
 export type TypeScope = "thisType" | "withSuperclasses";
@@ -1004,8 +1023,13 @@ function instanceInvokerKey(resolved: ResolvedMethod): string {
 }
 
 // witness_method CC: Self metadata + witness table trail the formal args; defaults depend on them.
-function witnessSelfArgs(table: WitnessTable | undefined): { typeArguments?: Metadata[]; witnessTables?: NativePointer[] } {
-  return table === undefined ? {} : { typeArguments: [table.conformingType], witnessTables: [table.handle] };
+function witnessSelfArgs(
+  table: WitnessTable | undefined,
+  witnessTables?: NativePointer[]
+): { typeArguments?: Metadata[]; witnessTables?: NativePointer[] } {
+  return table === undefined
+    ? {}
+    : { typeArguments: [table.conformingType], witnessTables: witnessTables ?? [table.handle] };
 }
 
 function invokerFor(resolved: ResolvedMethod): SwiftNativeFunction {
@@ -1015,7 +1039,7 @@ function invokerFor(resolved: ResolvedMethod): SwiftNativeFunction {
     fn = makeSwiftNativeFunction(resolved.address, resolved.returnType, resolved.argTypes, {
       hasSelf: true,
       throws: resolved.throws,
-      ...witnessSelfArgs(resolved.witnessSelf),
+      ...witnessSelfArgs(resolved.witnessSelf, resolved.witnessTables),
     });
     invokerCache.set(key, fn);
   }
@@ -1164,7 +1188,8 @@ export class BoundAsyncMethod {
       }
     }
     if (this.resolved.witnessSelf !== undefined) {
-      gp.push(this.resolved.witnessSelf.conformingType.handle, this.resolved.witnessSelf.handle);
+      const { conformingType, handle } = this.resolved.witnessSelf;
+      gp.push(conformingType.handle, ...(this.resolved.witnessTables ?? [handle]));
     }
     if (fp.length > 0) {
       options.floatArgs = fp;
@@ -2267,7 +2292,108 @@ function conformanceMembers(fullName: string, mayName: SymbolFilter | null = nul
     }
   }
   const members = protocolExtensionMembersOfAll(conformances.map((c) => c.protocol), mayName);
-  return conformances.map((c, i) => ({ ...c, members: members[i] }));
+  return conformances.map((c, i) => ({ ...c, members: applicableMembers(members[i], c.table) }));
+}
+
+function applicableMembers(members: TypeMembers, table: WitnessTable): TypeMembers {
+  const applies = (c: { constraints: string[] }): boolean =>
+    c.constraints.length === 0 || selfSignature(table, c.constraints) !== null;
+  return { methods: members.methods.filter(applies), accessors: members.accessors.filter(applies) };
+}
+
+function unshadowedMembers<T extends { constraints: string[] }>(candidates: T[], identity: (c: T) => string): T[] {
+  return candidates.filter(
+    (c) =>
+      !candidates.some(
+        (other) =>
+          identity(other) === identity(c) &&
+          other.constraints.length > c.constraints.length &&
+          c.constraints.every((constraint) => other.constraints.includes(constraint))
+      )
+  );
+}
+
+interface SelfSignature {
+  witnessTables: NativePointer[];
+  classBoundSelf: boolean;
+}
+
+// The compiler lowers Self: P plus the where clause as a minimized, canonically ordered signature:
+// Self's witness tables by protocol (Self: P dropped when another requirement implies it), then its
+// associated types'. null when the conforming type misses a requirement or one isn't checkable here.
+function selfSignature(table: WitnessTable, constraints: string[]): SelfSignature | null {
+  const protocol = protocolOf(table);
+  const selfWitnesses = [{ protocol, witness: table.handle }];
+  const associatedWitnesses: NativePointer[] = [];
+  let classBoundSelf = protocolClassConstraint(protocol) === 0;
+  let impliesProtocol = false;
+  for (const constraint of constraints) {
+    const match = /^(A(?:\.\w+)?): (.+)$/.exec(constraint);
+    const subject = match === null ? null : resolveWitnessSelfOrAssociatedType(table, match[1]);
+    if (match === null || subject === null) {
+      return null;
+    }
+    const [, subjectName, bound] = match;
+    const superclass =
+      subjectName === "A" && subject.kind === MetadataKind.Class
+        ? selfOrSuperclassNamed(new ClassMetadata(subject.handle), bound)
+        : null;
+    if (superclass !== null) {
+      classBoundSelf = true;
+      impliesProtocol ||= conformsToProtocol(superclass, protocol) !== null;
+      continue;
+    }
+    const required = whereClauseProtocol(bound);
+    const witness = required === null ? null : conformsToProtocol(subject, required);
+    if (required === null || witness === null) {
+      return null;
+    }
+    if (subjectName !== "A") {
+      associatedWitnesses.push(witness);
+      continue;
+    }
+    selfWitnesses.push({ protocol: required, witness });
+    classBoundSelf ||= protocolClassConstraint(required) === 0;
+    impliesProtocol ||= refinesProtocol(required, protocol);
+  }
+  const selfWitnessTables = (impliesProtocol ? selfWitnesses.slice(1) : selfWitnesses)
+    .sort((a, b) => compareProtocolDescriptors(a.protocol, b.protocol))
+    .map((w) => w.witness);
+  return { witnessTables: [...selfWitnessTables, ...associatedWitnesses], classBoundSelf };
+}
+
+// swift_getTypeName names a pure ObjC class without its __C module.
+function selfOrSuperclassNamed(type: ClassMetadata, name: string): Metadata | null {
+  const printed = name.startsWith("__C.") ? name.slice("__C.".length) : name;
+  for (let cls: ClassMetadata | null = type; cls !== null; cls = cls.superclass) {
+    const metadata = new Metadata(cls.handle);
+    if (typeName(metadata) === printed) {
+      return metadata;
+    }
+  }
+  return null;
+}
+
+// An extension's image links the images declaring its where clause's protocols, so a miss is final.
+const whereClauseProtocols = new Map<string, ContextDescriptor | null>();
+
+function whereClauseProtocol(name: string): ContextDescriptor | null {
+  let protocol = whereClauseProtocols.get(name);
+  if (protocol === undefined) {
+    protocol = findProtocol(name);
+    whereClauseProtocols.set(name, protocol);
+  }
+  return protocol;
+}
+
+function refinesProtocol(protocol: ContextDescriptor, ancestor: ContextDescriptor): boolean {
+  return readRequirementSignature(protocol).some(
+    (r) =>
+      r.kind === GenericRequirementKind.Protocol &&
+      r.protocol !== null &&
+      requirementSubject(r) === "A" &&
+      (r.protocol.handle.equals(ancestor.handle) || refinesProtocol(r.protocol, ancestor))
+  );
 }
 
 function isConformanceMethod(c: MethodCandidate): boolean {
@@ -2298,9 +2424,9 @@ function conformanceDeclaring(
   return owners[0] ?? null;
 }
 
-// Self is @in_guaranteed unless the protocol is class-bound, so a class reference needs a cell.
-function witnessReceiver(conformance: ConformanceMembers, self: NativePointer): NativePointer {
-  if (conformance.table.conformingType.kind !== MetadataKind.Class || protocolClassConstraint(conformance.protocol) === 0) {
+// Self is @in_guaranteed unless the callee's signature makes it class-bound, so a class reference needs a cell.
+function witnessReceiver(table: WitnessTable, classBoundSelf: boolean, self: NativePointer): NativePointer {
+  if (table.conformingType.kind !== MetadataKind.Class || classBoundSelf) {
     return self;
   }
   const cell = Memory.alloc(Process.pointerSize);
@@ -2323,7 +2449,7 @@ export function bindConformanceMethod(
     throw noMethodError(fullName, name);
   }
   const resolved = resolveExtensionMethod(conformance.table, name, options);
-  const receiver = witnessReceiver(conformance, self);
+  const receiver = witnessReceiver(conformance.table, resolved.classBoundSelf, self);
   return resolved.async === true ? new BoundAsyncMethod(resolved, receiver) : new BoundMethod(resolved, receiver);
 }
 
@@ -2335,7 +2461,8 @@ function conformanceGetProperty(fullName: string, self: NativePointer, member: s
     throw new Error(`no getter for ${member} on ${fullName}`);
   }
   const accessor = resolveExtensionAccessor(conformance.table, member, "getter");
-  return decodeReturn(accessor.type, invokerForWitnessAccessor(accessor)(witnessReceiver(conformance, self)));
+  const receiver = witnessReceiver(conformance.table, accessor.classBoundSelf, self);
+  return decodeReturn(accessor.type, invokerForWitnessAccessor(accessor)(receiver));
 }
 
 function protocolOf(table: WitnessTable): ContextDescriptor {
@@ -2518,10 +2645,13 @@ function resolveExtensionMethod(
   table: WitnessTable,
   methodName: string,
   options: RawMethodResolveOptions = {}
-): ResolvedMethod {
+): ResolvedMethod & { classBoundSelf: boolean } {
   const protocol = protocolOf(table);
   const protocolName = protocol.fullTypeName ?? "protocol";
-  const matches = conformanceMethodOverloads(protocolExtensionMembers(protocol), methodName, options);
+  const matches = unshadowedMembers(
+    conformanceMethodOverloads(applicableMembers(protocolExtensionMembers(protocol), table), methodName, options),
+    ({ signature }) => `${signature.selector}(${signature.argTypeNames.join(", ")}) -> ${signature.returnTypeName}`
+  );
   if (matches.length === 0) {
     throw new Error(`no requirement ${methodName} on ${protocolName}`);
   }
@@ -2531,7 +2661,7 @@ function resolveExtensionMethod(
       `ambiguous extension method ${methodName} on ${protocolName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
     );
   }
-  const { signature, mangled } = matches[0];
+  const { signature, mangled, constraints } = matches[0];
   const requirement = requirementImplementedBy(
     table,
     (r) => r.kind === ProtocolRequirementKind.Method && r.isAsync === signature.async,
@@ -2560,6 +2690,7 @@ function resolveExtensionMethod(
       asyncFunctionPointer = afp;
     }
   }
+  const { witnessTables, classBoundSelf } = selfSignature(table, requirement === null ? constraints : [])!;
   return {
     address,
     ...resolveWitnessSignature(table, signature),
@@ -2567,6 +2698,8 @@ function resolveExtensionMethod(
     async: signature.async,
     asyncFunctionPointer,
     witnessSelf: table,
+    witnessTables,
+    classBoundSelf,
   };
 }
 
@@ -2699,7 +2832,7 @@ export function bindWitnessMethodAt(
   return new BoundMethod(resolved, self);
 }
 
-interface ResolvedWitnessAccessor {
+interface ResolvedWitnessAccessor extends SelfSignature {
   address: NativePointer;
   type: Metadata;
   kind: AccessorKind;
@@ -2718,14 +2851,17 @@ function resolveWitnessAccessor(table: WitnessTable, member: string, kind: Acces
     return resolveExtensionAccessor(table, member, kind);
   }
   const address = table.requirement(match.requirement.witnessIndex);
-  return witnessAccessor(table, address, member, kind, match.signature.typeName);
+  return witnessAccessor(table, address, member, kind, match.signature.typeName, selfSignature(table, [])!);
 }
 
 function resolveExtensionAccessor(table: WitnessTable, member: string, kind: AccessorKind): ResolvedWitnessAccessor {
   const protocol = protocolOf(table);
   const protocolName = protocol.fullTypeName ?? "protocol";
-  const match = protocolExtensionMembers(protocol).accessors.find(
-    (a) => a.member === member && a.kind === kind && !a.isStatic
+  const [match] = unshadowedMembers(
+    applicableMembers(protocolExtensionMembers(protocol), table).accessors.filter(
+      (a) => a.member === member && a.kind === kind && !a.isStatic
+    ),
+    (a) => a.typeName
   );
   if (match === undefined) {
     throw new Error(`no ${kind} for ${member} on ${protocolName}`);
@@ -2740,7 +2876,8 @@ function resolveExtensionAccessor(table: WitnessTable, member: string, kind: Acc
     throw new Error(`cannot tell whether ${member} is a requirement of ${protocolName}`);
   }
   const address = requirement === null ? match.address.strip() : table.requirement(requirement.witnessIndex);
-  return witnessAccessor(table, address, member, kind, match.typeName);
+  const signature = selfSignature(table, requirement === null ? match.constraints : [])!;
+  return witnessAccessor(table, address, member, kind, match.typeName, signature);
 }
 
 function witnessAccessor(
@@ -2748,20 +2885,24 @@ function witnessAccessor(
   address: NativePointer,
   member: string,
   kind: AccessorKind,
-  typeName: string
+  typeName: string,
+  signature: SelfSignature
 ): ResolvedWitnessAccessor {
   const type = resolveTypeExpr(typeName, (n) => resolveWitnessSelfOrAssociatedType(table, n));
   if (type === null) {
     throw new Error(`cannot resolve ${kind} type ${typeName} of ${member}`);
   }
   const classBound = classBoundSubjects(protocolOf(table));
+  if (signature.classBoundSelf) {
+    classBound.add("A");
+  }
   const abstract = hasOpaqueLayout(typeName, (name): ParamLayout | null => {
     if (name !== "A" && !name.startsWith("A.")) {
       return null;
     }
     return classBound.has(name) ? "reference" : "opaque";
   });
-  return { address, type, kind, abstract, table };
+  return { address, type, kind, abstract, table, ...signature };
 }
 
 function classBoundSubjects(protocol: ContextDescriptor): Set<string> {
@@ -2807,7 +2948,7 @@ function invokerForWitnessAccessor(accessor: ResolvedWitnessAccessor): SwiftNati
   let fn = invokerCache.get(key);
   if (fn === undefined) {
     const type: SwiftArgType = accessor.abstract ? indirect(accessor.type) : accessor.type;
-    const options = { hasSelf: true, ...witnessSelfArgs(accessor.table) };
+    const options = { hasSelf: true, ...witnessSelfArgs(accessor.table, accessor.witnessTables) };
     fn =
       accessor.kind === "getter"
         ? makeSwiftNativeFunction(accessor.address, type, [], options)

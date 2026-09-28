@@ -715,6 +715,124 @@ public struct IntChooser: Chooser {
     public func choose() -> Int { n }
 }
 
+public protocol Perchable {
+    func chirp() -> String
+}
+public class Perch {
+    public init() {}
+}
+public final class PerchedBird: Perch, Perchable {
+    public let call: String
+    public init(call: String) {
+        self.call = call
+        super.init()
+    }
+    public func chirp() -> String { call }
+}
+public struct FreeBird: Perchable {
+    public let wingspan: Int
+    public func chirp() -> String { "caw" }
+}
+public protocol Banded {
+    var band: Int { get }
+}
+public struct BandedBird: Perchable, Banded {
+    public let band: Int
+    public func chirp() -> String { "peep" }
+}
+public protocol Songbird: Perchable {}
+public struct Lark: Songbird {
+    public let pitch: Int
+    public func chirp() -> String { "la" }
+}
+extension Perchable where Self: Perch {
+    public func perchedChirp() -> String { "perched " + chirp() }
+}
+extension Perchable where Self: Banded {
+    public func bandedChirp() -> String { "\(band):" + chirp() }
+    public var bandLabel: String { "#\(band)" }
+    public func greeting() -> String { "banded hello " + chirp() }
+    public var tag: String { "banded" }
+}
+extension Perchable where Self: Songbird {
+    public func song() -> String { chirp() + chirp() }
+}
+extension Perchable {
+    public func greeting() -> String { "hello " + chirp() }
+    public var tag: String { "plain" }
+}
+
+public class Rookery: Perchable {
+    public init() {}
+    public func chirp() -> String { "caw" }
+}
+public final class Rook: Rookery {}
+extension Perchable where Self: Rookery {
+    public func rookeryChirp() -> String { "rookery " + chirp() }
+}
+
+public protocol Nocturnal: AnyObject {}
+public final class Nightjar: Perchable, Nocturnal {
+    public init() {}
+    public func chirp() -> String { "churr" }
+}
+extension Perchable where Self: Nocturnal {
+    public func nightChirp() -> String { "night " + chirp() }
+}
+
+open class Coop<Hen> {
+    public init() {}
+}
+public final class HenCoop: Coop<Int>, Perchable {
+    public func chirp() -> String { "cluck" }
+}
+extension Perchable where Self: Coop<Int> {
+    public func coopChirp() -> String { "coop " + chirp() }
+}
+
+#if canImport(ObjectiveC)
+import ObjectiveC
+public final class Starling: NSObject, Perchable {
+    public func chirp() -> String { "whistle" }
+}
+extension Perchable where Self: NSObject {
+    public func objcChirp() -> String { "objc " + chirp() }
+}
+#endif
+
+public protocol Roosting {
+    func roostHeight() -> Int
+}
+#if compiler(>=5.10)
+public struct Aviary {
+    public protocol Aerie {
+        func aerieHeight() -> Int
+    }
+}
+extension Roosting where Self: Aviary.Aerie {
+    public func totalHeight() -> Int { roostHeight() * 10 + aerieHeight() }
+}
+public struct Kestrel: Roosting, Aviary.Aerie {
+    public let perch: Int
+    public func roostHeight() -> Int { perch }
+    public func aerieHeight() -> Int { 3 }
+}
+#endif
+
+public protocol Nest {
+    associatedtype Egg
+    var egg: Egg { get }
+}
+public struct IntNest: Nest {
+    public let egg: Int
+}
+public struct WordNest: Nest {
+    public let egg: String
+}
+extension Nest where Egg: BinaryInteger {
+    public func eggCount() -> Int { Int(egg) * 2 }
+}
+
 public protocol Container {
     associatedtype Item
     var item: Item { get }

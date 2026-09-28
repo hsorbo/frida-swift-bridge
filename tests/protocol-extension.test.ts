@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, loadOptimized } from "./fixtures/load.js";
+import { requireDarwin } from "./swift.js";
 
 import { Swift, ClassType, StructType } from "../src/index.js";
 
@@ -82,5 +83,94 @@ describe("protocol-extension members on a conforming type", () => {
     expect(() => n.scaledTwice(3)).toThrow(
       /ambiguous extension method scaledTwice on fixture\.Scalable: .*scaledTwice\(_:\).*\{ arity \}, \{ labels \}/
     );
+  });
+});
+
+describe("constrained protocol-extension members", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("a superclass-constrained extension method is listed and callable on a subclass that conforms", () => {
+    const type = Swift.type("fixture.PerchedBird") as ClassType;
+    expect(type.methods()).toContain("perchedChirp()");
+    expect(type.init({ call: "tweet" }).perchedChirp()).toBe("perched tweet");
+  });
+
+  test("a protocol-constrained extension method passes the extra witness table in canonical order", () => {
+    const type = Swift.type("fixture.BandedBird") as StructType;
+    expect(type.methods()).toContain("bandedChirp()");
+    expect(type.new({ band: 7 }).bandedChirp()).toBe("7:peep");
+  });
+
+  test("a protocol-constrained extension property is listed and readable", () => {
+    const type = Swift.type("fixture.BandedBird") as StructType;
+    expect(type.properties.map((p) => p.name)).toContain("bandLabel");
+    expect(type.new({ band: 7 }).bandLabel).toBe("#7");
+  });
+
+  test("a constraint to a refining protocol passes its witness table in place of Self's own", () => {
+    const type = Swift.type("fixture.Lark") as StructType;
+    expect(type.methods()).toContain("song()");
+    expect(type.new({ pitch: 1 }).song()).toBe("lala");
+  });
+
+  test("an associated-type-constrained extension method is listed and callable", () => {
+    const type = Swift.type("fixture.IntNest") as StructType;
+    expect(type.methods()).toContain("eggCount()");
+    expect(type.new({ egg: 21 }).eggCount()).toEqual(int64(42));
+  });
+
+  test("a superclass constraint that implies the conformance passes no witness table", () => {
+    const type = Swift.type("fixture.Rook") as ClassType;
+    expect(type.methods()).toContain("rookeryChirp()");
+    expect(type.init().rookeryChirp()).toBe("rookery caw");
+  });
+
+  test("a class-bound protocol constraint passes self as a plain reference", () => {
+    const type = Swift.type("fixture.Nightjar") as ClassType;
+    expect(type.methods()).toContain("nightChirp()");
+    expect(type.init().nightChirp()).toBe("night churr");
+  });
+
+  test("a generic superclass constraint is met by a subclass of that specialization", () => {
+    const type = Swift.type("fixture.HenCoop") as ClassType;
+    expect(type.methods()).toContain("coopChirp()");
+    expect(type.init().coopChirp()).toBe("coop cluck");
+  });
+
+  test("an ObjC superclass constraint is met by a Swift subclass", (ctx) => {
+    requireDarwin(ctx);
+    const type = Swift.type("fixture.Starling") as ClassType;
+    expect(type.methods()).toContain("objcChirp()");
+  });
+
+  test("a protocol nested in a type comes after top-level ones in the witness tables", () => {
+    const type = Swift.type("fixture.Kestrel") as StructType;
+    expect(type.methods()).toContain("totalHeight()");
+    expect(type.new({ perch: 4 }).totalHeight()).toEqual(int64(43));
+  });
+
+  test("a member of a constrained extension shadows the same member of a less constrained one", () => {
+    const banded = (Swift.type("fixture.BandedBird") as StructType).new({ band: 7 });
+    expect(banded.greeting()).toBe("banded hello peep");
+    expect(banded.tag).toBe("banded");
+    const free = (Swift.type("fixture.FreeBird") as StructType).new({ wingspan: 3 });
+    expect(free.greeting()).toBe("hello caw");
+    expect(free.tag).toBe("plain");
+  });
+
+  test("a conforming type that misses the constraint has none of the constrained members", () => {
+    const bird = Swift.type("fixture.FreeBird") as StructType;
+    for (const selector of ["perchedChirp()", "bandedChirp()", "song()", "rookeryChirp()", "nightChirp()", "coopChirp()"]) {
+      expect(bird.methods()).not.toContain(selector);
+    }
+    expect((Swift.type("fixture.PerchedBird") as ClassType).methods()).not.toContain("rookeryChirp()");
+    expect(bird.properties.map((p) => p.name)).not.toContain("bandLabel");
+    const free = bird.new({ wingspan: 3 });
+    expect(free.bandedChirp).toBeUndefined();
+    expect(() => free.$call("bandedChirp")).toThrow(/no method bandedChirp/);
+
+    const nest = Swift.type("fixture.WordNest") as StructType;
+    expect(nest.methods()).not.toContain("eggCount()");
+    expect(() => nest.new({ egg: "x" }).$call("eggCount")).toThrow(/no method eggCount/);
   });
 });

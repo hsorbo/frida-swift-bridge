@@ -190,7 +190,13 @@ Every wrapper extends `SwiftType`:
 
 Both lists span every loaded module: they include members that other modules
 add in extensions, and members a conformed-to protocol provides through a
-protocol extension.
+protocol extension. A constrained extension (`extension P where Self: Base`,
+`where Item: Numeric`) contributes only to types that meet its `where` clause,
+and its members shadow the same members of a less constrained extension. An
+extension whose clause the bridge can't check is left out: one with a same-type
+(`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
+requirement on a nested associated type (`Item.Index`) or on one inherited from
+a refined protocol.
 - `type.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
 - `type.toJSON()`: cheap identity `{ kind, name, module }`.
 

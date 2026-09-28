@@ -1,5 +1,5 @@
 import { Metadata, MetadataKind } from "./metadata.js";
-import { ContextDescriptor } from "./context-descriptor.js";
+import { ContextDescriptor, ContextDescriptorKind } from "./context-descriptor.js";
 import {
   GenericRequirementDescriptor,
   GenericRequirementKind,
@@ -206,8 +206,8 @@ export function protocolClassConstraint(descriptor: ContextDescriptor): number {
 
 export function getExistentialTypeMetadata(protocols: ContextDescriptor[]): Metadata {
   // swift_getExistentialTypeMetadata trusts the caller to pre-sort the protocol list by the
-  // compiler's canonical order (module name, then protocol name); otherwise the runtime uniques
-  // a distinct-but-equivalent instance that won't pointer-match compiler-emitted existentials.
+  // compiler's canonical order; otherwise the runtime uniques a distinct-but-equivalent instance
+  // that won't pointer-match compiler-emitted existentials.
   const sorted = [...protocols].sort(compareProtocolDescriptors);
   const refs = Memory.alloc(Process.pointerSize * Math.max(sorted.length, 1));
   sorted.forEach((p, i) => refs.add(i * Process.pointerSize).writePointer(p.handle));
@@ -222,11 +222,34 @@ export function getExistentialTypeMetadata(protocols: ContextDescriptor[]): Meta
   return new Metadata(handle);
 }
 
-function compareProtocolDescriptors(a: ContextDescriptor, b: ContextDescriptor): number {
-  const am = a.moduleName ?? "";
-  const bm = b.moduleName ?? "";
-  if (am !== bm) return am < bm ? -1 : 1;
-  const an = a.name ?? "";
-  const bn = b.name ?? "";
+// TypeDecl::compare: shallower nesting first, then the module (top level) or enclosing type, then the name.
+export function compareProtocolDescriptors(a: ContextDescriptor, b: ContextDescriptor): number {
+  const aEnclosing = enclosingTypeOf(a);
+  const bEnclosing = enclosingTypeOf(b);
+  const byDepth = nestingDepth(aEnclosing) - nestingDepth(bEnclosing);
+  if (byDepth !== 0) return byDepth;
+  const byContext =
+    aEnclosing !== null && bEnclosing !== null
+      ? compareProtocolDescriptors(aEnclosing, bEnclosing)
+      : compareNames(a.moduleName, b.moduleName);
+  return byContext !== 0 ? byContext : compareNames(a.name, b.name);
+}
+
+function compareNames(a: string | null, b: string | null): number {
+  const an = a ?? "";
+  const bn = b ?? "";
   return an === bn ? 0 : an < bn ? -1 : 1;
+}
+
+function nestingDepth(type: ContextDescriptor | null): number {
+  return type === null ? 0 : 1 + nestingDepth(enclosingTypeOf(type));
+}
+
+function enclosingTypeOf(descriptor: ContextDescriptor): ContextDescriptor | null {
+  for (let ctx = descriptor.parent; ctx !== null; ctx = ctx.parent) {
+    if (ctx.kind === ContextDescriptorKind.Extension) return ctx.extendedTypeDescriptor;
+    if (ctx.isType) return ctx;
+    if (ctx.kind === ContextDescriptorKind.Module) return null;
+  }
+  return null;
 }
