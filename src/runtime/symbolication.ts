@@ -82,9 +82,10 @@ export function symbolicate(address: NativePointer): SwiftSymbol | null {
 }
 
 export function parseSwiftSignature(demangled: string): ParsedSwiftSignature | null {
-  // A cross-module extension member is prefixed `(extension in Module):`; drop it so the leading paren
-  // is not mistaken for the argument list and the context is the bare receiver type.
-  const s = demangled.replace(/^\(extension in [^)]+\):/, "");
+  // A cross-module extension member is prefixed `(extension in Module):`, after `static ` or `class `
+  // if any; drop it so the paren is not mistaken for the argument list and the context is the bare
+  // receiver type.
+  const s = demangled.replace(/^((?:static |class )?)\(extension in [^)]+\):/, "$1");
   const accessor = parseAccessor(s);
   if (accessor !== null) {
     return accessor;

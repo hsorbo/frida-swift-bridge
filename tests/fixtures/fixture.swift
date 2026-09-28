@@ -833,6 +833,22 @@ extension Nest where Egg: BinaryInteger {
     public func eggCount() -> Int { Int(egg) * 2 }
 }
 
+public protocol Hatchable {
+    static var species: String { get }
+}
+extension Hatchable {
+    public static func hatch(count: Int) -> String { "\(count) \(species) (\(self))" }
+    public static var nursery: String { "\(species) nursery" }
+}
+public struct Duckling: Hatchable {
+    public let weight: Int
+    public static var species: String { "duck" }
+}
+public final class Owlet: Hatchable {
+    public init() {}
+    public static var species: String { "owl" }
+}
+
 public protocol Container {
     associatedtype Item
     var item: Item { get }

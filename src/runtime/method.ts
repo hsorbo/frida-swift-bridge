@@ -882,7 +882,7 @@ export function enumerateProperties(
   const fullName = canonicalTypeName(typeName);
   const levels = classChainNames(fullName).map((className) => members(className).accessors);
   if (modules === "allLoadedModules") {
-    levels.push(conformanceMembers(fullName).flatMap((c) => c.members.accessors.filter((a) => !a.isStatic)));
+    levels.push(conformanceMembers(fullName).flatMap((c) => c.members.accessors));
   }
   for (const accessors of levels) {
     const atThisLevel = new Map<string, PropertyInfo>();
@@ -1427,8 +1427,12 @@ export function bindStaticMethod(
   receiver: Metadata,
   name: string,
   options: RawMethodResolveOptions = {}
-): BoundStaticMethod | BoundAsyncMethod {
-  const resolved = resolveMethod(typeName(receiver), name, { ...options, static: true });
+): BoundStaticMethod | BoundMethod | BoundAsyncMethod {
+  const staticOptions = { ...options, static: true };
+  const resolved = findMethod(typeName(receiver), name, staticOptions);
+  if (resolved === null) {
+    return bindConformanceMethod(typeName(receiver), receiver.handle, name, staticOptions);
+  }
   return resolved.async === true ? new BoundAsyncMethod(resolved, null) : new BoundStaticMethod(resolved);
 }
 
@@ -2397,7 +2401,7 @@ function refinesProtocol(protocol: ContextDescriptor, ancestor: ContextDescripto
 }
 
 function isConformanceMethod(c: MethodCandidate): boolean {
-  return !c.isStatic && c.signature.genericParams.length === 0;
+  return c.signature.genericParams.length === 0;
 }
 
 function conformanceMethodOverloads(
@@ -2407,7 +2411,7 @@ function conformanceMethodOverloads(
 ): MethodCandidate[] {
   return applyOverloadFilters(
     members.methods.filter((c) => c.name === name && isConformanceMethod(c)),
-    options
+    { ...options, static: options.static ?? false }
   );
 }
 
@@ -2449,7 +2453,7 @@ export function bindConformanceMethod(
     throw noMethodError(fullName, name);
   }
   const resolved = resolveExtensionMethod(conformance.table, name, options);
-  const receiver = witnessReceiver(conformance.table, resolved.classBoundSelf, self);
+  const receiver = resolved.isStatic ? self : witnessReceiver(conformance.table, resolved.classBoundSelf, self);
   return resolved.async === true ? new BoundAsyncMethod(resolved, receiver) : new BoundMethod(resolved, receiver);
 }
 
@@ -2661,10 +2665,10 @@ function resolveExtensionMethod(
       `ambiguous extension method ${methodName} on ${protocolName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
     );
   }
-  const { signature, mangled, constraints } = matches[0];
+  const { signature, mangled, constraints, isStatic } = matches[0];
   const requirement = requirementImplementedBy(
     table,
-    (r) => r.kind === ProtocolRequirementKind.Method && r.isAsync === signature.async,
+    (r) => r.kind === ProtocolRequirementKind.Method && r.isAsync === signature.async && r.isInstance !== isStatic,
     (s) =>
       s.kind === "function" &&
       s.selector === signature.selector &&
@@ -2694,7 +2698,7 @@ function resolveExtensionMethod(
   return {
     address,
     ...resolveWitnessSignature(table, signature),
-    isStatic: false,
+    isStatic,
     async: signature.async,
     asyncFunctionPointer,
     witnessSelf: table,

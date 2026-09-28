@@ -29,7 +29,8 @@ import {
   ModuleScope,
   enumerateProperties,
   lowerResolveOptions,
-  resolveMethod,
+  findMethod,
+  bindConformanceMethod,
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
 import { metatypeInstanceType } from "../abi/metatype.js";
@@ -384,8 +385,12 @@ export class ClassType extends SwiftType {
   }
 
   method(name: string, options: MethodResolveOptions = {}): SwiftBoundMethod {
-    const resolved = resolveMethod(this.fullName, name, lowerResolveOptions({ ...options, static: true }));
+    const raw = lowerResolveOptions({ ...options, static: true });
+    const resolved = findMethod(this.fullName, name, raw);
     const selfMetadata = metadataOf(this).handle;
+    if (resolved === null) {
+      return narrowBoundMethod(bindConformanceMethod(this.fullName, selfMetadata, name, raw));
+    }
     return narrowBoundMethod(
       resolved.async === true
         ? new BoundAsyncMethod(resolved, selfMetadata)

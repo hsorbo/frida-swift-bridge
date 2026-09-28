@@ -174,3 +174,36 @@ describe("constrained protocol-extension members", () => {
     expect(() => nest.new({ egg: "x" }).$call("eggCount")).toThrow(/no method eggCount/);
   });
 });
+
+describe("static protocol-extension members", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("a value type lists and calls a static extension method", () => {
+    const type = Swift.type("fixture.Duckling") as StructType;
+    expect(type.methods({ static: true })).toContain("hatch(count:)");
+    expect(type.methods()).not.toContain("hatch(count:)");
+    expect(type.call("hatch", 3)).toBe("3 duck (Duckling)");
+  });
+
+  test("a class lists and calls a static extension method", () => {
+    const type = Swift.type("fixture.Owlet") as ClassType;
+    expect(type.methods({ static: true })).toContain("hatch(count:)");
+    expect(type.call("hatch", 2)).toBe("2 owl (Owlet)");
+  });
+
+  test("a static extension property is listed as static", () => {
+    const type = Swift.type("fixture.Duckling") as StructType;
+    expect(type.properties.find((p) => p.name === "nursery")).toEqual({
+      name: "nursery",
+      typeName: "Swift.String",
+      isStatic: true,
+      writable: false,
+    });
+  });
+
+  test("an instance does not reach a static extension method", () => {
+    const duckling = (Swift.type("fixture.Duckling") as StructType).new({ weight: 1 });
+    expect(duckling.hatch).toBeUndefined();
+    expect(() => duckling.$call("hatch", 1)).toThrow(/no method hatch/);
+  });
+});
