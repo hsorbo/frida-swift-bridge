@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, loadOptimized } from "./fixtures/load.js";
 import { requireDarwin } from "./swift.js";
 
-import { Swift, ClassType, StructType } from "../src/index.js";
+import { Swift, ClassType, StructType, SwiftObject } from "../src/index.js";
 
 describe("protocol-extension members on a conforming type", () => {
   beforeEach(() => { loadFixture(); });
@@ -125,6 +125,17 @@ describe("constrained protocol-extension members", () => {
     expect(type.new({ egg: 21 }).eggCount()).toEqual(int64(42));
   });
 
+  test("an associated type made class-bound by the where clause passes and returns directly", () => {
+    const nightjar = (Swift.type("fixture.Nightjar") as ClassType).init() as SwiftObject;
+    const nightjarNest = (Swift.type("fixture.NightjarNest") as StructType).init(nightjar)!;
+    expect((nightjarNest.nocturnalEcho(nightjar) as SwiftObject).$handle.equals(nightjar.$handle)).toBe(true);
+    expect((nightjarNest.nocturnalEgg as SwiftObject).$handle.equals(nightjar.$handle)).toBe(true);
+    expect((nightjarNest.objectEcho(nightjar) as SwiftObject).$handle.equals(nightjar.$handle)).toBe(true);
+    const rook = (Swift.type("fixture.Rook") as ClassType).init() as SwiftObject;
+    const rookNest = (Swift.type("fixture.RookNest") as StructType).init(rook)!;
+    expect((rookNest.rookeryEcho(rook) as SwiftObject).$handle.equals(rook.$handle)).toBe(true);
+  });
+
   test("a superclass constraint that implies the conformance passes no witness table", () => {
     const type = Swift.type("fixture.Rook") as ClassType;
     expect(type.methods()).toContain("rookeryChirp()");
@@ -178,7 +189,9 @@ describe("constrained protocol-extension members", () => {
     expect(() => free.$call("bandedChirp")).toThrow(/no method bandedChirp/);
 
     const nest = Swift.type("fixture.WordNest") as StructType;
-    expect(nest.methods()).not.toContain("eggCount()");
+    for (const selector of ["eggCount()", "nocturnalEcho(_:)", "objectEcho(_:)", "rookeryEcho(_:)"]) {
+      expect(nest.methods()).not.toContain(selector);
+    }
     expect(() => nest.new({ egg: "x" }).$call("eggCount")).toThrow(/no method eggCount/);
   });
 });

@@ -840,6 +840,24 @@ public struct WordNest: Nest {
 extension Nest where Egg: BinaryInteger {
     public func eggCount() -> Int { Int(egg) * 2 }
 }
+public struct NightjarNest: Nest {
+    public let egg: Nightjar
+    public init(_ egg: Nightjar) { self.egg = egg }
+}
+public struct RookNest: Nest {
+    public let egg: Rook
+    public init(_ egg: Rook) { self.egg = egg }
+}
+extension Nest where Egg: Nocturnal {
+    public func nocturnalEcho(_ x: Egg) -> Egg { x }
+    public var nocturnalEgg: Egg { egg }
+}
+extension Nest where Egg: AnyObject {
+    public func objectEcho(_ x: Egg) -> Egg { x }
+}
+extension Nest where Egg: Rookery {
+    public func rookeryEcho(_ x: Egg) -> Egg { x }
+}
 
 public protocol Hatchable {
     static var species: String { get }
