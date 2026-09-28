@@ -263,6 +263,8 @@ function aggregateMembers(metadata: Metadata): AggregateMember[] | null {
     members = structMembers(metadata);
   } else if (metadata.kind === MetadataKind.Tuple) {
     members = [...enumerateTupleElements(metadata)];
+  } else if (metadata.kind === MetadataKind.Enum) {
+    members = singleCasePayload(metadata);
   }
   return members !== null && members.length > 0 ? members : null;
 }
@@ -283,6 +285,83 @@ function structMembers(metadata: Metadata): AggregateMember[] | null {
     members.push({ type, offset: offsets.add(members.length * 4).readU32() });
   }
   return members;
+}
+
+function singleCasePayload(metadata: Metadata): AggregateMember[] | null {
+  const cases = [...enumerateFields(metadata.description)];
+  if (cases.length !== 1 || cases[0].mangledTypeName === null || cases[0].isIndirectCase) {
+    return null;
+  }
+  const payload = fieldTypeIn(metadata, cases[0]);
+  return payload === null ? null : [{ type: payload, offset: 0 }];
+}
+
+const GP_ARG_REGISTERS = ARCH === "arm64" ? 8 : 6;
+const FP_ARG_REGISTERS = 8;
+// Darwin arm64 packs a stack-passed scalar at its own size and alignment; AAPCS64 and SysV x86-64
+// give each one an 8-byte slot.
+const PACKS_STACK_ARGS = ARCH === "arm64" && Process.platform === "darwin";
+const I128_STARTS_AT_EVEN_REGISTER = ARCH === "arm64" && !PACKS_STACK_ARGS;
+
+export type RegisterLocation = { register: "gp" | "fp"; index: number };
+export type ArgLocation = RegisterLocation | { stackOffset: number };
+
+// swiftcc places each lowered scalar on its own, so an aggregate can straddle the last register and
+// the stack. Stack offsets are relative to the first stack-passed argument.
+export class ArgumentAllocator {
+  private ngrn: number;
+  private nsrn = 0;
+  stackSize = 0;
+
+  constructor(startReg = 0) {
+    this.ngrn = startReg;
+  }
+
+  gp(width = 8): ArgLocation {
+    if (this.ngrn < GP_ARG_REGISTERS) {
+      return { register: "gp", index: this.ngrn++ };
+    }
+    return this.stackSlot(width);
+  }
+
+  // arm64 passes an i128 in a register pair that never starts at x7, else in a 16-byte-aligned stack
+  // slot that retires x7. x86-64 compilers disagree on where one goes once r8 is taken.
+  gp128(): ArgLocation {
+    if (ARCH !== "arm64" && this.ngrn > GP_ARG_REGISTERS - 2) {
+      throw new Error("an Int128 argument past r8 is unsupported on x86-64");
+    }
+    if (I128_STARTS_AT_EVEN_REGISTER) {
+      this.ngrn += this.ngrn % 2;
+    }
+    if (this.ngrn < GP_ARG_REGISTERS - 1) {
+      const index = this.ngrn;
+      this.ngrn += 2;
+      return { register: "gp", index };
+    }
+    this.ngrn = GP_ARG_REGISTERS;
+    return this.stackSlot(16);
+  }
+
+  fp(width: number): ArgLocation {
+    if (this.nsrn < FP_ARG_REGISTERS) {
+      return { register: "fp", index: this.nsrn++ };
+    }
+    return this.stackSlot(width);
+  }
+
+  scalar({ size, cls }: LoweredScalar): ArgLocation {
+    if (cls !== "int") {
+      return this.fp(size);
+    }
+    return size === 16 ? this.gp128() : this.gp(size);
+  }
+
+  private stackSlot(width: number): ArgLocation {
+    const size = PACKS_STACK_ARGS ? width : Math.max(width, 8);
+    const stackOffset = Math.ceil(this.stackSize / size) * size;
+    this.stackSize = stackOffset + size;
+    return { stackOffset };
+  }
 }
 
 // A generic-typed value is always passed indirectly.
@@ -321,48 +400,13 @@ function isClosureRef(arg: SwiftArgType): arg is ClosureRef {
   return !(arg instanceof Metadata) && "closure" in arg;
 }
 
-// One physical register's worth of a directly-passed value, read out of the value's bytes.
-type ArgPiece = LoweredScalar;
-
-const INTEGER_ARG_TYPES: { [size: number]: NativeFunctionArgumentType } = {
-  1: "uint8",
-  2: "uint16",
-  4: "uint32",
-  8: "uint64",
-};
-
-function fridaArgType(piece: ArgPiece): NativeFunctionArgumentType {
-  return piece.cls === "int" ? INTEGER_ARG_TYPES[piece.size] : piece.cls;
-}
-
-function readArgPiece(piece: ArgPiece, base: NativePointer): NativeFunctionArgumentValue {
-  const at = base.add(piece.offset);
-  if (piece.cls !== "int") {
-    return piece.cls === "double" ? at.readDouble() : at.readFloat();
-  }
-  switch (piece.size) {
-    case 1:
-      return at.readU8();
-    case 2:
-      return at.readU16();
-    case 4:
-      return at.readU32();
-    default:
-      return at.readU64();
-  }
-}
-
-function wordPieces(count: number, base = 0): ArgPiece[] {
-  return Array.from({ length: count }, (_, i) => ({ offset: base + i * 8, size: 8, cls: "int" }));
-}
-
-function directArgPieces(metadata: Metadata): ArgPiece[] {
-  return loweredScalars(metadata).flatMap((s) => (s.size === 16 ? wordPieces(2, s.offset) : [s]));
+function wordPieces(count: number): LoweredScalar[] {
+  return Array.from({ length: count }, (_, i) => ({ offset: i * 8, size: 8, cls: "int" }));
 }
 
 interface LoweredArg {
   indirect: boolean;
-  pieces: ArgPiece[];
+  pieces: LoweredScalar[];
 }
 
 function lowerArg(arg: SwiftArgType): LoweredArg {
@@ -376,17 +420,33 @@ function lowerArg(arg: SwiftArgType): LoweredArg {
   if (shouldPassIndirectly(arg)) {
     return { indirect: true, pieces: [] };
   }
-  return { indirect: false, pieces: directArgPieces(arg) };
+  return { indirect: false, pieces: loweredScalars(arg) };
 }
 
-// The trampoline stores the register holding each piece of a direct result into that piece's 8-byte
-// slot of a register image; the piece is then copied out at its own width and offset.
-type ResultPiece =
-  | { reg: "gp"; off: number } // x0.. / rax,rdx,rcx,r8
-  | { reg: "fp"; cls: FloatClass; off: number }; // arm64 d/s register, x86-64 xmm register
+// The arguments are laid out in a frame of every argument register, GP then FP, followed by the
+// stack-passed bytes. libffi loads the registers from as many uint64/double arguments and copies the
+// trailing uint64 words to the stack verbatim, so placement follows ArgumentAllocator exactly.
+const REGISTER_FRAME_SIZE = (GP_ARG_REGISTERS + FP_ARG_REGISTERS) * 8;
 
-function resultPieces(pieces: ArgPiece[]): ResultPiece[] {
-  return pieces.map((p, k) => (p.cls === "int" ? { reg: "gp", off: k * 8 } : { reg: "fp", cls: p.cls, off: k * 8 }));
+function frameOffset(location: ArgLocation): number {
+  if ("stackOffset" in location) {
+    return REGISTER_FRAME_SIZE + location.stackOffset;
+  }
+  return (location.register === "gp" ? location.index : GP_ARG_REGISTERS + location.index) * 8;
+}
+
+interface PlacedScalar {
+  scalar: LoweredScalar;
+  location: ArgLocation;
+}
+
+// Each result register a direct result uses, stored by the trampoline at its frame offset.
+function resultRegisters(placed: PlacedScalar[]): RegisterLocation[] {
+  return placed.flatMap(({ scalar, location }) => {
+    const { register, index } = location as RegisterLocation;
+    const count = register === "gp" ? Math.ceil(scalar.size / 8) : 1;
+    return Array.from({ length: count }, (_, k) => ({ register, index: index + k }));
+  });
 }
 
 export interface SwiftNativeFunctionOptions {
@@ -441,23 +501,22 @@ export function makeSwiftNativeFunction(
       }
     }
   }
-  const fridaArgTypes: NativeFunctionArgumentType[] = [];
-  for (const arg of loweredArgs) {
-    if (arg.indirect) {
-      fridaArgTypes.push("pointer");
-    } else {
-      for (const piece of arg.pieces) {
-        fridaArgTypes.push(fridaArgType(piece));
-      }
-    }
-  }
+  const allocator = new ArgumentAllocator();
+  const argLocations = loweredArgs.map((arg) =>
+    arg.indirect ? [allocator.gp()] : arg.pieces.map((piece) => allocator.scalar(piece))
+  );
   // trailing implicit args after the formal ones: a type-metadata pointer per param, then witnesses
-  for (let i = 0; i < typeArguments.length + witnessTables.length; i++) {
-    fridaArgTypes.push("pointer");
-  }
+  const implicitArgs = [...typeArguments.map((m) => m.handle), ...witnessTables];
+  const implicitLocations = implicitArgs.map(() => allocator.gp());
+  const stackWords = Math.ceil(allocator.stackSize / 8);
+  const fridaArgTypes: NativeFunctionArgumentType[] = [
+    ...new Array<NativeFunctionArgumentType>(GP_ARG_REGISTERS).fill("uint64"),
+    ...new Array<NativeFunctionArgumentType>(FP_ARG_REGISTERS).fill("double"),
+    ...new Array<NativeFunctionArgumentType>(stackWords).fill("uint64"),
+  ];
 
   let indirectResult = false;
-  let directPieces: ArgPiece[] = [];
+  let directResult: PlacedScalar[] = [];
   let resultSize = 0;
   let resultStride = 0;
   if (returnType !== null) {
@@ -477,28 +536,33 @@ export function makeSwiftNativeFunction(
       if (forcedIndirect || shouldPassIndirectly(returnMetadata)) {
         indirectResult = true;
       } else {
-        directPieces = directArgPieces(returnMetadata);
+        const resultAllocator = new ArgumentAllocator();
+        directResult = loweredScalars(returnMetadata).map((scalar) => ({
+          scalar,
+          location: resultAllocator.scalar(scalar),
+        }));
       }
     }
   }
 
   // The returned closure captures `resources`, keeping the trampoline's baked buffers alive
-  // (Frida frees a Memory.alloc when its NativePointer is collected). self/error/scratch are
-  // single shared buffers per function, so the trampoline is not re-entrant.
+  // (Frida frees a Memory.alloc when its NativePointer is collected). self/error/scratch and the
+  // consumed-argument copies are single shared buffers per function, so the trampoline is not re-entrant.
   const savesContext = hasSelf || throws;
   const code = Memory.alloc(Process.pageSize);
   const save = Memory.alloc(Process.pointerSize * (savesContext ? 4 : 2));
-  const scratch = resultSize > 0 ? Memory.alloc(Math.max(resultStride, directPieces.length * 8, 8)) : ptr(0);
+  const scratch = resultSize > 0 ? Memory.alloc(Math.max(resultStride, REGISTER_FRAME_SIZE)) : ptr(0);
   const selfBuffer = hasSelf ? Memory.alloc(Process.pointerSize) : null;
   const errorBuffer = throws ? Memory.alloc(Process.pointerSize) : null;
+  const consumedCopies = argMetadata.map((m, i) => (consumed.has(i) ? Memory.alloc(m!.typeLayout.stride) : null));
   writeTrampoline(code, {
     save,
     target: address.strip(),
     selfBuffer,
     errorBuffer,
     indirectResultBuffer: indirectResult ? scratch : null,
-    resultBuffer: directPieces.length > 0 ? scratch : null,
-    resultPieces: resultPieces(directPieces),
+    resultBuffer: directResult.length > 0 ? scratch : null,
+    resultRegisters: resultRegisters(directResult),
   });
   const resources = {
     code,
@@ -506,6 +570,7 @@ export function makeSwiftNativeFunction(
     scratch,
     selfBuffer,
     errorBuffer,
+    consumedCopies,
     invoke: new NativeFunction(signCode(code), "void", fridaArgTypes) as unknown as (
       ...args: NativeFunctionArgumentValue[]
     ) => void,
@@ -522,33 +587,35 @@ export function makeSwiftNativeFunction(
       resources.selfBuffer!.writePointer(args[next++]);
     }
 
-    const physical: NativeFunctionArgumentValue[] = [];
+    const frame = Memory.alloc(REGISTER_FRAME_SIZE + stackWords * 8);
     for (let i = 0; i < loweredArgs.length; i++) {
       const lowered = loweredArgs[i];
       const value = args[next++];
       if (lowered.indirect) {
         // consumed (+1): the callee destroys it, so hand it a copy
-        const metadata = argMetadata[i];
-        if (consumed.has(i) && metadata !== null) {
-          const copy = Memory.alloc(metadata.typeLayout.stride);
-          metadata.valueWitnesses.initializeWithCopy(copy, value);
-          physical.push(copy);
-        } else {
-          physical.push(value);
+        const copy = resources.consumedCopies[i];
+        if (copy !== null) {
+          argMetadata[i]!.valueWitnesses.initializeWithCopy(copy, value);
         }
+        frame.add(frameOffset(argLocations[i][0])).writePointer(copy ?? value);
       } else {
-        for (const piece of lowered.pieces) {
-          physical.push(readArgPiece(piece, value));
-        }
+        lowered.pieces.forEach((piece, k) => {
+          const location = argLocations[i][k];
+          const slot = frame.add(frameOffset(location));
+          if ("register" in location) {
+            slot.writeU64(0);
+          }
+          Memory.copy(slot, value.add(piece.offset), piece.size);
+        });
       }
     }
-    for (const metadata of typeArguments) {
-      physical.push(metadata.handle);
-    }
-    for (const witnessTable of witnessTables) {
-      physical.push(witnessTable);
-    }
+    implicitArgs.forEach((arg, k) => frame.add(frameOffset(implicitLocations[k])).writePointer(arg));
 
+    const physical: NativeFunctionArgumentValue[] = [];
+    for (let i = 0; i < fridaArgTypes.length; i++) {
+      const slot = frame.add(i * 8);
+      physical.push(fridaArgTypes[i] === "double" ? slot.readDouble() : slot.readU64());
+    }
     resources.invoke(...physical);
 
     if (throws) {
@@ -562,10 +629,12 @@ export function makeSwiftNativeFunction(
       return null;
     }
     const out = Memory.alloc(resultStride);
-    if (directPieces.length === 0) {
+    if (directResult.length === 0) {
       Memory.copy(out, resources.scratch, resultSize);
     } else {
-      directPieces.forEach((p, k) => Memory.copy(out.add(p.offset), resources.scratch.add(k * 8), p.size));
+      for (const { scalar, location } of directResult) {
+        Memory.copy(out.add(scalar.offset), resources.scratch.add(frameOffset(location)), scalar.size);
+      }
     }
     return out;
   };
@@ -578,7 +647,7 @@ interface TrampolineConfig {
   errorBuffer: NativePointer | null;
   indirectResultBuffer: NativePointer | null;
   resultBuffer: NativePointer | null;
-  resultPieces: ResultPiece[];
+  resultRegisters: RegisterLocation[];
 }
 
 function writeTrampoline(code: NativePointer, cfg: TrampolineConfig): void {
@@ -617,15 +686,9 @@ function writeArm64Trampoline(code: NativePointer, cfg: TrampolineConfig): void 
 
     if (cfg.resultBuffer !== null) {
       writer.putLdrRegAddress("x15", cfg.resultBuffer);
-      let gp = 0;
-      let vfp = 0;
-      for (const piece of cfg.resultPieces) {
-        if (piece.reg === "gp") {
-          writer.putStrRegRegOffset(`x${gp++}` as Arm64Register, "x15", piece.off);
-        } else {
-          const prefix = piece.cls === "double" ? "d" : "s";
-          writer.putStrRegRegOffset(`${prefix}${vfp++}` as Arm64Register, "x15", piece.off);
-        }
+      for (const location of cfg.resultRegisters) {
+        const prefix = location.register === "gp" ? "x" : "d";
+        writer.putStrRegRegOffset(`${prefix}${location.index}` as Arm64Register, "x15", frameOffset(location));
       }
     }
     if (cfg.errorBuffer !== null) {
@@ -682,13 +745,11 @@ function writeX86Trampoline(code: NativePointer, cfg: TrampolineConfig): void {
     }
     if (cfg.resultBuffer !== null) {
       writer.putMovRegAddress("r10", cfg.resultBuffer);
-      let gp = 0;
-      let sse = 0;
-      for (const piece of cfg.resultPieces) {
-        if (piece.reg === "gp") {
-          writer.putMovRegOffsetPtrReg("r10", piece.off, X86_RESULT_GP[gp++]);
+      for (const location of cfg.resultRegisters) {
+        if (location.register === "gp") {
+          writer.putMovRegOffsetPtrReg("r10", frameOffset(location), X86_RESULT_GP[location.index]);
         } else {
-          putFpStoreToR10(writer, piece.cls, piece.off, sse++);
+          putFpStoreToR10(writer, "double", frameOffset(location), location.index);
         }
       }
     }

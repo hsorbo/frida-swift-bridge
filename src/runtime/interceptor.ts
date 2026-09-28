@@ -3,7 +3,14 @@ import { readValue, embedsManagedReference, SwiftValue } from "../abi/instance.j
 import { ValueInstance } from "../abi/value.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { decodeThrownError } from "./thrown-error.js";
-import { shouldPassIndirectly, loweredScalars, LoweredScalar } from "./calling-convention.js";
+import {
+  shouldPassIndirectly,
+  loweredScalars,
+  LoweredScalar,
+  ArgumentAllocator,
+  RegisterLocation,
+  FloatClass,
+} from "./calling-convention.js";
 import { AsyncFunctionPointer, isAsyncFunctionPointerSymbol } from "../abi/async-function-pointer.js";
 import { AsyncContext } from "../abi/async-context.js";
 import {
@@ -203,76 +210,59 @@ function fpArg(context: CpuContext, n: number, cls: "double" | "float"): number 
   return readXmm(context, n, cls);
 }
 
-const GP_ARG_REGISTERS = ARCH === "arm64" ? 8 : X64_GP_ARGS.length;
-const FP_ARG_REGISTERS = 8;
-// Darwin arm64 packs a stack-passed scalar at its own size and alignment; AAPCS64 and SysV x86-64
-// give each one an 8-byte slot.
-const PACKS_STACK_ARGS = ARCH === "arm64" && Process.platform === "darwin";
-const I128_STARTS_AT_EVEN_REGISTER = ARCH === "arm64" && !PACKS_STACK_ARGS;
-
-// swiftcc places each lowered scalar on its own, so an aggregate can straddle the last register and
-// the stack. Stack args start at the entry sp on arm64, past the return address on x86-64.
+// Stack args start at the entry sp on arm64, past the return address on x86-64.
 class ArgumentCursor {
-  private ngrn: number;
-  private nsrn = 0;
-  private stackOffset = 0;
+  private readonly allocator: ArgumentAllocator;
 
   constructor(private readonly context: CpuContext, startReg: number) {
-    this.ngrn = startReg;
+    this.allocator = new ArgumentAllocator(startReg);
   }
 
-  gp(width = 8): NativePointer {
-    if (this.ngrn < GP_ARG_REGISTERS) {
-      return gpArg(this.context, this.ngrn++);
+  gp(): NativePointer {
+    const location = this.allocator.gp();
+    if ("stackOffset" in location) {
+      return this.stackSlot(location.stackOffset).readPointer();
     }
-    return this.stackSlot(width).readPointer();
+    return gpArg(this.context, location.index);
   }
 
-  // arm64 passes an i128 in a register pair that never starts at x7, else in a 16-byte-aligned stack
-  // slot that retires x7. x86-64 compilers disagree on where one goes once r8 is taken.
-  gp128(): [NativePointer, NativePointer] {
-    if (ARCH !== "arm64" && this.ngrn > GP_ARG_REGISTERS - 2) {
-      throw new Error("an Int128 argument past r8 is unsupported on x86-64");
+  readScalar(scalar: LoweredScalar, value: NativePointer): void {
+    const location = this.allocator.scalar(scalar);
+    if ("stackOffset" in location) {
+      Memory.copy(value.add(scalar.offset), this.stackSlot(location.stackOffset), scalar.size);
+      return;
     }
-    if (I128_STARTS_AT_EVEN_REGISTER) {
-      this.ngrn += this.ngrn % 2;
-    }
-    if (this.ngrn < GP_ARG_REGISTERS - 1) {
-      return [gpArg(this.context, this.ngrn++), gpArg(this.context, this.ngrn++)];
-    }
-    this.ngrn = GP_ARG_REGISTERS;
-    const slot = this.stackSlot(16);
-    return [slot.readPointer(), slot.add(8).readPointer()];
+    writeRegisterScalar(
+      value,
+      scalar,
+      location,
+      (n) => gpArg(this.context, n),
+      (n, cls) => fpArg(this.context, n, cls)
+    );
   }
 
-  fp(cls: "double" | "float"): number {
-    if (this.nsrn < FP_ARG_REGISTERS) {
-      return fpArg(this.context, this.nsrn++, cls);
-    }
-    const slot = this.stackSlot(cls === "double" ? 8 : 4);
-    return cls === "double" ? slot.readDouble() : slot.readFloat();
-  }
-
-  readScalar({ offset, size, cls }: LoweredScalar, value: NativePointer): void {
-    const at = value.add(offset);
-    if (cls !== "int") {
-      writeFloatScalar(at, cls, this.fp(cls));
-    } else if (size === 16) {
-      const [low, high] = this.gp128();
-      at.writePointer(low);
-      at.add(8).writePointer(high);
-    } else {
-      writeIntegerScalar(at, size, this.gp(size));
-    }
-  }
-
-  private stackSlot(width: number): NativePointer {
-    const size = PACKS_STACK_ARGS ? width : Math.max(width, 8);
-    this.stackOffset = Math.ceil(this.stackOffset / size) * size;
+  private stackSlot(stackOffset: number): NativePointer {
     const base = ARCH === "arm64" ? this.context.sp : this.context.sp.add(8);
-    const slot = base.add(this.stackOffset);
-    this.stackOffset += size;
-    return slot;
+    return base.add(stackOffset);
+  }
+}
+
+function writeRegisterScalar(
+  value: NativePointer,
+  { offset, size, cls }: LoweredScalar,
+  { index }: RegisterLocation,
+  gp: (n: number) => NativePointer,
+  fp: (n: number, cls: FloatClass) => number
+): void {
+  const at = value.add(offset);
+  if (cls === "double") {
+    at.writeDouble(fp(index, cls));
+  } else if (cls === "float") {
+    at.writeFloat(fp(index, cls));
+  } else {
+    for (let w = 0; w < size; w += 8) {
+      Memory.copy(at.add(w), Memory.alloc(8).writePointer(gp(index + w / 8)), Math.min(size, 8));
+    }
   }
 }
 
@@ -304,14 +294,6 @@ function asyncContextRegister(context: CpuContext): NativePointer {
 
 function words(metadata: Metadata): number {
   return Math.ceil(metadata.valueWitnesses.size / 8);
-}
-
-function writeIntegerScalar(at: NativePointer, size: number, register: NativePointer): void {
-  Memory.copy(at, Memory.alloc(8).writePointer(register), size);
-}
-
-function writeFloatScalar(at: NativePointer, cls: "double" | "float", value: number): void {
-  cls === "double" ? at.writeDouble(value) : at.writeFloat(value);
 }
 
 interface MaterializedArgs {
@@ -425,17 +407,15 @@ function materializeReturn(
   // Direct multi-register return: the bytes live only in the result registers, so a non-POD value is
   // borrowed over this private reassembly — readable/callable in the callback, not write-through.
   const scratch = Memory.alloc(Math.max(words(returnType), 1) * 8);
-  let gp = 0;
-  let fp = 0;
-  for (const { offset, size, cls } of loweredScalars(returnType)) {
-    const at = scratch.add(offset);
-    if (cls !== "int") {
-      writeFloatScalar(at, cls, fpResult(context, fp++, cls));
-    } else {
-      for (let w = 0; w < size; w += 8) {
-        writeIntegerScalar(at.add(w), Math.min(size, 8), gpResult(context, gp++));
-      }
-    }
+  const allocator = new ArgumentAllocator();
+  for (const scalar of loweredScalars(returnType)) {
+    writeRegisterScalar(
+      scratch,
+      scalar,
+      allocator.scalar(scalar) as RegisterLocation,
+      (n) => gpResult(context, n),
+      (n, cls) => fpResult(context, n, cls)
+    );
   }
   return decodeReturnValue(returnType, scratch);
 }

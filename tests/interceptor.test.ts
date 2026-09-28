@@ -419,6 +419,50 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toEqual(int64(40));
   });
 
+  test("decodes a single-case enum argument as its payload", (ctx) => {
+    requireFpRegisterHooks(ctx);
+    const Int = metadataFor("Swift.Int")!;
+    const addr = fixtureExport("fixture.spillWrapped(");
+    let seenArgs: SwiftValue[] | null = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+    });
+    const driven = makeSwiftNativeFunction(fixtureExport("fixture.driveSpillWrapped("), Int, [])()!;
+    listener.detach();
+    expect(driven.readS64().toNumber()).toBe(44);
+    expect(seenArgs).toEqual([
+      int64(1), int64(2), int64(3), int64(4), int64(5), int64(6), int64(7), int64(8),
+      true,
+      { tagged: { tag: 9, value: int64(10), flag: true } },
+      { meters: 11.5 },
+      int64(12),
+    ]);
+  });
+
+  test("decodes a returned Int128 from its register pair, skipping the padding word", (ctx) => {
+    loadFixture();
+    if (metadataFor("fixture.FramedInt128") === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
+    const Int = metadataFor("Swift.Int")!;
+    const addr = fixtureExport("fixture.flipFramedInt128(");
+    let seenArgs: SwiftValue[] | null = null;
+    let seenRet: CallResult = null;
+    const listener = SwiftInterceptor.attach(addr, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+      onLeave(ret) {
+        seenRet = ret;
+      },
+    });
+    const driven = makeSwiftNativeFunction(fixtureExport("fixture.driveFlipFramedInt128("), Int, [])()!;
+    listener.detach();
+    expect(driven.readS64().toNumber()).toBe(441);
+    expect(seenArgs).toEqual([{ head: int64(1), wide: { _value: null }, tail: int64(4) }]);
+    expect(seenRet).toEqual({ head: int64(4), wide: { _value: null }, tail: int64(1) });
+  });
+
   test("surfaces a thrown error on leave instead of decoding a bogus return", () => {
     const Int = metadataFor("Swift.Int")!;
     const addr = fixtureExport("fixture.mightThrow");

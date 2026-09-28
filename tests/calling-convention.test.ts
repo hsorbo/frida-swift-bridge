@@ -198,6 +198,90 @@ describe("makeSwiftNativeFunction", () => {
     expect(fn(quad)!.readFloat()).toBe(15);
   });
 
+  test("spills narrow scalars onto the caller's stack at their own widths", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const Loadable = metadataFor("fixture.LoadableStruct")!;
+    const Bool_ = metadataFor("Swift.Bool")!;
+    const Tagged = metadataFor("fixture.TaggedInt")!;
+    const Int32_ = metadataFor("Swift.Int32")!;
+    const fn = makeSwiftNativeFunction(
+      fixtureExport("fixture.spillInts("),
+      Int,
+      [Int, Int, Int, Int, Int, Int, Loadable, Bool_, Tagged, Int32_, Int]
+    );
+    const split = Memory.alloc(32);
+    [7, 8, 9, 10].forEach((v, i) => split.add(i * 8).writeU64(v));
+    const tagged = Memory.alloc(Tagged.typeLayout.stride);
+    tagged.writeS8(11);
+    tagged.add(8).writeU64(12);
+    tagged.add(16).writeU8(1);
+    const r = fn(
+      intValue(1), intValue(2), intValue(3), intValue(4), intValue(5), intValue(6),
+      split, Memory.alloc(1).writeU8(1), tagged, Memory.alloc(4).writeS32(-13), intValue(14)
+    )!;
+    expect(r.readS64().toNumber()).toBe(25);
+  });
+
+  test("passes a single-case enum as its payload", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const Bool_ = metadataFor("Swift.Bool")!;
+    const Wrapped = metadataFor("fixture.WrappedTagged")!;
+    const Meters = metadataFor("fixture.Meters")!;
+    const ints = Array.from({ length: 8 }, () => Int);
+    const fn = makeSwiftNativeFunction(fixtureExport("fixture.spillWrapped("), Int, [
+      ...ints, Bool_, Wrapped, Meters, Int,
+    ]);
+    const wrapped = Memory.alloc(Wrapped.typeLayout.stride);
+    wrapped.writeS8(9);
+    wrapped.add(8).writeU64(10);
+    wrapped.add(16).writeU8(1);
+    const r = fn(
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map(intValue),
+      Memory.alloc(1).writeU8(1), wrapped, Memory.alloc(8).writeDouble(11.5), intValue(12)
+    )!;
+    expect(r.readS64().toNumber()).toBe(44);
+  });
+
+  test("passes an Int128 in a register pair or a 16-byte-aligned stack slot", (ctx) => {
+    if (Process.arch !== "arm64") ctx.skip("x86-64 compilers disagree on where an Int128 past the registers goes");
+    const Padded = metadataFor("fixture.PaddedInt128");
+    if (Padded === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
+    const Int = metadataFor("Swift.Int")!;
+    const Bool_ = metadataFor("Swift.Bool")!;
+    const Int128_ = metadataFor("Swift.Int128")!;
+    const int128 = (high: number, low: number): NativePointer => {
+      const p = Memory.alloc(16);
+      p.writeU64(low);
+      p.add(8).writeU64(high);
+      return p;
+    };
+    const fn = makeSwiftNativeFunction(fixtureExport("fixture.spillInt128("), Int, [
+      Padded!, Int, Int, Int, Int, Int128_, Bool_, Int128_, Int,
+    ]);
+    const padded = Memory.alloc(Padded!.typeLayout.stride);
+    padded.writeU64(1);
+    padded.add(16).writeU64(3);
+    padded.add(24).writeU64(2);
+    const r = fn(
+      padded, intValue(4), intValue(5), intValue(6), intValue(7), int128(8, 9),
+      Memory.alloc(1).writeU8(1), int128(10, 11), intValue(12)
+    )!;
+    expect(r.readS64().toNumber()).toBe(40);
+  });
+
+  test("passes and returns an Int128 framed by integers in registers", (ctx) => {
+    const Framed = metadataFor("fixture.FramedInt128");
+    if (Framed === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
+    const fn = makeSwiftNativeFunction(fixtureExport("fixture.flipFramedInt128("), Framed!, [Framed!]);
+    const framed = Memory.alloc(Framed!.typeLayout.stride);
+    framed.writeU64(1);
+    framed.add(16).writeU64(3);
+    framed.add(24).writeU64(2);
+    framed.add(32).writeU64(4);
+    const r = fn(framed)!;
+    expect([0, 16, 24, 32].map((off) => r.add(off).readU64().toNumber())).toEqual([4, 4, 2, 1]);
+  });
+
   test("drives a generic function directly with supplied type metadata", () => {
     const Int = metadataFor("Swift.Int")!;
     const id = makeSwiftNativeFunction(

@@ -622,6 +622,20 @@ public func driveSpillDoubles() -> Double {
                  DoublePair(x: 7.5, y: 8.5), 9.25, 10.75, "hi", 11.5)
 }
 
+// A single-case enum lowers as its payload: WrappedTagged to (i8, i64, i1), Meters to (double).
+public enum WrappedTagged { case tagged(TaggedInt) }
+public enum Meters { case meters(Double) }
+public func spillWrapped(_ a0: Int, _ a1: Int, _ a2: Int, _ a3: Int, _ a4: Int, _ a5: Int, _ a6: Int,
+                         _ a7: Int, _ flag: Bool, _ wrapped: WrappedTagged, _ distance: Meters,
+                         _ last: Int) -> Int {
+    guard case .tagged(let t) = wrapped, case .meters(let m) = distance else { return 0 }
+    return a0 + (flag ? 1 : 0) + Int(t.tag) + t.value + Int(m) + last
+}
+public func driveSpillWrapped() -> Int {
+    spillWrapped(1, 2, 3, 4, 5, 6, 7, 8, true, .tagged(TaggedInt(tag: 9, value: 10, flag: true)),
+                 .meters(11.5), 12)
+}
+
 // Int128 lowers to one i128: a register pair that never starts at x7, else a 16-byte-aligned stack
 // slot. PaddedInt128 lowers to (i64, i128); its padding word takes no register.
 #if compiler(>=6.0)
@@ -637,6 +651,18 @@ public func spillInt128(_ padded: PaddedInt128, _ a0: Int, _ a1: Int, _ a2: Int,
 public func driveSpillInt128() -> Int {
     spillInt128(PaddedInt128(head: 1, wide: Int128(2) << 64 | 3), 4, 5, 6, 7, Int128(8) << 64 | 9,
                 true, Int128(10) << 64 | 11, 12)
+}
+// Five words but four registers, so direct: (i64, i128, i64).
+@available(macOS 15, iOS 18, *)
+public struct FramedInt128 { public var head: Int; public var wide: Int128; public var tail: Int }
+@available(macOS 15, iOS 18, *)
+public func flipFramedInt128(_ f: FramedInt128) -> FramedInt128 {
+    FramedInt128(head: f.tail, wide: f.wide + 1, tail: f.head)
+}
+@available(macOS 15, iOS 18, *)
+public func driveFlipFramedInt128() -> Int {
+    let r = flipFramedInt128(FramedInt128(head: 1, wide: Int128(2) << 64 | 3, tail: 4))
+    return r.head * 10 + r.tail + Int(truncatingIfNeeded: r.wide) * 100
 }
 #endif
 
