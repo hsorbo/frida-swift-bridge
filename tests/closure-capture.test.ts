@@ -6,9 +6,9 @@ import { readObject } from "../src/abi/instance.js";
 import { layoutCaptures, readCaptures, unwrapReabstractionThunk, writeCaptures } from "../src/abi/closure-capture.js";
 import { captureDescriptorOf, offsetToFirstCapture } from "../src/abi/capture-descriptor.js";
 import { resolveTypeByMangledName } from "../src/abi/field-descriptor.js";
-import { MetadataKind } from "../src/abi/metadata.js";
+import { Metadata, MetadataKind } from "../src/abi/metadata.js";
 import { typeName } from "../src/runtime/type-name.js";
-import { fixtureExport } from "./fixtures/load.js";
+import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
 import { Swift } from "../src/index.js";
 const HEAP_LOCAL_VARIABLE = 0x400;
@@ -63,6 +63,38 @@ describe("closure capture layout (synthetic)", () => {
     expect(slots![1].type.description.fullTypeName).toBe("Swift.Int");
     expect(slots![0].address.equals(context.add(0x10))).toBeTruthy();
     expect(slots![1].address.sub(slots![0].address).toInt32()).toBe(8);
+  });
+
+  // IRGen places an empty capture at the running offset without aligning it (addEmptyElement).
+  test("places an empty capture without aligning it, even when its alignment exceeds 1", (ctx) => {
+    requireSwift();
+    const accessor = loadFixture().findExportByName("$s7fixture12AlignedEmptyVMa");
+    if (accessor === null) {
+      ctx.skip("fixture compiled without ~Copyable (Swift < 5.9)");
+    }
+    const alignedEmpty = new Metadata(new NativeFunction(accessor!, "pointer", ["size_t"])(0) as NativePointer);
+    expect(alignedEmpty.typeLayout.size).toBe(0);
+    expect(alignedEmpty.typeLayout.alignment).toBe(16);
+
+    // A noncopyable type is not found by its textual name, so name it by a symbolic reference.
+    const typeDescriptor = alignedEmpty.description.handle;
+    const descriptor = Memory.alloc(Process.pageSize, { near: typeDescriptor, maxDistance: 0x7fff0000 });
+    pinned.push(descriptor);
+    const boolName = descriptor.add(0x20);
+    boolName.writeUtf8String("Sb");
+    const alignedEmptyName = descriptor.add(0x28);
+    alignedEmptyName.writeU8(0x01);
+    writeRelativeDirectPointer(alignedEmptyName.add(1), typeDescriptor);
+    alignedEmptyName.add(5).writeU8(0);
+    descriptor.writeU32(3);
+    [boolName, alignedEmptyName, boolName].forEach((name, i) => {
+      writeRelativeDirectPointer(descriptor.add(0xc + i * 0x4), name);
+    });
+    const context = makeHeapContext(descriptor, 0x10);
+
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual(["Swift.Bool", "fixture.AlignedEmpty", "Swift.Bool"]);
+    expect(slots.map(({ address }) => address.sub(context).toInt32())).toEqual([0x10, 0x11, 0x11]);
   });
 
   test("returns null for a generic-bound closure without attempting to resolve it", () => {

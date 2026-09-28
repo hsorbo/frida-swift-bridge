@@ -1285,6 +1285,11 @@ public func spareBitsCapturingContext() -> UnsafeMutableRawPointer {
     }
 }
 
+#if compiler(>=5.9)
+// Copyable empty types share the empty tuple's witnesses (alignment 1); this one keeps its own.
+@_alignment(16) public struct AlignedEmpty: ~Copyable {}
+#endif
+
 var genericCapturingBody: () -> Void = {}
 public func storeGenericCapturing<T>(_ value: T) {
     genericCapturingBody = { _ = value }

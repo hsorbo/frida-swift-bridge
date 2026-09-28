@@ -64,7 +64,9 @@ function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
       return null;
     }
     const { size, alignment } = type.typeLayout;
-    offset = (offset + alignment - 1) & ~(alignment - 1);
+    if (size !== 0) {
+      offset = (offset + alignment - 1) & ~(alignment - 1);
+    }
     slots.push({ type, address: context.add(offset) });
     offset += size;
   }
