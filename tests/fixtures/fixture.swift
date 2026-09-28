@@ -833,6 +833,18 @@ public func storeRefInt(_ p: UnsafeMutableRawPointer) {
     p.assumingMemoryBound(to: (any Ref<Int>).self).initialize(to: IntRef(7))
 }
 
+open class HashedBox<Key: Hashable> {
+    public init() {}
+}
+public func hashedBoxHolderType() -> UnsafeRawPointer {
+    unsafeBitCast((any HashedBox<Int> & Holder<String>).self as Any.Type, to: UnsafeRawPointer.self)
+}
+
+public protocol Consumable: ~Copyable {}
+public func noncopyableConsumableType() -> UnsafeRawPointer {
+    unsafeBitCast((any Consumable & ~Copyable).self, to: UnsafeRawPointer.self)
+}
+
 // Method-name rendering: an operator and a generic return.
 public struct Selectors {
     public var n: Int

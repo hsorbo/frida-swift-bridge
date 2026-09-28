@@ -2,7 +2,17 @@ import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift } from "./swift.js";
 import { fixtureExport, existentialMetadata } from "./fixtures/load.js";
 
-import { Metadata, readValue, readObject, metadataFor } from "../src/abi.js";
+import {
+  Metadata,
+  readValue,
+  readObject,
+  metadataFor,
+  typeName,
+  GenericRequirementKind,
+  existentialProtocols,
+  extendedExistentialRequirementSignature,
+  extendedExistentialGeneralizationArguments,
+} from "../src/abi.js";
 import { MetadataKind } from "../src/abi/metadata.js";
 import {
   extendedExistentialSpecialKind,
@@ -49,5 +59,53 @@ describe("readValue extended existential", () => {
     expect(M.kind).toBe(MetadataKind.ExtendedExistential);
     expect(extendedExistentialSpecialKind(M)).toBe(ExtendedExistentialSpecialKind.Metatype);
     expect(readValue(M, store("fixture.storeHolderMetatype", M))).toBe("fixture.IntHolder");
+  });
+});
+
+describe("extended existential shape", () => {
+  test("names the constrained protocol and its type argument (any Holder<Int>)", () => {
+    requireSwift();
+    const Holder = existentialMetadata("fixture.holderIntType");
+    expect(existentialProtocols(Holder).map((p) => p.fullTypeName)).toEqual(["fixture.Holder"]);
+    expect(extendedExistentialGeneralizationArguments(Holder).map((m) => typeName(m))).toEqual(["Swift.Int"]);
+  });
+
+  test("names the protocol of a class-constrained and a metatype shape (any Ref<Int>, any Holder<Int>.Type)", () => {
+    requireSwift();
+    const Ref = existentialMetadata("fixture.refIntType");
+    expect(existentialProtocols(Ref).map((p) => p.fullTypeName)).toEqual(["fixture.Ref"]);
+    expect(extendedExistentialGeneralizationArguments(Ref).map((m) => typeName(m))).toEqual(["Swift.Int"]);
+    const M = existentialMetadata("fixture.holderMetatypeType");
+    expect(existentialProtocols(M).map((p) => p.fullTypeName)).toEqual(["fixture.Holder"]);
+    expect(extendedExistentialGeneralizationArguments(M).map((m) => typeName(m))).toEqual(["Swift.Int"]);
+  });
+
+  test("decodes the requirement signature: the argument's same-type binding, then Self's conformance", () => {
+    requireSwift();
+    const signature = extendedExistentialRequirementSignature(existentialMetadata("fixture.holderIntType"));
+    expect(signature.map((r) => r.kind)).toEqual([GenericRequirementKind.SameType, GenericRequirementKind.Protocol]);
+    expect(signature[0].sameTypeName).not.toBeNull();
+    expect(signature[1].protocol!.fullTypeName).toBe("fixture.Holder");
+  });
+
+  test("separates a generic superclass's arguments and conformances from Self's protocols", () => {
+    requireSwift();
+    const M = existentialMetadata("fixture.hashedBoxHolderType");
+    expect(existentialProtocols(M).map((p) => p.fullTypeName)).toEqual(["fixture.Holder"]);
+    expect(extendedExistentialGeneralizationArguments(M).map((m) => typeName(m))).toEqual(["Swift.Int", "Swift.String"]);
+    const kinds = extendedExistentialRequirementSignature(M).map((r) => r.kind);
+    expect(kinds).toContain(GenericRequirementKind.BaseClass);
+  });
+
+  test("names Self's protocol when there is no generalization signature (any Consumable & ~Copyable)", () => {
+    requireSwift();
+    const M = existentialMetadata("fixture.noncopyableConsumableType");
+    expect(M.kind).toBe(MetadataKind.ExtendedExistential);
+    expect(existentialProtocols(M).map((p) => p.fullTypeName)).toEqual(["fixture.Consumable"]);
+    expect(extendedExistentialGeneralizationArguments(M)).toEqual([]);
+    expect(extendedExistentialRequirementSignature(M).map((r) => r.kind)).toEqual([
+      GenericRequirementKind.Protocol,
+      GenericRequirementKind.InvertedProtocols,
+    ]);
   });
 });

@@ -1,5 +1,10 @@
 import { Metadata, MetadataKind } from "./metadata.js";
 import { ContextDescriptor } from "./context-descriptor.js";
+import {
+  GenericRequirementDescriptor,
+  GenericRequirementKind,
+  readGenericRequirementDescriptors,
+} from "./generic-requirement-descriptor.js";
 import { dynamicTypeOf } from "./class-metadata.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 
@@ -12,6 +17,23 @@ const SPECIAL_PROTOCOL_ERROR = 0x01000000;
 const NOT_CLASS_CONSTRAINED = 0x80000000;
 const HAS_SUPERCLASS_CONSTRAINT = 0x40000000;
 const PROTOCOL_DESCRIPTOR_REF_IS_OBJC = 1;
+
+const SHAPE_SPECIAL_KIND_MASK = 0xff;
+const SHAPE_HAS_GENERALIZATION_SIGNATURE = 0x100;
+const SHAPE_HAS_TYPE_EXPRESSION = 0x200;
+const SHAPE_HAS_SUGGESTED_VALUE_WITNESSES = 0x400;
+const SHAPE_HAS_IMPLICIT_REQ_SIG_PARAMS = 0x800;
+const SHAPE_HAS_IMPLICIT_GEN_SIG_PARAMS = 0x1000;
+const SHAPE_REQ_SIG_HEADER_OFFSET = 0x8;
+const SHAPE_GEN_SIG_HEADER_OFFSET = 0x10;
+const GENERIC_HEADER_SIZE = 0x8;
+const GENERIC_HEADER_NUM_REQUIREMENTS_OFFSET = 0x2;
+const RELATIVE_POINTER_SIZE = 4;
+const GENERALIZATION_ARGUMENTS_OFFSET = 2 * Process.pointerSize;
+
+// Self is opened one depth below the generalization parameters: τ_1_0, or τ_0_0 when there are none.
+const OPENED_SELF_BEHIND_GENERALIZATION = "qd__";
+const OPENED_SELF_ALONE = "x";
 
 export type ExistentialRepresentation = "opaque" | "class" | "error";
 
@@ -45,9 +67,76 @@ export enum ExtendedExistentialSpecialKind {
   ExplicitLayout = 3,
 }
 
+function extendedExistentialShape(metadata: Metadata): NativePointer {
+  return metadata.handle.add(Process.pointerSize).readPointer().strip();
+}
+
 export function extendedExistentialSpecialKind(metadata: Metadata): ExtendedExistentialSpecialKind {
-  const shape = metadata.handle.add(Process.pointerSize).readPointer().strip();
-  return shape.readU32() & 0xff;
+  return extendedExistentialShape(metadata).readU32() & SHAPE_SPECIAL_KIND_MASK;
+}
+
+function hasGeneralizationSignature(shape: NativePointer): boolean {
+  return (shape.readU32() & SHAPE_HAS_GENERALIZATION_SIGNATURE) !== 0;
+}
+
+function numGeneralizationParams(shape: NativePointer): number {
+  return hasGeneralizationSignature(shape) ? shape.add(SHAPE_GEN_SIG_HEADER_OFFSET).readU16() : 0;
+}
+
+export function extendedExistentialRequirementSignature(metadata: Metadata): GenericRequirementDescriptor[] {
+  const shape = extendedExistentialShape(metadata);
+  const flags = shape.readU32();
+  const numReqSigParams = shape.add(SHAPE_REQ_SIG_HEADER_OFFSET).readU16();
+  const numReqSigRequirements = shape
+    .add(SHAPE_REQ_SIG_HEADER_OFFSET + GENERIC_HEADER_NUM_REQUIREMENTS_OFFSET)
+    .readU16();
+  let offset = SHAPE_GEN_SIG_HEADER_OFFSET;
+  if (hasGeneralizationSignature(shape)) {
+    offset += GENERIC_HEADER_SIZE;
+  }
+  if ((flags & SHAPE_HAS_TYPE_EXPRESSION) !== 0) {
+    offset += RELATIVE_POINTER_SIZE;
+  }
+  if ((flags & SHAPE_HAS_SUGGESTED_VALUE_WITNESSES) !== 0) {
+    offset += RELATIVE_POINTER_SIZE;
+  }
+  if ((flags & SHAPE_HAS_IMPLICIT_REQ_SIG_PARAMS) === 0) {
+    offset += numReqSigParams;
+  }
+  if ((flags & SHAPE_HAS_IMPLICIT_GEN_SIG_PARAMS) === 0) {
+    offset += numGeneralizationParams(shape);
+  }
+  return readGenericRequirementDescriptors(shape.add((offset + 3) & ~3), numReqSigRequirements);
+}
+
+// Only the leading type metadata; witness tables for the generalization signature's conformances follow.
+export function extendedExistentialGeneralizationArguments(metadata: Metadata): Metadata[] {
+  const numParams = numGeneralizationParams(extendedExistentialShape(metadata));
+  const args = metadata.handle.add(GENERALIZATION_ARGUMENTS_OFFSET);
+  const result: Metadata[] = [];
+  for (let i = 0; i < numParams; i++) {
+    result.push(new Metadata(args.add(i * Process.pointerSize).readPointer()));
+  }
+  return result;
+}
+
+function extendedExistentialProtocols(metadata: Metadata): ContextDescriptor[] {
+  const self = hasGeneralizationSignature(extendedExistentialShape(metadata))
+    ? OPENED_SELF_BEHIND_GENERALIZATION
+    : OPENED_SELF_ALONE;
+  const protocols: ContextDescriptor[] = [];
+  for (const requirement of extendedExistentialRequirementSignature(metadata)) {
+    const { address, length } = requirement.param;
+    if (
+      requirement.kind === GenericRequirementKind.Protocol &&
+      requirement.protocol !== null &&
+      length === self.length &&
+      address.readUtf8String(length) === self
+    ) {
+      protocols.push(requirement.protocol);
+    }
+  }
+  return protocols;
 }
 
 export function isClassExistential(metadata: Metadata): boolean {
@@ -77,8 +166,11 @@ export function projectExistentialValue(metadata: Metadata, container: NativePoi
   throw new Error("projectExistentialValue: Error existentials are not supported; use projectErrorExistential");
 }
 
-// Swift protocol descriptors of an Existential-kind metadata; ObjC refs (low bit set) are skipped.
+// Swift protocol descriptors of an Existential or ExtendedExistential metadata; ObjC refs (low bit set) are skipped.
 export function existentialProtocols(metadata: Metadata): ContextDescriptor[] {
+  if (metadata.kind === MetadataKind.ExtendedExistential) {
+    return extendedExistentialProtocols(metadata);
+  }
   const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
   const numProtocols = metadata.handle.add(NUM_PROTOCOLS_OFFSET).readU32();
   let cursor = metadata.handle.add(NUM_PROTOCOLS_OFFSET + 4);

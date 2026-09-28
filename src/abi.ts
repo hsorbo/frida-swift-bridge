@@ -124,6 +124,9 @@ export {
   projectClassExistential,
   projectExistentialValue,
   projectErrorExistential,
+  existentialProtocols,
+  extendedExistentialRequirementSignature,
+  extendedExistentialGeneralizationArguments,
 } from "./abi/existential.js";
 export { ValueInstance } from "./abi/value.js";
 export { ClassInstance, VTableInvokeSignature } from "./abi/heap-object.js";
