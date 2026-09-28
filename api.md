@@ -831,7 +831,8 @@ corrupts memory instead of failing cleanly.
   not record it. For a small loadable receiver (`String`, `Int`, small structs),
   it decides whether `self` is passed as a pointer or in registers. Plain
   methods, sync or async, don't need it, because the bridge passes `self` both
-  ways; for generic ones pass `{ self: "borrowing" | "mutating" }` to `$method` (see
+  ways, unless an async method's arguments leave `self` no register; for those
+  and for generic ones pass `{ self: "borrowing" | "mutating" }` to `$method` (see
   [Calling methods](#calling-methods)). Large receivers are unaffected.
 - **Whether a value-type method is `consuming`.** The mangled name does not
   record it either, and here the bridge can't detect it and throw: without

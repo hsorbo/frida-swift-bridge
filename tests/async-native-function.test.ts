@@ -12,6 +12,7 @@ const MAKE_TUPLE_ASYNC = "$s7fixture14makeTupleAsyncySi_SStSi_SitYaF";
 const SCALE_MIXED_PAIR_ASYNC = "$s7fixture19scaleMixedPairAsyncyAA0cD0VAD_SitYaF";
 const SUM_PADDED_INT128_ASYNC = "$s7fixture20sumPaddedInt128AsyncySiAA0cD0V_SitYaF";
 const FLIP_FRAMED_INT128_ASYNC = "$s7fixture21flipFramedInt128AsyncyAA0cD0VADYaF";
+const WEIGH_INTS_ASYNC = "$s7fixture14weighIntsAsyncyS2i_S7is5Int32VSitYaF";
 const ADD_ASYNC = "$s7fixture9AsyncCalcC03addB0yS2iYaF";
 const ADD_INTS_SYNC = "$s7fixture7addIntsyS2i_SitF";
 const GENERIC_HOLDER_SCALED_STORED_ASYNC = "$s7fixture13GenericHolderC17scaledStoredAsync2byS2i_tYaF";
@@ -50,6 +51,12 @@ describe("Swift.asyncFunction", () => {
   test("passes and returns a mixed Double/Int struct in FP and GP registers", async () => {
     const scaleMixedPairAsync = Swift.asyncFunction(module, SCALE_MIXED_PAIR_ASYNC);
     expect(await scaleMixedPairAsync.call({ d: 1.5, i: 2 }, 3)).toEqual({ d: 4.5, i: int64(6) });
+  });
+
+  test("passes arguments past the registers on the stack: weighIntsAsync(1...8, 9, 1) ⇒ 1987654321", async () => {
+    const weighIntsAsync = Swift.asyncFunction(module, WEIGH_INTS_ASYNC);
+    expect(await weighIntsAsync.call(1, 2, 3, 4, 5, 6, 7, 8, 9, 1)).toEqual(int64(1987654321));
+    expect(await weighIntsAsync.call(1, 2, 3, 4, 5, 6, 7, 8, 9, 1)).toEqual(int64(1987654321));
   });
 
   test("passes an Int128 in a register pair, skipping the padding word", async (ctx) => {

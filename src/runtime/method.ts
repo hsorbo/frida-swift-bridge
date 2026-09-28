@@ -1071,12 +1071,10 @@ function asyncResultShape(returnType: Metadata | null): AsyncResultShape | null 
   return { kind: "scalars", placed, stride: returnType.valueWitnesses.stride };
 }
 
-// The async trampoline loads registers only, so an argument the allocator puts on the stack is
-// recorded as a spill for the caller to reject.
 class AsyncArgs {
   readonly gp: NativePointer[] = [];
   readonly fp: AsyncFloatArg[] = [];
-  spills = false;
+  private readonly stackBytes: { offset: number; bytes: ArrayBuffer }[] = [];
   private readonly allocator: ArgumentAllocator;
 
   constructor(private readonly gpBase: number) {
@@ -1100,10 +1098,26 @@ class AsyncArgs {
     }
   }
 
+  get stackSize(): number {
+    return this.allocator.stackSize;
+  }
+
+  stackWords(): NativePointer[] {
+    const image = Memory.alloc(Math.max(this.stackSize, 1));
+    const words = Math.ceil(this.stackSize / 8);
+    for (let i = 0; i < words; i++) {
+      image.add(i * 8).writeU64(0);
+    }
+    for (const { offset, bytes } of this.stackBytes) {
+      image.add(offset).writeByteArray(bytes);
+    }
+    return Array.from({ length: words }, (_, i) => image.add(i * 8).readPointer());
+  }
+
   private place(scalar: LoweredScalar, value: NativePointer): void {
     const location = this.allocator.scalar(scalar);
     if ("stackOffset" in location) {
-      this.spills = true;
+      this.stackBytes.push({ offset: location.stackOffset, bytes: value.add(scalar.offset).readByteArray(scalar.size)! });
       return;
     }
     const bytes = value.add(scalar.offset);
@@ -1198,15 +1212,17 @@ export class BoundAsyncMethod {
     if (self !== null) {
       options.receiver = self;
       if (!this.selfRouting.indirect) {
-        const argsFit = !lowered.spills;
-        lowered.push(this.selfRouting.receiver, self); // both ways, as in valueInvoker
-        if (argsFit && lowered.spills) {
+        const stackSize = lowered.stackSize;
+        lowered.push(this.selfRouting.receiver, self);
+        if (this.selfRouting.bothWays === true && lowered.stackSize !== stackSize) {
           cleanup();
           discardSelf();
           const { selector } = this.resolved;
+          const baseName = selector.split("(")[0];
           throw new Error(
-            `${selector} on ${typeName(this.selfRouting.receiver)}: args plus a trailing self exceed the async ` +
-              `argument registers; if it mutates, call it as $method("${selector.split("(")[0]}", { self: "mutating" }).call(...)`
+            `${selector} on ${typeName(this.selfRouting.receiver)}: a trailing self past the async argument registers ` +
+              `is only safe if the method takes it; call it as $method("${baseName}", { self: "borrowing" }).call(...), ` +
+              `or { self: "mutating" } if it mutates`
           );
         }
       }
@@ -1217,14 +1233,12 @@ export class BoundAsyncMethod {
         lowered.pushWord(word);
       }
     }
-    if (lowered.spills) {
-      cleanup();
-      discardSelf();
-      throw new Error("too many register arguments");
-    }
     const { gp, fp } = lowered;
     if (fp.length > 0) {
       options.floatArgs = fp;
+    }
+    if (lowered.stackSize > 0) {
+      options.stackArgs = lowered.stackWords();
     }
     if (this.result !== null) {
       options.result = this.result;
@@ -1525,7 +1539,7 @@ export function bindValueInitializer(
   return new BoundValueInitializer(resolveMethod(typeName(receiver), "init", options));
 }
 
-export type SelfRouting = { indirect: true } | { indirect: false; receiver: Metadata };
+export type SelfRouting = { indirect: true } | { indirect: false; receiver: Metadata; bothWays?: boolean };
 
 // Value-type self is indirect (x20) when mutating/inout or large/non-POD; else it rides as a trailing
 // arg. Only a small loadable receiver's routing depends on `mutating`, which isn't recoverable from the
@@ -1613,10 +1627,15 @@ export function bindValueMethod(
   if (resolved === null) {
     return bindConformanceMethod(typeName(receiver), self, name, options);
   }
-  // Both ways unless { self: "mutating" }, which keeps self out of the async trampoline's scarce arg registers.
-  return resolved.async === true
-    ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.self ?? "borrowing"), null, consumedSelf(receiver, options))
-    : new BoundValueMethod(resolved, receiver, self, options.self === "consuming");
+  if (resolved.async !== true) {
+    return new BoundValueMethod(resolved, receiver, self, options.self === "consuming");
+  }
+  // Both ways unless self is stated. An async callee pops its own stack args, so a guessed trailing self must fit in registers.
+  const routing = valueSelfRouting(receiver, resolved.selector, options.self ?? "borrowing");
+  if (!routing.indirect && options.self === undefined) {
+    routing.bothWays = true;
+  }
+  return new BoundAsyncMethod(resolved, self, routing, null, consumedSelf(receiver, options));
 }
 
 // buffer: (UnsafeRawBufferPointer) -> @out, via an asm trampoline. loadable: register params and
@@ -1981,15 +2000,14 @@ export class GenericBoundAsyncMethod {
     for (const witnessTable of this.plan.witnessTables) {
       lowered.pushWord(witnessTable);
     }
-    if (lowered.spills) {
-      cleanup();
-      throw new Error("too many register arguments");
-    }
     const { gp, fp } = lowered;
     const self = this.consumedSelf === null ? this.self : copyOfValue(this.consumedSelf, this.self);
     const options: AsyncCallOptions = { throws: this.plan.throws, receiver: self };
     if (fp.length > 0) {
       options.floatArgs = fp;
+    }
+    if (lowered.stackSize > 0) {
+      options.stackArgs = lowered.stackWords();
     }
     if (this.result !== null) {
       options.result = this.result;

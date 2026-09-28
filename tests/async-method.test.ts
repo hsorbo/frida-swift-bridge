@@ -89,6 +89,11 @@ describe("async method", () => {
     expect(() => quad.method("shiftAsync").call(1, 1, 1, 1, 2)).toThrow('{ self: "mutating" }');
   });
 
+  test('{ self: "borrowing" } passes a trailing self past the registers on the stack', async () => {
+    const quad = ValueInstance.fromJS(metadataFor("fixture.DoubleQuad")!, { a: 1, b: 2, c: 3, d: 4 });
+    expect(await quad.method("weighAsync", { self: "borrowing" }).call(1, 10, 100, 1000, 2)).toBe(8642);
+  });
+
   test('{ self: "mutating" } keeps self out of the async argument registers', async () => {
     const quad = ValueInstance.fromJS(metadataFor("fixture.DoubleQuad")!, { a: 1, b: 2, c: 3, d: 4 });
     await quad.method("shiftAsync", { self: "mutating" }).call(1, 1, 1, 1, 2);

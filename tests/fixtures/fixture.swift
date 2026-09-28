@@ -588,6 +588,10 @@ public struct DoubleQuad {
         await Task.yield()
         a = (a + da) * scale; b = (b + db) * scale; c = (c + dc) * scale; d = (d + dd) * scale
     }
+    public func weighAsync(_ da: Double, _ db: Double, _ dc: Double, _ dd: Double, _ scale: Double) async -> Double {
+        await Task.yield()
+        return (a * da + b * db + c * dc + d * dd) * scale
+    }
 }
 public func makeDoubleQuad() -> DoubleQuad { DoubleQuad(a: 1, b: 2, c: 3, d: 4) }
 public func sumDoubleQuad(_ q: DoubleQuad) -> Double { q.a + q.b + q.c + q.d }
@@ -1589,6 +1593,13 @@ public func spillIntsAsync(_ a0: Int, _ a1: Int, _ a2: Int, _ a3: Int, _ a4: Int
                            _ a6: Int, _ a7: Int, _ small: Int32, _ last: Int) async -> Int {
     await Task.yield()
     return a0 + Int(small) + last
+}
+public func weighIntsAsync(_ a0: Int, _ a1: Int, _ a2: Int, _ a3: Int, _ a4: Int, _ a5: Int,
+                           _ a6: Int, _ a7: Int, _ small: Int32, _ last: Int) async -> Int {
+    await Task.yield()
+    var weighed = last
+    for digit in [Int(small), a7, a6, a5, a4, a3, a2, a1, a0] { weighed = weighed * 10 + digit }
+    return weighed
 }
 public func driveSpillIntsAsync() -> Int {
     let sem = DispatchSemaphore(value: 0)

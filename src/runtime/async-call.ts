@@ -27,6 +27,7 @@ const COPY_TASK_LOCALS = 1 << 10;
 const ENQUEUE_JOB = 1 << 12;
 const OPERATION_CONTEXT_SIZE = 512;
 const TRAMPOLINE_SIZE = 0x100;
+const MAX_STACK_WORD_CODE_SIZE = 24;
 const DEFAULT_TIMEOUT_MS = 1000;
 const DISPATCH_TIME_FOREVER = uint64("0xffffffffffffffff");
 const POLL_INTERVAL_MS = 5;
@@ -59,6 +60,7 @@ export interface AsyncCallOptions {
   receiver?: NativePointer;
   throws?: boolean;
   floatArgs?: AsyncFloatArg[];
+  stackArgs?: NativePointer[]; // the stack argument area as words, from offset 0
   result?: AsyncResultShape;
   timeoutMs?: number; // 0 waits forever
   onActor?: SerialExecutorRef;
@@ -108,6 +110,10 @@ function fpReg(cls: FloatClass, i: number): Arm64Register {
 
 function fpStride(cls: FloatClass): number {
   return cls === "double" ? 8 : 4;
+}
+
+function alignTo(n: number, alignment: number): number {
+  return Math.ceil(n / alignment) * alignment;
 }
 
 function resultRegisterSlot({ register, index }: RegisterLocation): number {
@@ -192,10 +198,16 @@ function synthesizeAsyncCall(afp: AsyncFunctionPointer, args: NativePointer[], o
     }
   });
 
+  const stackArgs = options.stackArgs ?? [];
+  const operationSize = TRAMPOLINE_SIZE + stackArgs.length * MAX_STACK_WORD_CODE_SIZE;
+  if (operationSize > Process.pageSize) {
+    throw new Error("too many stack arguments");
+  }
   const operationCtx: OperationCtx = {
     afp,
     args,
     floatArgs,
+    stackArgs,
     shape,
     gpBase,
     result,
@@ -204,7 +216,7 @@ function synthesizeAsyncCall(afp: AsyncFunctionPointer, args: NativePointer[], o
     continuation,
   };
   const operation = Memory.alloc(Process.pageSize);
-  Memory.patchCode(operation, TRAMPOLINE_SIZE, (slot) => {
+  Memory.patchCode(operation, operationSize, (slot) => {
     if (ARCH === "arm64") {
       writeArm64Operation(slot, operation, operationCtx);
     } else {
@@ -232,6 +244,7 @@ interface OperationCtx {
   afp: AsyncFunctionPointer;
   args: NativePointer[];
   floatArgs: AsyncFloatArg[];
+  stackArgs: NativePointer[];
   shape: AsyncResultShape;
   gpBase: number;
   result: NativePointer;
@@ -320,6 +333,13 @@ function writeArm64Operation(slot: NativePointer, pc: NativePointer, o: Operatio
   if (o.receiver !== undefined) {
     w.putLdrRegAddress("x20", o.receiver);
   }
+  if (o.stackArgs.length > 0) {
+    w.putSubRegRegImm("sp", "sp", alignTo(o.stackArgs.length * 8, 16));
+    o.stackArgs.forEach((word, i) => {
+      w.putLdrRegAddress("x15", word);
+      w.putStrRegRegOffset("x15", "sp", i * 8);
+    });
+  }
   w.putMovRegReg("x22", "x9");
   w.putLdrRegAddress("x14", o.afp.code);
   w.putBrRegNoAuth("x14");
@@ -405,6 +425,20 @@ function writeX64Operation(slot: NativePointer, pc: NativePointer, o: OperationC
     w.putMovRegAddress("r13", o.receiver); // swiftself
   }
   w.putPopReg("r15");
+  if (o.stackArgs.length > 0) {
+    // swifttailcc pops alignTo(K + 8, 16) - 8 bytes of stack args, 8 even with none, so the return
+    // address moves down by the difference and the args sit above it.
+    const drop = alignTo(o.stackArgs.length * 8 + 8, 16) - 16;
+    w.putMovRegRegOffsetPtr("r10", "rsp", 0);
+    if (drop > 0) {
+      w.putSubRegImm("rsp", drop);
+    }
+    w.putMovRegOffsetPtrReg("rsp", 0, "r10");
+    o.stackArgs.forEach((word, i) => {
+      w.putMovRegAddress("r10", word);
+      w.putMovRegOffsetPtrReg("rsp", 8 + i * 8, "r10");
+    });
+  }
   w.putMovRegAddress("r11", o.afp.code);
   w.putJmpReg("r11");
   w.flush();
