@@ -742,6 +742,11 @@ public class GenericHolder<T: Scalable> {
     public func scaledStoredAsync(by k: Int) async -> Int { value.scaled(by: k) }
 }
 public func makeHolder(_ n: Int) -> GenericHolder<Int> { GenericHolder(value: n) }
+public final class LabeledHolder: GenericHolder<Int> {
+    public let label: String
+    public init(value: Int, label: String) { self.label = label; super.init(value: value) }
+}
+public func makeLabeledHolder(_ n: Int) -> LabeledHolder { LabeledHolder(value: n, label: "L") }
 
 // Inheritance + live polymorphic dispatch. Animal is non-final so speak/legs take vtable slots;
 // Cat overrides speak (filling Animal's slot in Cat's metadata) and inherits legs unchanged.

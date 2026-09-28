@@ -52,6 +52,10 @@ export class ClassMetadata {
     return new ContextDescriptor(this.handle.add(OFFSETOF_DESCRIPTION).readPointer().strip());
   }
 
+  get genericArguments(): NativePointer {
+    return this.handle.add(getClassMetadataBounds(this.description).immediateMembersOffset);
+  }
+
   fieldOffset(index: number): number {
     const descriptor = this.description;
     let vectorOffset = descriptor.handle.add(DESC_OFFSETOF_FIELD_OFFSET_VECTOR_OFFSET).readU32();

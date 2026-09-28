@@ -6,7 +6,7 @@ import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { SwiftInterceptor } from "../src/runtime/interceptor.js";
 import { requireFpRegisterHooks } from "./swift.js";
 
-import { metadataFor } from "../src/abi.js";
+import { metadataFor, ClassInstance, asSwiftObject } from "../src/abi.js";
 function intValue(v: number): NativePointer {
   const p = Memory.alloc(8);
   p.writeU64(v);
@@ -176,14 +176,13 @@ describe("SwiftInterceptor.attach", () => {
     const Int = metadataFor("Swift.Int")!;
     const identity = fixtureExport("fixture.genericCellIdentity");
     const driver = fixtureExport("fixture.makeGenericCell");
-    const heapObjectHeaderSize = 2 * Process.pointerSize;
-    let seenValue: number | null = null;
+    let seenValue: SwiftValue = null;
     let cell: NativePointer | null = null;
     let returned: NativePointer | null = null;
     const listener = SwiftInterceptor.attach(identity, {
       onEnter(args) {
         cell = args[0] as NativePointer;
-        seenValue = cell.add(heapObjectHeaderSize).readS64().toNumber();
+        seenValue = asSwiftObject(new ClassInstance(cell)).$field("value").read();
       },
       onLeave(ret) {
         returned = (ret as SwiftObject).$handle;
@@ -191,7 +190,7 @@ describe("SwiftInterceptor.attach", () => {
     });
     makeSwiftNativeFunction(driver, Int, [])();
     listener.detach();
-    expect(seenValue).toBe(5);
+    expect(seenValue).toEqual(int64(5));
     expect(String(returned)).toBe(String(cell));
   });
 

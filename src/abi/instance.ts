@@ -365,10 +365,11 @@ export function* enumerateClassInstanceFields(object: NativePointer): Generator<
   // Base-class fields first, matching ascending in-instance offsets.
   for (const metadata of chain.reverse()) {
     const descriptor = metadata.description;
+    const genericArguments = descriptor.isGeneric ? metadata.genericArguments : null;
     for (const { field, offset } of enumerateClassFields(metadata)) {
       yield {
         name: field.name,
-        type: resolveFieldType(field, descriptor),
+        type: resolveFieldType(field, descriptor, genericArguments),
         address: object.add(offset),
       };
     }
