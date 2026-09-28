@@ -664,6 +664,17 @@ public func driveFlipFramedInt128() -> Int {
     let r = flipFramedInt128(FramedInt128(head: 1, wide: Int128(2) << 64 | 3, tail: 4))
     return r.head * 10 + r.tail + Int(truncatingIfNeeded: r.wide) * 100
 }
+@available(macOS 15, iOS 18, *)
+public func sumPaddedInt128Async(_ padded: PaddedInt128, _ last: Int) async -> Int {
+    await Task.yield()
+    return padded.head + Int(truncatingIfNeeded: padded.wide) * 10 + Int(truncatingIfNeeded: padded.wide >> 64) * 100
+        + last * 1000
+}
+@available(macOS 15, iOS 18, *)
+public func flipFramedInt128Async(_ f: FramedInt128) async -> FramedInt128 {
+    await Task.yield()
+    return flipFramedInt128(f)
+}
 #endif
 
 public func boxAnyInt(_ n: Int) -> Any { n }
@@ -1578,6 +1589,11 @@ public func driveSpillIntsAsync() -> Int {
     }
     sem.wait()
     return box.value
+}
+
+public func scaleMixedPairAsync(_ p: MixedPair, _ factor: Int) async -> MixedPair {
+    await Task.yield()
+    return scaleMixedPair(p, factor)
 }
 
 // Distributed thunks are the only emitter of __swift5_acfuncs records: one per distributed func.

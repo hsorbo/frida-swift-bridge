@@ -2,13 +2,16 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, SwiftError, ClassType } from "../src/index.js";
-import { metadataFor, typeOf } from "../src/abi.js";
+import { metadataFor, typeOf, ValueInstance } from "../src/abi.js";
 
 const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
 const DIVIDE_ASYNC = "$s7fixture11divideAsyncyS2i_SitYaKF";
 const COMPUTE_DOUBLE_ASYNC = "$s7fixture18computeDoubleAsyncyS2dYaF";
 const MAKE_PAIR_ASYNC = "$s7fixture13makePairAsyncyAA0dC0VSi_SitYaF";
 const MAKE_TUPLE_ASYNC = "$s7fixture14makeTupleAsyncySi_SStSi_SitYaF";
+const SCALE_MIXED_PAIR_ASYNC = "$s7fixture19scaleMixedPairAsyncyAA0cD0VAD_SitYaF";
+const SUM_PADDED_INT128_ASYNC = "$s7fixture20sumPaddedInt128AsyncySiAA0cD0V_SitYaF";
+const FLIP_FRAMED_INT128_ASYNC = "$s7fixture21flipFramedInt128AsyncyAA0cD0VADYaF";
 const ADD_ASYNC = "$s7fixture9AsyncCalcC03addB0yS2iYaF";
 const ADD_INTS_SYNC = "$s7fixture7addIntsyS2i_SitF";
 const GENERIC_HOLDER_SCALED_STORED_ASYNC = "$s7fixture13GenericHolderC17scaledStoredAsync2byS2i_tYaF";
@@ -42,6 +45,38 @@ describe("Swift.asyncFunction", () => {
   test("decodes a struct return: makePairAsync(3, 4) ⇒ { a: 3, b: 4 }", async () => {
     const makePairAsync = Swift.asyncFunction(module, MAKE_PAIR_ASYNC);
     expect(await makePairAsync.call(3, 4)).toEqual({ a: int64(3), b: int64(4) });
+  });
+
+  test("passes and returns a mixed Double/Int struct in FP and GP registers", async () => {
+    const scaleMixedPairAsync = Swift.asyncFunction(module, SCALE_MIXED_PAIR_ASYNC);
+    expect(await scaleMixedPairAsync.call({ d: 1.5, i: 2 }, 3)).toEqual({ d: 4.5, i: int64(6) });
+  });
+
+  test("passes an Int128 in a register pair, skipping the padding word", async (ctx) => {
+    const Padded = metadataFor("fixture.PaddedInt128");
+    if (Padded === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
+    const padded = Memory.alloc(Padded!.typeLayout.stride);
+    padded.writeU64(1);
+    padded.add(16).writeU64(3);
+    padded.add(24).writeU64(2);
+    const sumPaddedInt128Async = Swift.asyncFunction(module, SUM_PADDED_INT128_ASYNC);
+    expect(await sumPaddedInt128Async.call(ValueInstance.borrow(Padded!, padded), 4)).toEqual(int64(4231));
+  });
+
+  test("returns an Int128 framed by integers in four registers", async (ctx) => {
+    const Framed = metadataFor("fixture.FramedInt128");
+    if (Framed === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
+    const framed = Memory.alloc(Framed!.typeLayout.stride);
+    framed.writeU64(1);
+    framed.add(16).writeU64(3);
+    framed.add(24).writeU64(2);
+    framed.add(32).writeU64(4);
+    const flipFramedInt128Async = Swift.asyncFunction(module, FLIP_FRAMED_INT128_ASYNC);
+    expect(await flipFramedInt128Async.call(ValueInstance.borrow(Framed!, framed))).toEqual({
+      head: int64(4),
+      wide: { _value: null },
+      tail: int64(1),
+    });
   });
 
   test("derives and decodes a tuple return: makeTupleAsync(3, 4) ⇒ [7, \"sum\"]", async () => {

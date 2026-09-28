@@ -3,6 +3,7 @@ import { AsyncTask } from "../abi/async-task.js";
 import { SwiftError } from "./thrown-error.js";
 import { LIBSWIFT_CORE_NAME, SWIFT_HOST_SUPPORTED } from "./platform.js";
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
+import type { LoweredScalar, RegisterLocation } from "./calling-convention.js";
 
 const OFFSETOF_PARENT = 0;
 const OFFSETOF_RESUME_PARENT = Process.pointerSize;
@@ -19,6 +20,7 @@ const ARG_REGS_X64 = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"] as X86Register[];
 const GP_RESULT_REGS_X64 = ["rdi", "rsi", "rdx", "rcx"] as X86Register[];
 const NUM_ARG_REGS = ARCH === "arm64" ? ARG_REGS_ARM64.length : ARG_REGS_X64.length;
 const NUM_GP_RESULT_REGS = 4;
+const NUM_FP_RESULT_REGS = 4;
 const MAX_FLOAT_REGS = 8;
 
 const COPY_TASK_LOCALS = 1 << 10;
@@ -31,9 +33,16 @@ const POLL_INTERVAL_MS = 5;
 
 export type FloatClass = "double" | "float";
 
+export interface PlacedResultScalar {
+  scalar: LoweredScalar;
+  location: RegisterLocation;
+}
+
+// "scalars" is a direct result lowered per scalar, each read from the result register it was placed in.
 export type AsyncResultShape =
   | { kind: "gp"; words: number }
   | { kind: "float"; cls: FloatClass; count: number }
+  | { kind: "scalars"; placed: PlacedResultScalar[]; stride: number }
   | { kind: "indirect"; stride: number };
 
 export interface AsyncFloatArg {
@@ -101,12 +110,18 @@ function fpStride(cls: FloatClass): number {
   return cls === "double" ? 8 : 4;
 }
 
+function resultRegisterSlot({ register, index }: RegisterLocation): number {
+  return (register === "gp" ? index : NUM_GP_RESULT_REGS + index) * 8;
+}
+
 function resultBufferSize(shape: AsyncResultShape): number {
   switch (shape.kind) {
     case "gp":
       return shape.words * Process.pointerSize;
     case "float":
       return Math.max(shape.count * fpStride(shape.cls), Process.pointerSize);
+    case "scalars":
+      return (NUM_GP_RESULT_REGS + NUM_FP_RESULT_REGS) * 8;
     case "indirect":
       return shape.stride;
   }
@@ -126,17 +141,13 @@ function buildActorTaskOption(executor: SerialExecutorRef): NativePointer {
 
 // Held for the task's lifetime so Frida keeps the trampoline pages and result buffers alive.
 interface SynthesizedCall {
+  shape: AsyncResultShape;
   operation: NativePointer;
   continuation: NativePointer;
   result: NativePointer;
   error: NativePointer;
   done: NativePointer;
   option: NativePointer | null;
-}
-
-export function asyncArgsFitRegisters(gpCount: number, fpCount: number, result: AsyncResultShape | null): boolean {
-  const gpBase = result?.kind === "indirect" ? 1 : 0;
-  return gpBase + gpCount <= NUM_ARG_REGS && fpCount <= MAX_FLOAT_REGS;
 }
 
 // Two swiftasync trampolines (PAC stripped): `operation` allocates foo's frame, wires Parent/
@@ -203,7 +214,7 @@ function synthesizeAsyncCall(afp: AsyncFunctionPointer, args: NativePointer[], o
 
   const option = options.onActor !== undefined ? buildActorTaskOption(options.onActor) : null;
 
-  return { operation, continuation, result, error, done, option };
+  return { shape, operation, continuation, result, error, done, option };
 }
 
 interface ContinuationCtx {
@@ -240,6 +251,14 @@ function writeArm64Continuation(slot: NativePointer, pc: NativePointer, c: Conti
     w.putLdrRegAddress("x14", c.result);
     for (let i = 0; i < c.shape.count; i++) {
       w.putStrRegRegOffset(fpReg(c.shape.cls, i), "x14", i * fpStride(c.shape.cls));
+    }
+  } else if (c.shape.kind === "scalars") {
+    w.putLdrRegAddress("x14", c.result);
+    for (let i = 0; i < NUM_GP_RESULT_REGS; i++) {
+      w.putStrRegRegOffset(GP_RESULT_REGS_ARM64[i], "x14", resultRegisterSlot({ register: "gp", index: i }));
+    }
+    for (let i = 0; i < NUM_FP_RESULT_REGS; i++) {
+      w.putStrRegRegOffset(fpReg("double", i), "x14", resultRegisterSlot({ register: "fp", index: i }));
     }
   }
   if (c.throws) {
@@ -330,6 +349,14 @@ function writeX64Continuation(slot: NativePointer, pc: NativePointer, c: Continu
     w.putMovRegAddress("r10", c.result);
     for (let i = 0; i < c.shape.count; i++) {
       putFpStoreToR10(w, c.shape.cls, i * fpStride(c.shape.cls), i);
+    }
+  } else if (c.shape.kind === "scalars") {
+    w.putMovRegAddress("r10", c.result);
+    for (let i = 0; i < NUM_GP_RESULT_REGS; i++) {
+      w.putMovRegOffsetPtrReg("r10", resultRegisterSlot({ register: "gp", index: i }), GP_RESULT_REGS_X64[i]);
+    }
+    for (let i = 0; i < NUM_FP_RESULT_REGS; i++) {
+      putFpStoreToR10(w, "double", resultRegisterSlot({ register: "fp", index: i }), i);
     }
   }
   if (c.throws) {
@@ -468,7 +495,15 @@ function takeResult(call: SynthesizedCall): NativePointer {
   if (!thrown.isNull()) {
     throw new SwiftError(thrown, true);
   }
-  return call.result;
+  const { shape } = call;
+  if (shape.kind !== "scalars") {
+    return call.result;
+  }
+  const value = Memory.alloc(shape.stride);
+  for (const { scalar, location } of shape.placed) {
+    Memory.copy(value.add(scalar.offset), call.result.add(resultRegisterSlot(location)), scalar.size);
+  }
+  return value;
 }
 
 // Block on a dispatch semaphore (not a plain sleep) so libdispatch keeps servicing the executor; the

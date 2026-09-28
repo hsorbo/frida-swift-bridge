@@ -179,7 +179,7 @@ describe("makeSwiftNativeFunction", () => {
   test("passes and returns a mixed Double/Int struct in FP and GP registers", () => {
     const Int = metadataFor("Swift.Int")!;
     const MixedPair = metadataFor("fixture.MixedPair")!;
-    const fn = makeSwiftNativeFunction(fixtureExport("fixture.scaleMixedPair"), MixedPair, [MixedPair, Int]);
+    const fn = makeSwiftNativeFunction(fixtureExport("fixture.scaleMixedPair("), MixedPair, [MixedPair, Int]);
     const pair = Memory.alloc(MixedPair.typeLayout.stride);
     pair.writeDouble(1.5);
     pair.add(8).writeU64(2);

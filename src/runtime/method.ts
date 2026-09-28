@@ -31,11 +31,14 @@ import {
   SwiftNativeFunction,
   SwiftArgType,
   shouldPassIndirectly,
-  floatLayout,
+  loweredScalars,
+  ArgumentAllocator,
+  LoweredScalar,
+  RegisterLocation,
   indirect,
 } from "./calling-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
-import { callAsync, asyncArgsFitRegisters, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, SerialExecutorRef } from "./async-call.js";
+import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClass, SerialExecutorRef } from "./async-call.js";
 import { SwiftClosure, ClosureSpec, ClosureBody, LoadableClosureBody, SwiftThrow } from "./closure.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
@@ -1052,7 +1055,7 @@ export class BoundMethod {
   }
 }
 
-// null ⇒ Void; check indirect before float, matching lowerArg (a resilient float aggregate is @out).
+// null ⇒ Void; check indirect before lowering, matching lowerArg (a resilient float aggregate is @out).
 function asyncResultShape(returnType: Metadata | null): AsyncResultShape | null {
   if (returnType === null || returnType.valueWitnesses.size === 0) {
     return null;
@@ -1060,52 +1063,80 @@ function asyncResultShape(returnType: Metadata | null): AsyncResultShape | null 
   if (shouldPassIndirectly(returnType)) {
     return { kind: "indirect", stride: returnType.valueWitnesses.stride };
   }
-  const fl = floatLayout(returnType);
-  if (fl !== null) {
-    return { kind: "float", cls: fl.cls, count: fl.count };
-  }
-  return { kind: "gp", words: Math.ceil(returnType.valueWitnesses.size / Process.pointerSize) };
+  const allocator = new ArgumentAllocator(0, true);
+  const placed = loweredScalars(returnType).map((scalar) => ({
+    scalar,
+    location: allocator.scalar(scalar) as RegisterLocation,
+  }));
+  return { kind: "scalars", placed, stride: returnType.valueWitnesses.stride };
 }
 
-interface LoweredAsyncArgs {
-  gp: NativePointer[];
-  fp: AsyncFloatArg[];
-}
+// The async trampoline loads registers only, so an argument the allocator puts on the stack is
+// recorded as a spill for the caller to reject.
+class AsyncArgs {
+  readonly gp: NativePointer[] = [];
+  readonly fp: AsyncFloatArg[] = [];
+  spills = false;
+  private readonly allocator: ArgumentAllocator;
 
-function pushAsyncArg(metadata: Metadata, buffer: NativePointer, gp: NativePointer[], fp: AsyncFloatArg[]): void {
-  if (metadata.kind === MetadataKind.Class) {
-    gp.push(buffer.readPointer());
-    return;
+  constructor(private readonly gpBase: number) {
+    this.allocator = new ArgumentAllocator(gpBase);
   }
-  if (shouldPassIndirectly(metadata)) {
-    gp.push(buffer);
-    return;
+
+  pushWord(word: NativePointer): void {
+    const value = Memory.alloc(Process.pointerSize).writePointer(word);
+    this.place({ offset: 0, size: Process.pointerSize, cls: "int" }, value);
   }
-  const fl = floatLayout(metadata);
-  if (fl !== null) {
-    const stride = fl.cls === "double" ? 8 : 4;
-    for (let k = 0; k < fl.count; k++) {
-      fp.push({ bytes: buffer.add(k * stride), cls: fl.cls });
+
+  push(metadata: Metadata, buffer: NativePointer): void {
+    if (metadata.kind === MetadataKind.Class) {
+      this.pushWord(buffer.readPointer());
+    } else if (shouldPassIndirectly(metadata)) {
+      this.pushWord(buffer);
+    } else {
+      for (const scalar of loweredScalars(metadata)) {
+        this.place(scalar, buffer);
+      }
     }
-    return;
   }
-  const words = Math.ceil(metadata.valueWitnesses.size / Process.pointerSize);
-  for (let w = 0; w < words; w++) {
-    gp.push(buffer.add(w * Process.pointerSize).readPointer());
+
+  private place(scalar: LoweredScalar, value: NativePointer): void {
+    const location = this.allocator.scalar(scalar);
+    if ("stackOffset" in location) {
+      this.spills = true;
+      return;
+    }
+    const bytes = value.add(scalar.offset);
+    if (location.register === "fp") {
+      this.fp.push({ bytes, cls: scalar.cls as FloatClass });
+      return;
+    }
+    for (let w = 0; w < scalar.size; w += 8) {
+      const word = Memory.alloc(8).writeU64(0);
+      Memory.copy(word, bytes.add(w), Math.min(scalar.size - w, 8));
+      while (this.gp.length < location.index - this.gpBase + w / 8) {
+        this.gp.push(NULL);
+      }
+      this.gp.push(word.readPointer());
+    }
   }
 }
 
-function lowerAsyncArgs(argTypes: Metadata[], buffers: NativePointer[], abstractArgs: boolean[] = []): LoweredAsyncArgs {
-  const gp: NativePointer[] = [];
-  const fp: AsyncFloatArg[] = [];
+function lowerAsyncArgs(
+  argTypes: Metadata[],
+  buffers: NativePointer[],
+  abstractArgs: boolean[],
+  result: AsyncResultShape | null
+): AsyncArgs {
+  const lowered = new AsyncArgs(result?.kind === "indirect" ? 1 : 0);
   for (let i = 0; i < argTypes.length; i++) {
     if (abstractArgs[i]) {
-      gp.push(buffers[i]);
+      lowered.pushWord(buffers[i]);
     } else {
-      pushAsyncArg(argTypes[i], buffers[i], gp, fp);
+      lowered.push(argTypes[i], buffers[i]);
     }
   }
-  return { gp, fp };
+  return lowered;
 }
 
 // The settle reactions root the binder, so a keepalive stored here keeps the receiver's owning
@@ -1154,7 +1185,7 @@ export class BoundAsyncMethod {
     const cleanup = (): void => {
       buffers.forEach((ptr, i) => destroyArgTemp(argTypes[i], ptr));
     };
-    const { gp, fp } = lowerAsyncArgs(argTypes, buffers, this.resolved.abstractArgs);
+    const lowered = lowerAsyncArgs(argTypes, buffers, this.resolved.abstractArgs ?? [], this.result);
     const options: AsyncCallOptions = { throws };
     if (this.executor !== null) {
       options.onActor = this.executor;
@@ -1162,9 +1193,9 @@ export class BoundAsyncMethod {
     if (this.self !== null) {
       options.receiver = this.self;
       if (!this.selfRouting.indirect) {
-        const argsFit = asyncArgsFitRegisters(gp.length, fp.length, this.result);
-        pushAsyncArg(this.selfRouting.receiver, this.self, gp, fp); // both ways, as in valueInvoker
-        if (argsFit && !asyncArgsFitRegisters(gp.length, fp.length, this.result)) {
+        const argsFit = !lowered.spills;
+        lowered.push(this.selfRouting.receiver, this.self); // both ways, as in valueInvoker
+        if (argsFit && lowered.spills) {
           cleanup();
           const { selector } = this.resolved;
           throw new Error(
@@ -1176,8 +1207,15 @@ export class BoundAsyncMethod {
     }
     if (this.resolved.witnessSelf !== undefined) {
       const { conformingType, handle } = this.resolved.witnessSelf;
-      gp.push(conformingType.handle, ...(this.resolved.witnessTables ?? [handle]));
+      for (const word of [conformingType.handle, ...(this.resolved.witnessTables ?? [handle])]) {
+        lowered.pushWord(word);
+      }
     }
+    if (lowered.spills) {
+      cleanup();
+      throw new Error("too many register arguments");
+    }
+    const { gp, fp } = lowered;
     if (fp.length > 0) {
       options.floatArgs = fp;
     }
@@ -1919,21 +1957,19 @@ export class GenericBoundAsyncMethod {
     const cleanup = (): void => {
       buffers.forEach((ptr, i) => destroyArgTemp(metas[i], ptr));
     };
-    const gp: NativePointer[] = [];
-    const fp: AsyncFloatArg[] = [];
-    plans.forEach((plan, i) => {
-      if (plan.kind === "generic" || plan.kind === "abstractIndirect") {
-        gp.push(buffers[i]);
-      } else {
-        pushAsyncArg(metas[i], buffers[i], gp, fp);
-      }
-    });
+    const abstractArgs = plans.map((plan) => plan.kind === "generic" || plan.kind === "abstractIndirect");
+    const lowered = lowerAsyncArgs(metas, buffers, abstractArgs, this.result);
     for (const metadata of this.plan.typeArguments) {
-      gp.push(metadata.handle);
+      lowered.pushWord(metadata.handle);
     }
     for (const witnessTable of this.plan.witnessTables) {
-      gp.push(witnessTable);
+      lowered.pushWord(witnessTable);
     }
+    if (lowered.spills) {
+      cleanup();
+      throw new Error("too many register arguments");
+    }
+    const { gp, fp } = lowered;
     const options: AsyncCallOptions = { throws: this.plan.throws, receiver: this.self };
     if (fp.length > 0) {
       options.floatArgs = fp;

@@ -138,40 +138,6 @@ export function floatClass(metadata: Metadata): FloatClass | null {
   }
 }
 
-export interface FloatLayout {
-  cls: FloatClass;
-  count: number;
-}
-
-// swiftcc passes each FP leaf in its own v-register; homogeneous and ≤4 (scalar = count 1).
-export function floatLayout(metadata: Metadata): FloatLayout | null {
-  const scalar = floatClass(metadata);
-  if (scalar !== null) {
-    return { cls: scalar, count: 1 };
-  }
-  if (metadata.kind !== MetadataKind.Struct) {
-    return null;
-  }
-  let cls: FloatClass | null = null;
-  let count = 0;
-  for (const field of enumerateFields(metadata.description)) {
-    const fieldType = fieldTypeIn(metadata, field);
-    if (fieldType === null) {
-      return null;
-    }
-    const leaf = floatLayout(fieldType);
-    if (leaf === null || (cls !== null && leaf.cls !== cls)) {
-      return null;
-    }
-    cls = leaf.cls;
-    count += leaf.count;
-    if (count > 4) {
-      return null;
-    }
-  }
-  return cls === null ? null : { cls, count };
-}
-
 export interface LoweredScalar {
   offset: number;
   size: number;

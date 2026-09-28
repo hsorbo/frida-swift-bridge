@@ -323,7 +323,7 @@ describe("SwiftInterceptor.attach", () => {
   test("decodes a mixed Double/Int struct from the FP and GP registers", (ctx) => {
     requireFpRegisterHooks(ctx);
     const Int = metadataFor("Swift.Int")!;
-    const addr = fixtureExport("fixture.scaleMixedPair");
+    const addr = fixtureExport("fixture.scaleMixedPair(");
     let seenArgs: SwiftValue[] | null = null;
     let seenRet: CallResult = null;
     const listener = SwiftInterceptor.attach(addr, {
