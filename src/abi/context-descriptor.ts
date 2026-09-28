@@ -28,7 +28,6 @@ const SYMBOLIC_REF_INDIRECT = 0x02;
 
 const KIND_MASK = 0x1f;
 const FLAG_IS_GENERIC = 0x80;
-const FLAG_HAS_LAYOUT_STRING = 0x00100000; // TypeContextDescriptorFlags bit 4, in the high 16 bits
 
 export class ContextDescriptor {
   constructor(readonly handle: NativePointer) {}
@@ -43,10 +42,6 @@ export class ContextDescriptor {
 
   get isGeneric(): boolean {
     return (this.flags & FLAG_IS_GENERIC) !== 0;
-  }
-
-  get hasLayoutString(): boolean {
-    return (this.flags & FLAG_HAS_LAYOUT_STRING) !== 0;
   }
 
   get isType(): boolean {

@@ -17,7 +17,7 @@ public func translate(_ p: ResilientPoint, dx: Int, dy: Int) -> ResilientPoint {
     return ResilientPoint(x: p.x + dx, y: p.y + dy)
 }
 
-// @frozen ⇒ visible layout ⇒ direct ABI even in a resilient module (the heuristic's false-positive case)
+// @frozen ⇒ visible layout ⇒ direct ABI even in a resilient module; leaves no trace, so it must be marked
 @frozen public struct FrozenPoint {
     public var x: Int
     public var y: Int
@@ -54,3 +54,13 @@ public struct ResilientHolder {
 }
 public func makeHolder(_ id: Int) -> ResilientHolder? { ResilientHolder(id: id) }
 public func holderTokenId(_ h: ResilientHolder) -> Int { h.token.id }
+
+public enum ResilientMode { case first, second }
+@frozen public enum FrozenMode { case first, second }
+public func modeIndex(_ m: ResilientMode) -> Int { m == .first ? 1 : 2 }
+public func flipMode(_ m: ResilientMode) -> ResilientMode { m == .first ? .second : .first }
+
+struct InternalPoint {
+    var x: Int
+    var y: Int
+}

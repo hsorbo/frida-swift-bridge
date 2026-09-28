@@ -94,8 +94,11 @@ The default export is the whole facade. Its members:
   [Closures](#closures).
 - `Swift.borrowObject(handle)`, `Swift.adoptObject(handle)`: wrap a raw class
   pointer as an object facade. See [Ownership and lifetime](#ownership-and-lifetime).
-- `Swift.markResilient(moduleName)`: force a module's types to be treated as
-  resilient (library-evolution) for ABI purposes.
+- `Swift.markResilient(moduleName)`: treat a module as built with library
+  evolution, for one the bridge can't detect as such. See
+  [Known limitations](#known-limitations).
+- `Swift.markFrozen(typeName)`: treat a struct in a library-evolution module as
+  `@frozen`, so it keeps the direct ABI. See [Known limitations](#known-limitations).
 
 ```js
 if (!Swift.available)
@@ -838,6 +841,14 @@ corrupts memory instead of failing cleanly.
   (`5` could be `Int`, `Int32` or `Double`), so a generic method needs
   `{ typeArguments }`. The one exception: a type parameter that appears only as
   the result of a closure argument is inferred as `Void`.
+- **Whether a struct is `@frozen`.** A public struct in a module built with
+  library evolution is passed by address unless it is `@frozen`, and `@frozen`
+  leaves no trace in metadata or symbols. The bridge detects library evolution
+  from the module's exports and a non-frozen enum from its case symbols, then
+  treats every public struct in such a module as resilient. Mark the frozen ones
+  with `Swift.markFrozen("Module.Type")`, including frozen structs they store.
+  A module whose exports show no sign of library evolution (only structs and
+  frozen enums) needs `Swift.markResilient("Module")`.
 
 **Things the bridge cannot recover**
 

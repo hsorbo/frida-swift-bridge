@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
 
 import { ContextDescriptor, ContextDescriptorKind } from "../src/abi/context-descriptor.js";
-import { buildMangledTypeToken } from "../src/runtime/method.js";
+import { buildMangledTypeToken } from "../src/runtime/type-name.js";
 import { arenaAlloc, arenaString, writeRelativeDirectPointer } from "./arena.js";
 
 describe("mangled type token", () => {

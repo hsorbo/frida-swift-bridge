@@ -27,7 +27,7 @@ import {
   swiftProtocols,
 } from "./runtime/protocol.js";
 import type { StableProtocol, StableProtocolComposition } from "./runtime/protocol.js";
-import { markResilientModule } from "./runtime/calling-convention.js";
+import { markResilientModule, markFrozenType } from "./runtime/calling-convention.js";
 import { resolveAsyncFunction, resolveFunction } from "./runtime/method.js";
 import { closure } from "./runtime/closure.js";
 import { moduleRegistry, ModuleRegistry } from "./runtime/module-namespace.js";
@@ -186,6 +186,7 @@ export const Swift = {
 
   closure,
   markResilient: markResilientModule,
+  markFrozen: markFrozenType,
   symbolicate,
   Interceptor: SwiftInterceptor,
 

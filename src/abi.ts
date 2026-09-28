@@ -171,6 +171,7 @@ export {
   shouldPassIndirectly,
   isResilientValueType,
   markResilientModule,
+  markFrozenType,
   indirect,
   AbstractIndirect,
   makeSwiftNativeFunction,

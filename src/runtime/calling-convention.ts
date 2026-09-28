@@ -2,7 +2,10 @@ import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { existentialRepresentation } from "../abi/existential.js";
 import { SwiftError } from "./thrown-error.js";
-import { typeName } from "./type-name.js";
+import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
+import { ContextDescriptorKind } from "../abi/context-descriptor.js";
+import { exportsByPrefix } from "./export-trie.js";
+import { demangle } from "./demangle.js";
 import { signCode } from "../basic/pac.js";
 
 export const MAX_LOADABLE_SIZE = Process.pointerSize * 4;
@@ -10,24 +13,30 @@ export const MAX_LOADABLE_SIZE = Process.pointerSize * 4;
 const ARCH = Process.arch;
 
 const resilientModules = new Set<string>();
+const frozenTypes = new Set<string>();
+
+// Built with library evolution, yet nearly every public type is @frozen.
+const FROZEN_BY_DEFAULT_MODULES = new Set(["Swift", "Synchronization"]);
 
 export function markResilientModule(name: string): void {
   resilientModules.add(name);
+  resilientValueCache.clear();
+}
+
+export function markFrozenType(name: string): void {
+  frozenTypes.add(name);
+  resilientValueCache.clear();
 }
 
 const resilientValueCache = new Map<string, boolean>();
 
-// Resilience isn't recorded in metadata (@frozen leaves no trace), so it's inferred from positive
-// signals only: the layout-string bit, a caller-declared module, or an embedded resilient field or
-// payload (Optional<URL> is address-only because URL is, though Swift.Optional carries no signal).
+// Resilience isn't recorded in metadata: a public type is resilient when its module is built with
+// library evolution and the type isn't @frozen. A value embedding a resilient field or payload is
+// address-only too (Optional<URL> because URL is).
 export function isResilientValueType(metadata: Metadata): boolean {
   const kind = metadata.kind;
   if (kind !== MetadataKind.Struct && kind !== MetadataKind.Enum && kind !== MetadataKind.Optional) {
     return false;
-  }
-  const description = metadata.description;
-  if (description.hasLayoutString || resilientModules.has(description.moduleName ?? "")) {
-    return true;
   }
   const key = metadata.handle.toString();
   const cached = resilientValueCache.get(key);
@@ -35,16 +44,68 @@ export function isResilientValueType(metadata: Metadata): boolean {
     return cached;
   }
   resilientValueCache.set(key, false); // break recursive-type cycles
-  let result = false;
-  for (const field of enumerateFields(description)) {
-    const fieldType = fieldTypeIn(metadata, field);
-    if (fieldType !== null && isResilientValueType(fieldType)) {
-      result = true;
-      break;
-    }
-  }
+  const result = isResilientNominal(metadata) || embedsResilientValue(metadata);
   resilientValueCache.set(key, result);
   return result;
+}
+
+function embedsResilientValue(metadata: Metadata): boolean {
+  for (const field of enumerateFields(metadata.description)) {
+    const fieldType = fieldTypeIn(metadata, field);
+    if (fieldType !== null && isResilientValueType(fieldType)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Library evolution shows in the exports: dispatch thunks, and case symbols that only non-frozen
+// enums get. A @frozen struct leaves no trace, so it has to be marked.
+function isResilientNominal(metadata: Metadata): boolean {
+  const description = metadata.description;
+  const moduleName = description.moduleName;
+  const fullName = description.fullTypeName;
+  if (moduleName === null || fullName === null || FROZEN_BY_DEFAULT_MODULES.has(moduleName)) {
+    return false;
+  }
+  const image = Process.findModuleByAddress(description.handle);
+  const token = description.isGeneric ? buildMangledTypeToken(description) : mangledTypeName(metadata);
+  if (image === null || token === null) {
+    return false;
+  }
+  if (description.kind === ContextDescriptorKind.Enum) {
+    return exportsOwnEnumCase(image, token, fullName);
+  }
+  if (frozenTypes.has(fullName)) {
+    return false;
+  }
+  const isPublic = image.findExportByName(`$s${token}Mn`) !== null;
+  return isPublic && (resilientModules.has(moduleName) || isLibraryEvolutionImage(image));
+}
+
+function exportsOwnEnumCase(image: Module, token: string, fullName: string): boolean {
+  const ownCase = `enum case for ${fullName}.`;
+  return exportsByPrefix(image, [`$s${token}`])[0].some((e) => {
+    if (!e.name.endsWith("WC")) {
+      return false;
+    }
+    const demangled = demangle(e.name);
+    return demangled !== null && demangled.startsWith(ownCase) && /^[^.(<]+[(<]/.test(demangled.slice(ownCase.length));
+  });
+}
+
+const libraryEvolutionImages = new Map<string, boolean>();
+
+function isLibraryEvolutionImage(image: Module): boolean {
+  const key = `${image.path}@${image.base}`;
+  let known = libraryEvolutionImages.get(key);
+  if (known === undefined) {
+    known = image
+      .enumerateExports()
+      .some((e) => e.name.startsWith("$s") && (e.name.endsWith("Tj") || e.name.endsWith("WC")));
+    libraryEvolutionImages.set(key, known);
+  }
+  return known;
 }
 
 // Integer/pointer-class only; floating-point uses the separate v-register budget below.

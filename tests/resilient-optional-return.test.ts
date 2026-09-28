@@ -19,7 +19,6 @@ describe("Optional<resilient struct wrapping a class ref> return", () => {
   let mod: Module;
   beforeEach(() => {
     mod = loadResilient();
-    Swift.markResilient("resilient");
   });
 
   test(".some unwraps to a facade whose class ref survives decode and destroy", () => {

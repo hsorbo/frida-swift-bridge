@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadResilient } from "./fixtures/load.js";
+import { loadFixture, loadResilient } from "./fixtures/load.js";
 
 import { indirect, isResilientValueType, makeSwiftNativeFunction, metadataFor } from "../src/abi.js";
 
@@ -47,20 +47,47 @@ describe("resilient calling convention (local library-evolution fixture)", () =>
     expect(xy(fn(point(1, 2), int(10), int(20))!)).toEqual([11, 22]);
   });
 
-  test("a @frozen struct in a resilient module keeps the direct ABI", () => {
+  test("a resilient struct is lowered @in / @out from plain metadata", () => {
     const mod = loadResilient();
+    const RP = metadataFor("resilient.ResilientPoint")!;
+    const Int = metadataFor("Swift.Int")!;
+    const translate = resilientFn(mod, "resilient.translate(");
+
+    const fn = makeSwiftNativeFunction(translate, RP, [RP, Int, Int]);
+    expect(xy(fn(point(1, 2), int(10), int(20))!)).toEqual([11, 22]);
+  });
+
+  test("a @frozen struct marked frozen keeps the direct ABI", () => {
+    const mod = loadResilient();
+    Swift.markFrozen("resilient.FrozenPoint");
     const FP = metadataFor("resilient.FrozenPoint")!;
     const Int = metadataFor("Swift.Int")!;
     const translate = resilientFn(mod, "resilient.translateFrozen(");
 
+    expect(isResilientValueType(FP)).toBe(false);
     const fn = makeSwiftNativeFunction(translate, FP, [FP, Int, Int]);
     expect(xy(fn(point(3, 4), int(100), int(200))!)).toEqual([103, 204]);
   });
 
-  // swiftc emits no layout-string bit, so the heuristic can't see local resilient types — they need
-  // the explicit AbstractIndirect used above. Pinned so the limitation is explicit, not silent.
-  test("auto-detection does not fire for a locally-built resilient struct", () => {
-    expect(isResilientValueType(metadataFor("resilient.ResilientPoint")!)).toBe(false);
-    expect(isResilientValueType(metadataFor("resilient.FrozenPoint")!)).toBe(false);
+  test("resilience is detected from the module's exports", () => {
+    expect(isResilientValueType(metadataFor("resilient.ResilientPoint")!)).toBe(true);
+    expect(isResilientValueType(metadataFor("resilient.ResilientMode")!)).toBe(true);
+    expect(isResilientValueType(metadataFor("resilient.FrozenMode")!)).toBe(false);
+    expect(isResilientValueType(metadataFor("resilient.InternalPoint")!)).toBe(false);
+    loadFixture();
+    expect(isResilientValueType(metadataFor("fixture.LoadableStruct")!)).toBe(false);
+    expect(isResilientValueType(metadataFor("Swift.Int")!)).toBe(false);
+  });
+
+  test("a resilient enum is passed @in and returned @out", () => {
+    const mod = loadResilient();
+    const Mode = Swift.enum("resilient.ResilientMode")!;
+    const Int = Swift.type("Swift.Int")!;
+
+    const modeIndex = Swift.NativeFunction(resilientFn(mod, "resilient.modeIndex("), Int, [Mode]);
+    expect(modeIndex(Mode.case("second"))).toEqual(int64(2));
+
+    const flipMode = Swift.NativeFunction(resilientFn(mod, "resilient.flipMode("), Mode, [Mode]);
+    expect(flipMode(Mode.case("first"))).toBe("second");
   });
 });

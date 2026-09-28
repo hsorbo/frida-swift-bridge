@@ -37,7 +37,7 @@ import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-fun
 import { callAsync, asyncArgsFitRegisters, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, SerialExecutorRef } from "./async-call.js";
 import { SwiftClosure, ClosureSpec, ClosureBody, LoadableClosureBody, SwiftThrow } from "./closure.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
-import { typeName, mangledTypeName } from "./type-name.js";
+import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { readString, createString } from "../abi/string.js";
 import {
   isClassExistential,
@@ -471,33 +471,6 @@ function mangledTypeToken(descriptor: ContextDescriptor): string | null {
   } catch {
     return null;
   }
-}
-
-const MANGLED_KIND_CHARS: { [kind: number]: string } = {
-  [ContextDescriptorKind.Class]: "C",
-  [ContextDescriptorKind.Struct]: "V",
-  [ContextDescriptorKind.Enum]: "O",
-  [ContextDescriptorKind.Protocol]: "P",
-};
-
-export function buildMangledTypeToken(descriptor: ContextDescriptor): string | null {
-  let token = "";
-  for (let context: ContextDescriptor | null = descriptor; context !== null; context = context.parent) {
-    const isModule = context.kind === ContextDescriptorKind.Module;
-    const kindChar = MANGLED_KIND_CHARS[context.kind];
-    if (!isModule && kindChar === undefined) {
-      return null;
-    }
-    const name = context.name;
-    if (name === null) {
-      return null;
-    }
-    if (isModule) {
-      return `${name.length}${name}${token}`;
-    }
-    token = `${name.length}${name}${kindChar}${token}`;
-  }
-  return null;
 }
 
 const provenTokens = new Map<string, string | null>();
