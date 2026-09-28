@@ -147,6 +147,7 @@ describe("constrained protocol-extension members", () => {
     requireDarwin(ctx);
     const type = Swift.type("fixture.Starling") as ClassType;
     expect(type.methods()).toContain("objcChirp()");
+    expect(type.init().objcChirp()).toBe("objc whistle");
   });
 
   test("a protocol nested in a type comes after top-level ones in the witness tables", () => {

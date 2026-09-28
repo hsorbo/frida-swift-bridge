@@ -1,5 +1,6 @@
 import { captureDescriptorOf, offsetToFirstCapture, resolveCaptureType } from "./capture-descriptor.js";
 import { Metadata, MetadataKind } from "./metadata.js";
+import { classMetadataOf } from "./class-metadata.js";
 import { readValue, writeValue, SwiftValue } from "./instance.js";
 
 export interface CaptureSlot {
@@ -42,7 +43,7 @@ function layoutSoleClassCapture(context: NativePointer): CaptureSlot[] | null {
   }
   const address = context.add(offsetToFirstCapture(context)).add(Process.pointerSize);
   try {
-    const type = new Metadata(address.readPointer().readPointer().strip());
+    const type = new Metadata(classMetadataOf(address.readPointer()).handle);
     return type.kind === MetadataKind.Class ? [{ type, address }] : null;
   } catch {
     return null;

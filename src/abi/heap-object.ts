@@ -50,7 +50,7 @@ export class ClassInstance implements RawInstance {
     const object = new ClassInstance(handle);
     const state: OwnedState = { disposed: false };
     object.state = state;
-    const release = getSwiftCoreApi().swift_release;
+    const release = getSwiftCoreApi().swift_unknownObjectRelease;
     object.weakId = Script.bindWeak(object, () => {
       if (!state.disposed) {
         state.disposed = true;
@@ -98,17 +98,17 @@ export class ClassInstance implements RawInstance {
   }
 
   get isUniquelyReferenced(): boolean {
-    return Boolean(getSwiftCoreApi().swift_isUniquelyReferenced_native(this.handle));
+    return Boolean(getSwiftCoreApi().swift_isUniquelyReferenced_nonNull(this.handle));
   }
 
   // On an owned object use dispose(), not release(): raw release plus GC release double-frees.
   retain(): this {
-    getSwiftCoreApi().swift_retain(this.handle);
+    getSwiftCoreApi().swift_unknownObjectRetain(this.handle);
     return this;
   }
 
   release(): void {
-    getSwiftCoreApi().swift_release(this.handle);
+    getSwiftCoreApi().swift_unknownObjectRelease(this.handle);
   }
 
   dispose(): void {
@@ -120,7 +120,7 @@ export class ClassInstance implements RawInstance {
       Script.unbindWeak(this.weakId);
       this.weakId = null;
     }
-    getSwiftCoreApi().swift_release(this.handle);
+    getSwiftCoreApi().swift_unknownObjectRelease(this.handle);
   }
 
   [Symbol.dispose](): void {

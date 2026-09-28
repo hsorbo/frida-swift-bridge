@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
+import { requireDarwin } from "./swift.js";
 
 import { Swift, ClassType } from "../src/index.js";
 
@@ -133,6 +134,13 @@ describe("Swift object intrinsics", () => {
     expect(o.$type.name).toBe("fixture.Robot");
     expect(typeName(metadataOf(o.$type))).toBe("fixture.Robot");
     expect(o.$handle.isNull()).toBe(false);
+  });
+
+  test("calls a method and reads a field of a Swift subclass of an ObjC class", (ctx) => {
+    requireDarwin(ctx);
+    const starling = (Swift.type("fixture.Starling") as ClassType).init();
+    expect(starling.chirp()).toBe("whistle");
+    expect(starling.pitch).toEqual(int64(5));
   });
 
   test("$kind tags the facade as an object instance", () => {

@@ -1,7 +1,7 @@
 import { ContextDescriptor } from "./context-descriptor.js";
 import { Metadata, MetadataKind, getMetadata } from "./metadata.js";
 import { Field, enumerateFields } from "./field-descriptor.js";
-import { getSwiftCoreApi } from "../runtime/api.js";
+import { getSwiftCoreApi, getSwiftIsaMask } from "../runtime/api.js";
 import { hasResilientSuperclass } from "./class-descriptor.js";
 import { getClassMetadataBounds } from "./class-metadata-bounds.js";
 
@@ -80,8 +80,10 @@ export function getClassMetadata(descriptor: ContextDescriptor): ClassMetadata {
   return new ClassMetadata(metadata.handle);
 }
 
+// An instance of a Swift subclass of an ObjC class can carry a nonpointer isa.
 export function classMetadataOf(object: NativePointer): ClassMetadata {
-  return new ClassMetadata(object.readPointer().strip());
+  const isa = object.readPointer();
+  return new ClassMetadata((Process.platform === "darwin" ? isa.and(getSwiftIsaMask()) : isa).strip());
 }
 
 // unwraps ObjC/tagged-pointer instances that a raw isa read (classMetadataOf) mishandles

@@ -793,6 +793,7 @@ extension Perchable where Self: Coop<Int> {
 #if canImport(ObjectiveC)
 import ObjectiveC
 public final class Starling: NSObject, Perchable {
+    public var pitch = 5
     public func chirp() -> String { "whistle" }
 }
 extension Perchable where Self: NSObject {

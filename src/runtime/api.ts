@@ -60,6 +60,9 @@ export interface SwiftCoreApi {
     [NativePointerValue, number | UInt64, number | UInt64]
   >;
   swift_isUniquelyReferenced_native: NativeFunction<number, [NativePointerValue]>;
+  swift_unknownObjectRetain: NativeFunction<NativePointer, [NativePointerValue]>;
+  swift_unknownObjectRelease: NativeFunction<void, [NativePointerValue]>;
+  swift_isUniquelyReferenced_nonNull: NativeFunction<number, [NativePointerValue]>;
   swift_getObjectType: NativeFunction<NativePointer, [NativePointerValue]>;
   swift_getExistentialTypeMetadata: NativeFunction<
     NativePointer,
@@ -80,6 +83,13 @@ export interface SwiftCoreApi {
 }
 
 let cachedSwiftCore: SwiftCoreApi | null = null;
+let cachedIsaMask: NativePointer | null = null;
+
+export function getSwiftIsaMask(): NativePointer {
+  ensureSwiftHost();
+  cachedIsaMask ??= loadLibswiftCore().getExportByName("swift_isaMask").readPointer();
+  return cachedIsaMask;
+}
 
 export function getSwiftCoreApi(): SwiftCoreApi {
   ensureSwiftHost();
@@ -164,6 +174,21 @@ export function getSwiftCoreApi(): SwiftCoreApi {
     ),
     swift_isUniquelyReferenced_native: new NativeFunction(
       lib.getExportByName("swift_isUniquelyReferenced_native"),
+      "bool",
+      ["pointer"]
+    ),
+    swift_unknownObjectRetain: new NativeFunction(
+      lib.getExportByName(Process.platform === "darwin" ? "swift_unknownObjectRetain" : "swift_retain"),
+      "pointer",
+      ["pointer"]
+    ),
+    swift_unknownObjectRelease: new NativeFunction(
+      lib.getExportByName(Process.platform === "darwin" ? "swift_unknownObjectRelease" : "swift_release"),
+      "void",
+      ["pointer"]
+    ),
+    swift_isUniquelyReferenced_nonNull: new NativeFunction(
+      lib.getExportByName("swift_isUniquelyReferenced_nonNull"),
       "bool",
       ["pointer"]
     ),

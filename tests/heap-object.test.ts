@@ -4,7 +4,8 @@ import { loadFixture, fixtureExport } from "./fixtures/load.js";
 import { ClassInstance, metadataFor, typeName, metadataOf } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
-import { Swift } from "../src/index.js";
+import { Swift, ClassType } from "../src/index.js";
+import { requireDarwin } from "./swift.js";
 function intArg(n: number): NativePointer {
   const cell = Memory.alloc(Process.pointerSize);
   cell.writeS64(n);
@@ -60,5 +61,20 @@ describe("ClassInstance", () => {
   test("kind tags the wrapper as an object instance", () => {
     const counter = makeCounter(1);
     expect(counter.kind).toBe("object");
+  });
+
+  test("reads a stored property of a Swift subclass of an ObjC class and retains it through ObjC", (ctx) => {
+    requireDarwin(ctx);
+    loadFixture();
+    const starling = (Swift.type("fixture.Starling") as ClassType).init();
+    const object = new ClassInstance(starling.$handle);
+    expect(object.metadata.isTypeMetadata).toBe(true);
+    expect(object.field("pitch").read()).toEqual(int64(5));
+    expect(object.isUniquelyReferenced).toBe(true);
+    object.retain();
+    expect(object.isUniquelyReferenced).toBe(false);
+    object.release();
+    expect(object.field("pitch").read()).toEqual(int64(5));
+    starling.$dispose();
   });
 });
