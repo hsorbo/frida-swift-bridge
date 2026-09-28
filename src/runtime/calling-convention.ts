@@ -473,13 +473,20 @@ function writeArm64Trampoline(code: NativePointer, cfg: TrampolineConfig): void 
 const X86_RESULT_GP: X86Register[] = ["rax", "rdx", "rcx", "r8"];
 
 function writeX86Trampoline(code: NativePointer, cfg: TrampolineConfig): void {
+  const savesContext = cfg.selfBuffer !== null || cfg.errorBuffer !== null;
+
   Memory.patchCode(code, 0x200, (slot) => {
     const writer = new X86Writer(slot, { pc: code });
 
-    // r12 (error) and r13 (self) are callee-saved; preserve them and keep rsp 16-aligned for the call.
-    writer.putPushReg("r12");
-    writer.putPushReg("r13");
-    writer.putSubRegImm("rsp", 8);
+    // Stack-passed args must sit right above the callee's return address, so the return address and
+    // the callee-saved r12 (error) / r13 (self) go to the save buffer instead of the stack.
+    writer.putMovRegAddress("r11", cfg.save);
+    writer.putPopReg("r10");
+    writer.putMovRegOffsetPtrReg("r11", 0, "r10");
+    if (savesContext) {
+      writer.putMovRegOffsetPtrReg("r11", 8, "r12");
+      writer.putMovRegOffsetPtrReg("r11", 16, "r13");
+    }
 
     if (cfg.selfBuffer !== null) {
       writer.putMovRegAddress("r11", cfg.selfBuffer);
@@ -512,9 +519,13 @@ function writeX86Trampoline(code: NativePointer, cfg: TrampolineConfig): void {
       }
     }
 
-    writer.putAddRegImm("rsp", 8);
-    writer.putPopReg("r13");
-    writer.putPopReg("r12");
+    writer.putMovRegAddress("r11", cfg.save);
+    if (savesContext) {
+      writer.putMovRegRegOffsetPtr("r12", "r11", 8);
+      writer.putMovRegRegOffsetPtr("r13", "r11", 16);
+    }
+    writer.putMovRegRegOffsetPtr("r10", "r11", 0);
+    writer.putPushReg("r10");
     writer.putRet();
 
     writer.flush();
