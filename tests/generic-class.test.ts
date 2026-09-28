@@ -39,7 +39,7 @@ describe("generic class fields", () => {
     loadFixture();
     const Int = metadataFor("Swift.Int")!;
     const holderInt = metadataFor("fixture.GenericHolder", [Int])!;
-    const make = makeSwiftNativeFunction(fixtureExport("fixture.makeHolder"), holderInt, [Int]);
+    const make = makeSwiftNativeFunction(fixtureExport("fixture.makeHolder("), holderInt, [Int]);
     const holder = new ClassInstance(make(intArg(5))!.readPointer());
     expect(holder.field("value").read()).toEqual(int64(5));
     expect(holder.read()).toEqual({ value: int64(5) });

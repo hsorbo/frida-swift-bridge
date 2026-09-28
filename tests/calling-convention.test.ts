@@ -111,7 +111,7 @@ describe("makeSwiftNativeFunction", () => {
 
   test("passes self in the context register and the callee mutates through it", () => {
     const Int = metadataFor("Swift.Int")!;
-    const add = makeSwiftNativeFunction(fixtureExport("fixture.Accumulator.add"), null, [Int], {
+    const add = makeSwiftNativeFunction(fixtureExport("fixture.Accumulator.add("), null, [Int], {
       hasSelf: true,
     });
     const self = Memory.alloc(8);
