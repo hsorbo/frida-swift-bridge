@@ -56,6 +56,12 @@ describe("protocol-extension members on a conforming type", () => {
     expect(w.scaledTwice()).toEqual(int64(30));
   });
 
+  test("an async extension method resolves by naming the conformance's async witness thunks", async () => {
+    loadFixtureSyms();
+    const ruler = (Swift.type("fixturesyms.Ruler") as StructType).new({ n: 7 });
+    expect(await ruler.measureTwice()).toEqual(int64(14));
+  });
+
   test("an extension method differing from a requirement only in return type is not called through its witness", () => {
     const c = (Swift.type("fixture.IntChooser") as StructType).new({ n: 4 });
     expect(c.$method("choose", { returnType: "Swift.String", mutating: false }).call()).toBe("ext");

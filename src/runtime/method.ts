@@ -2750,9 +2750,6 @@ function siblingWitnessSignature(
   protocol: ContextDescriptor,
   requirement: ProtocolRequirement
 ): ParsedSwiftSignature | null {
-  if (requirement.isAsync) {
-    return null;
-  }
   for (const typeDescriptor of conformingTypes(protocol)) {
     const table = conformanceTable(typeDescriptor, protocol);
     if (table === null) {
@@ -2793,7 +2790,8 @@ function witnessTargetSignature(table: WitnessTable, requirement: ProtocolRequir
 }
 
 function witnessThunkSignature(table: WitnessTable, requirement: ProtocolRequirement): ParsedSwiftSignature | null {
-  const demangled = symbolicateLocal(table.requirement(requirement.witnessIndex));
+  const slot = table.requirement(requirement.witnessIndex);
+  const demangled = symbolicateLocal(requirement.isAsync ? new AsyncFunctionPointer(slot).code : slot);
   const stripped = demangled === null ? null : stripWitnessWrapper(demangled);
   return stripped === null ? null : parseSwiftSignature(stripped);
 }

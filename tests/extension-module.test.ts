@@ -130,4 +130,9 @@ describe("a module that declares conformances but no types", () => {
     const flyable = Swift.Protocol.find("conformance.Flyable")!;
     expect(flyable.conformingTypes().map((t) => t.name)).toContain("fixture.Robot");
   });
+
+  test("its conformer names an async requirement, so a stripped conformer's async extension method resolves", async () => {
+    const ruler = (Swift.type("fixture.Ruler") as StructType).new({ n: 7 });
+    expect(await ruler.measureTwice()).toEqual(int64(14));
+  });
 });

@@ -1465,6 +1465,21 @@ public func storeAsyncScaler(_ p: UnsafeMutableRawPointer) {
     p.assumingMemoryBound(to: (any AsyncScaler).self).initialize(to: TripleScaler(factor: 3))
 }
 
+// On a stripped build only conformance's unstripped conformer names measure().
+public protocol AsyncMeasurable {
+    func measure() async -> Int
+}
+extension AsyncMeasurable {
+    public func measureTwice() async -> Int { await measure() * 2 }
+}
+public struct Ruler: AsyncMeasurable {
+    public let n: Int
+    public func measure() async -> Int {
+        await Task.yield()
+        return n
+    }
+}
+
 public func computeDoubleAsync(_ x: Double) async -> Double {
     await Task.yield()
     return x * 2

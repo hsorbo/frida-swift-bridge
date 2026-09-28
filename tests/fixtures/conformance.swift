@@ -11,3 +11,7 @@ extension Robot: Flyable {
 extension Robot: fixture.Container {
     public var item: String { name }
 }
+
+extension Robot: fixture.AsyncMeasurable {
+    public func measure() async -> Int { name.count }
+}
