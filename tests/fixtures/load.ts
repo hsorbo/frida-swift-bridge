@@ -1,7 +1,7 @@
 import { toByteArray } from "base64-js";
 import { requireSwift } from "../swift.js";
-import { FIXTURE_DYLIB, RESILIENT_DYLIB, FIXTURESYMS_DYLIB, NOMETADATA_DYLIB, CONFORMANCE_DYLIB } from "./paths.js";
-import { FIXTURE_B64, RESILIENT_B64, FIXTURESYMS_B64, NOMETADATA_B64, CONFORMANCE_B64 } from "./bytes.js";
+import { FIXTURE_DYLIB, RESILIENT_DYLIB, FIXTURESYMS_DYLIB, NOMETADATA_DYLIB, CONFORMANCE_DYLIB, OPTIMIZED_DYLIB } from "./paths.js";
+import { FIXTURE_B64, RESILIENT_B64, FIXTURESYMS_B64, NOMETADATA_B64, CONFORMANCE_B64, OPTIMIZED_B64 } from "./bytes.js";
 import { Metadata, makeSwiftNativeFunction, metadataFor } from "../../src/abi.js";
 import { Swift } from "../../src/index.js";
 const EXT = Process.platform === "darwin" ? "dylib" : "so";
@@ -10,6 +10,7 @@ export const RESILIENT_MODULE = `resilient.${EXT}`;
 export const FIXTURESYMS_MODULE = `fixturesyms.${EXT}`;
 export const NOMETADATA_MODULE = `nometadata.${EXT}`;
 export const CONFORMANCE_MODULE = `conformance.${EXT}`;
+export const OPTIMIZED_MODULE = `optimized.${EXT}`;
 
 function materialize(name: string, base64: string): string {
   const path = `${Process.getTmpDir()}/${name}`;
@@ -51,6 +52,10 @@ export function loadNoMetadata(): Module {
 export function loadConformance(): Module {
   loadFixture();
   return loadModule(CONFORMANCE_DYLIB, CONFORMANCE_MODULE, CONFORMANCE_B64);
+}
+
+export function loadOptimized(): Module {
+  return loadModule(OPTIMIZED_DYLIB, OPTIMIZED_MODULE, OPTIMIZED_B64);
 }
 
 export function fixtureExport(swiftName: string, mod: Module = loadFixture()): NativePointer {

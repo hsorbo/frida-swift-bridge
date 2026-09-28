@@ -10,11 +10,11 @@ paths="$fixtures/paths.ts"
 bytes="$fixtures/bytes.ts"
 
 emit_paths() {
-  printf 'export const FIXTURE_DYLIB = "%s";\nexport const RESILIENT_DYLIB = "%s";\nexport const FIXTURESYMS_DYLIB = "%s";\nexport const NOMETADATA_DYLIB = "%s";\nexport const CONFORMANCE_DYLIB = "%s";\n' "$1" "$2" "$3" "$4" "$5" >"$paths"
+  printf 'export const FIXTURE_DYLIB = "%s";\nexport const RESILIENT_DYLIB = "%s";\nexport const FIXTURESYMS_DYLIB = "%s";\nexport const NOMETADATA_DYLIB = "%s";\nexport const CONFORMANCE_DYLIB = "%s";\nexport const OPTIMIZED_DYLIB = "%s";\n' "$1" "$2" "$3" "$4" "$5" "$6" >"$paths"
 }
 
 emit_empty_bytes() {
-  printf 'export const FIXTURE_B64 = "";\nexport const RESILIENT_B64 = "";\nexport const FIXTURESYMS_B64 = "";\nexport const NOMETADATA_B64 = "";\nexport const CONFORMANCE_B64 = "";\n' >"$bytes"
+  printf 'export const FIXTURE_B64 = "";\nexport const RESILIENT_B64 = "";\nexport const FIXTURESYMS_B64 = "";\nexport const NOMETADATA_B64 = "";\nexport const CONFORMANCE_B64 = "";\nexport const OPTIMIZED_B64 = "";\n' >"$bytes"
 }
 
 # EMBED_FIXTURES base64s the dylibs into bytes.ts for remote targets that lack the
@@ -30,13 +30,14 @@ emit_bytes() {
     printf '";\nexport const FIXTURESYMS_B64 = "'; base64 <"$3" | tr -d '\n'
     printf '";\nexport const NOMETADATA_B64 = "'; base64 <"$4" | tr -d '\n'
     printf '";\nexport const CONFORMANCE_B64 = "'; base64 <"$5" | tr -d '\n'
+    printf '";\nexport const OPTIMIZED_B64 = "'; base64 <"$6" | tr -d '\n'
     printf '";\n'
   } >"$bytes"
 }
 
 if ! command -v swiftc >/dev/null 2>&1; then
   echo "build fixtures: swiftc not found; skipping Swift fixture build"
-  emit_paths "" "" "" "" ""
+  emit_paths "" "" "" "" "" ""
   emit_empty_bytes
   exit 0
 fi
@@ -51,7 +52,8 @@ platform="${PLATFORM:-$host}"
 # fixture/resilient are stripped on every platform, matching a real release binary; resilient
 # stays unstripped until fixture/fixturesyms have linked against it. fixturesyms is the same
 # source, deliberately left unstripped. conformance stays unstripped so its witness thunks can
-# name requirements that fixture's own stripped conformances cannot.
+# name requirements that fixture's own stripped conformances cannot. optimized is the one fixture
+# built with -O, stripped like a release binary.
 case "$platform" in
   ios)
     dep="${IOS_DEPLOYMENT_TARGET:-17.0}"
@@ -63,6 +65,7 @@ case "$platform" in
     fixturesyms_out="$fixtures/fixturesyms.dylib"
     nometadata_out="$fixtures/nometadata.dylib"
     conformance_out="$fixtures/conformance.dylib"
+    optimized_out="$fixtures/optimized.dylib"
 
     for arch in arm64 arm64e; do
       mkdir -p "$work/$arch"
@@ -89,6 +92,10 @@ case "$platform" in
           -Xlinker -install_name -Xlinker "@rpath/$mod.dylib" \
           -Xlinker -rpath -Xlinker @loader_path
       done
+
+      xcrun -sdk iphoneos swiftc -target "${arch}-apple-ios${dep}" -O \
+        -emit-library -module-name optimized "$fixtures/optimized.swift" -o "$work/$arch/optimized.dylib" \
+        -Xlinker -install_name -Xlinker @rpath/optimized.dylib
     done
 
     lipo -create "$work/arm64/resilient.dylib"   "$work/arm64e/resilient.dylib"   -output "$resilient_out"
@@ -96,17 +103,19 @@ case "$platform" in
     lipo -create "$work/arm64/fixturesyms.dylib" "$work/arm64e/fixturesyms.dylib" -output "$fixturesyms_out"
     lipo -create "$work/arm64/nometadata.dylib"  "$work/arm64e/nometadata.dylib"  -output "$nometadata_out"
     lipo -create "$work/arm64/conformance.dylib" "$work/arm64e/conformance.dylib" -output "$conformance_out"
+    lipo -create "$work/arm64/optimized.dylib"   "$work/arm64e/optimized.dylib"   -output "$optimized_out"
     rm -rf "$work"
 
-    xcrun strip -x "$fixture_out" "$resilient_out" "$nometadata_out"
+    xcrun strip -x "$fixture_out" "$resilient_out" "$nometadata_out" "$optimized_out"
     codesign -s - -f "$fixture_out"
     codesign -s - -f "$fixturesyms_out"
     codesign -s - -f "$resilient_out"
     codesign -s - -f "$nometadata_out"
     codesign -s - -f "$conformance_out"
+    codesign -s - -f "$optimized_out"
 
-    emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out"
-    emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out"
+    emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out"
+    emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out"
     ;;
   macos)
     fixture_out="$fixtures/fixture.dylib"
@@ -114,6 +123,7 @@ case "$platform" in
     fixturesyms_out="$fixtures/fixturesyms.dylib"
     nometadata_out="$fixtures/nometadata.dylib"
     conformance_out="$fixtures/conformance.dylib"
+    optimized_out="$fixtures/optimized.dylib"
 
     # ARCH=arm64e pins the arm64e slice so fixtures match an arm64e (PAC) host.
     if [ -n "$ARCH" ]; then
@@ -146,8 +156,12 @@ case "$platform" in
     xcrun strip -x "$resilient_out"
     codesign -s - -f "$resilient_out"
 
-    emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out"
-    emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out"
+    swiftc $target_flag -O -emit-library -module-name optimized "$fixtures/optimized.swift" -o "$optimized_out"
+    xcrun strip -x "$optimized_out"
+    codesign -s - -f "$optimized_out"
+
+    emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out"
+    emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out"
 
     if [ "$ARCH" = "arm64e" ]; then
       host_out="$fixtures/host"
@@ -161,6 +175,7 @@ case "$platform" in
     fixturesyms_out="$fixtures/fixturesyms.so"
     nometadata_out="$fixtures/nometadata.so"
     conformance_out="$fixtures/conformance.so"
+    optimized_out="$fixtures/optimized.so"
 
     swiftc -emit-library -emit-module -enable-library-evolution -module-name resilient \
       "$fixtures/resilient.swift" -o "$resilient_out" \
@@ -173,12 +188,13 @@ case "$platform" in
         "$fixture_out" "$resilient_out" -o "$fixtures/$mod.so" \
         -Xlinker -soname -Xlinker "$fixtures/$mod.so"
     done
+    swiftc -O -emit-library -module-name optimized "$fixtures/optimized.swift" -o "$optimized_out"
 
     # Also proves section discovery is symbol-independent.
-    strip "$fixture_out" "$resilient_out" "$nometadata_out"
+    strip "$fixture_out" "$resilient_out" "$nometadata_out" "$optimized_out"
 
-    emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out"
-    emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out"
+    emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out"
+    emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out"
     ;;
   *)
     echo "build fixtures: unsupported platform $platform" >&2

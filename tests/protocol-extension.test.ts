@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms, loadOptimized } from "./fixtures/load.js";
 
 import { Swift, ClassType, StructType } from "../src/index.js";
 
@@ -59,6 +59,22 @@ describe("protocol-extension members on a conforming type", () => {
     const c = (Swift.type("fixture.IntChooser") as StructType).new({ n: 4 });
     expect(c.$method("choose", { returnType: "Swift.String", mutating: false }).call()).toBe("ext");
     expect(c.$method("choose", { returnType: "Swift.Int", mutating: false }).call()).toEqual(int64(4));
+  });
+
+  test("an extension method resolves on a stripped binary by naming the requirement from another conformance's witness", () => {
+    const w = (Swift.type("fixture.WideScalar") as StructType).new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
+    expect(w.scaledTwice()).toEqual(int64(30));
+  });
+
+  test("a requirement named only by another conformance's default calls the stripped conformance's own witness", () => {
+    const r = (Swift.type("fixture.HiddenRanked") as StructType).new({ n: 7 });
+    expect(r.rank()).toEqual(int64(7));
+  });
+
+  test("another conformance's optimized thunk calling some other function first does not name the requirement", () => {
+    loadOptimized();
+    const t = (Swift.type("optimized.HiddenTagged") as StructType).new({ n: 7 });
+    expect(() => t.tag()).toThrow(/cannot tell whether tag\(\) is a requirement of optimized\.Tagged/);
   });
 
   test("an extension method still ambiguous after filtering lists its overloads", () => {

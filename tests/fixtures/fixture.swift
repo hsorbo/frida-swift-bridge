@@ -660,6 +660,19 @@ public struct CustomDescriber: Labeled {
     public func describe() -> String { "custom:\(displayName)" }
 }
 
+// HiddenRanked's witness is internal, so a stripped build names it on no arch.
+public protocol Ranked {
+    func rank() -> Int
+}
+extension Ranked {
+    public func rank() -> Int { 0 }
+}
+public struct DefaultRanked: Ranked {}
+struct HiddenRanked: Ranked {
+    let n: Int
+    func rank() -> Int { n }
+}
+
 public protocol Vocal {
     func speak() -> String
 }

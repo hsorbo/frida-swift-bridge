@@ -2426,20 +2426,10 @@ export function namedProtocolRequirements(protocol: ContextDescriptor): NamedReq
       continue;
     }
     visitedTypes.add(typeKey);
-    if (typeDescriptor.isGeneric) {
-      continue; // no accessFunction to call without type arguments — never nameable this way
-    }
-    let type: Metadata;
-    try {
-      type = getMetadata(typeDescriptor);
-    } catch {
+    const table = conformanceTable(typeDescriptor, protocol);
+    if (table === null) {
       continue;
     }
-    const tableAddr = conformsToProtocol(type, protocol);
-    if (tableAddr === null) {
-      continue;
-    }
-    const table = new WitnessTable(tableAddr, type);
     for (const requirement of pending) {
       if (found.has(requirement.witnessIndex)) {
         continue;
@@ -2463,6 +2453,20 @@ export function namedProtocolRequirements(protocol: ContextDescriptor): NamedReq
   }
 
   return [...found.values()];
+}
+
+function conformanceTable(typeDescriptor: ContextDescriptor, protocol: ContextDescriptor): WitnessTable | null {
+  if (typeDescriptor.isGeneric) {
+    return null; // no accessFunction to call without type arguments
+  }
+  let type: Metadata;
+  try {
+    type = getMetadata(typeDescriptor);
+  } catch {
+    return null;
+  }
+  const tableAddr = conformsToProtocol(type, protocol);
+  return tableAddr === null ? null : new WitnessTable(tableAddr, type);
 }
 
 function witnessCandidates(table: WitnessTable): NamedRequirement[] {
@@ -2573,8 +2577,12 @@ function requirementImplementedBy(
   isImplementation: (signature: ParsedSwiftSignature) => boolean
 ): ProtocolRequirement | null | "undecodable" {
   let undecodable = false;
-  for (const requirement of readProtocolRequirements(protocolOf(table)).filter(isCandidate)) {
-    const signature = witnessTargetSignature(table, requirement) ?? witnessThunkSignature(table, requirement);
+  const protocol = protocolOf(table);
+  for (const requirement of readProtocolRequirements(protocol).filter(isCandidate)) {
+    const signature =
+      witnessTargetSignature(table, requirement) ??
+      witnessThunkSignature(table, requirement) ??
+      siblingWitnessSignature(protocol, requirement);
     if (signature === null) {
       undecodable = true;
     } else if (isImplementation(signature)) {
@@ -2582,6 +2590,46 @@ function requirementImplementedBy(
     }
   }
   return undecodable ? "undecodable" : null;
+}
+
+function siblingWitnessSignature(
+  protocol: ContextDescriptor,
+  requirement: ProtocolRequirement
+): ParsedSwiftSignature | null {
+  if (requirement.isAsync) {
+    return null;
+  }
+  for (const typeDescriptor of conformingTypes(protocol)) {
+    const table = conformanceTable(typeDescriptor, protocol);
+    if (table === null) {
+      continue;
+    }
+    const signature = witnessThunkSignature(table, requirement) ?? witnessTargetSignature(table, requirement);
+    if (signature !== null && isWitnessOf(signature, requirement, typeDescriptor, protocol)) {
+      return signature;
+    }
+  }
+  return null;
+}
+
+const WITNESS_KIND: Partial<Record<ProtocolRequirementKind, ParsedSwiftSignature["kind"]>> = {
+  [ProtocolRequirementKind.Method]: "function",
+  [ProtocolRequirementKind.Getter]: "getter",
+  [ProtocolRequirementKind.Setter]: "setter",
+};
+
+// An optimized thunk may inline its witness, so its first branch can be any callee of that witness.
+function isWitnessOf(
+  signature: ParsedSwiftSignature,
+  requirement: ProtocolRequirement,
+  conformingType: ContextDescriptor,
+  protocol: ContextDescriptor
+): boolean {
+  const { context } = stripReceiverKeyword(signature.context);
+  return (
+    signature.kind === WITNESS_KIND[requirement.kind] &&
+    (context === conformingType.fullTypeName || context === protocol.fullTypeName)
+  );
 }
 
 function witnessTargetSignature(table: WitnessTable, requirement: ProtocolRequirement): ParsedSwiftSignature | null {
