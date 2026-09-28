@@ -38,6 +38,14 @@ describe("methods on a generic value type", () => {
     const Int = metadataFor("Swift.Int")!;
     expect(constrainedBox(Int, 9).method("stored").call()).toEqual(int64(9));
   });
+
+  test("return-type-only overloads are listed with their return types and picked by returnType", () => {
+    const box = constrainedBox(metadataFor("Swift.Int")!, 9);
+    expect(() => box.method("pick")).toThrow(/pick\(\) \(\) -> A\b/);
+    expect(() => box.method("pick")).toThrow(/pick\(\) \(\) -> Swift\.Int\b/);
+    expect(box.method("pick", { returnType: "A" }).call()).toEqual(int64(9));
+    expect(box.method("pick", { returnType: "Swift.Int" }).call()).toEqual(int64(-1));
+  });
 });
 
 describe("methods on a generic class", () => {

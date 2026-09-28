@@ -147,6 +147,7 @@ interface BaseResolveOptions {
   arity?: number;
   labels?: (string | null)[]; // null = unlabelled
   argTypes?: string[]; // exact match against the signature's demangled argument-type names
+  returnType?: string | null; // exact match against the demangled return-type name; null = Void
   static?: boolean;
 }
 
@@ -172,8 +173,8 @@ export interface RawValueMethodResolveOptions extends RawMethodResolveOptions {
 }
 
 export function lowerResolveOptions(stable: ValueMethodResolveOptions): RawValueMethodResolveOptions {
-  const { arity, labels, argTypes, static: isStatic, mutating, consuming, typeArguments } = stable;
-  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, static: isStatic, mutating, consuming };
+  const { arity, labels, argTypes, returnType, static: isStatic, mutating, consuming, typeArguments } = stable;
+  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, mutating, consuming };
   if (typeArguments !== undefined) {
     raw.typeArguments = typeArguments.map((t) => metadataOf(t));
   }
@@ -406,7 +407,14 @@ function applyOverloadFilters<T extends { isStatic: boolean; signature: SwiftFun
   if (options.argTypes !== undefined) {
     candidates = candidates.filter((c) => sequenceEqual(c.signature.argTypeNames, options.argTypes!));
   }
+  if (options.returnType !== undefined) {
+    candidates = candidates.filter((c) => c.signature.returnTypeName === options.returnType);
+  }
   return candidates;
+}
+
+function describeOverload(signature: SwiftFunctionSignature): string {
+  return `${signature.selector} (${signature.argTypeNames.join(", ")}) -> ${signature.returnTypeName ?? "()"}`;
 }
 
 // swift_getTypeName spells a private type's anonymous parent as "(unknown context at $<address>)";
@@ -949,11 +957,9 @@ function resolveMethodIn(
       continue;
     }
     if (candidates.length > 1) {
-      const overloads = candidates
-        .map((c) => `${c.signature.selector} (${c.signature.argTypeNames.join(", ")})`)
-        .join(", ");
+      const overloads = candidates.map((c) => describeOverload(c.signature)).join(", ");
       throw new Error(
-        `ambiguous method ${methodName} on ${className}: ${overloads} (disambiguate with { arity }, { labels }, or { argTypes })`
+        `ambiguous method ${methodName} on ${className}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
       );
     }
 
@@ -2022,8 +2028,8 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     throw noMethodError(unboundName, methodName);
   }
   if (candidates.length > 1) {
-    const overloads = candidates.map((c) => c.signature.selector).join(", ");
-    throw new Error(`ambiguous method ${methodName} on ${unboundName}: ${overloads} (disambiguate with { arity }, { labels }, or { argTypes })`);
+    const overloads = candidates.map((c) => describeOverload(c.signature)).join(", ");
+    throw new Error(`ambiguous method ${methodName} on ${unboundName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`);
   }
   const { address, signature, mangled } = candidates[0];
   assertBorrowingArgs(signature.argTypeNames, signature.selector);
@@ -2446,18 +2452,20 @@ function resolveExtensionMethod(
     throw new Error(`no requirement ${methodName} on ${protocolName}`);
   }
   if (matches.length > 1) {
-    const overloads = matches
-      .map((m) => `${m.signature.selector} (${m.signature.argTypeNames.join(", ")})`)
-      .join(", ");
+    const overloads = matches.map((m) => describeOverload(m.signature)).join(", ");
     throw new Error(
-      `ambiguous extension method ${methodName} on ${protocolName}: ${overloads} (disambiguate with { arity }, { labels }, or { argTypes })`
+      `ambiguous extension method ${methodName} on ${protocolName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
     );
   }
   const { signature, mangled } = matches[0];
   const requirement = requirementImplementedBy(
     table,
     (r) => r.kind === ProtocolRequirementKind.Method && r.isAsync === signature.async,
-    (s) => s.kind === "function" && s.selector === signature.selector
+    (s) =>
+      s.kind === "function" &&
+      s.selector === signature.selector &&
+      sequenceEqual(s.argTypeNames, signature.argTypeNames) &&
+      s.returnTypeName === signature.returnTypeName
   );
   if (requirement === "undecodable") {
     throw new Error(`cannot tell whether ${signature.selector} is a requirement of ${protocolName}`);

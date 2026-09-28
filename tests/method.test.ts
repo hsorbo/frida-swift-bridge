@@ -80,6 +80,16 @@ describe("resolveMethod", () => {
     const s = resolveMethod("fixture.Robot", "tagged", { argTypes: ["Swift.String"] });
     expect(typeName(s.argTypes[0])).toBe("Swift.String");
   });
+
+  test("disambiguates a return-type-only overload by returnType, null selecting Void", () => {
+    const ambiguous = () => resolveMethod("fixture.Robot", "pick");
+    expect(ambiguous).toThrow(/pick\(\) \(\) -> Swift\.Int\b/);
+    expect(ambiguous).toThrow(/pick\(\) \(\) -> Swift\.String\b/);
+    expect(ambiguous).toThrow(/pick\(\) \(\) -> \(\).*\{ returnType \}/);
+    expect(typeName(resolveMethod("fixture.Robot", "pick", { returnType: "Swift.Int" }).returnType!)).toBe("Swift.Int");
+    expect(typeName(resolveMethod("fixture.Robot", "pick", { returnType: "Swift.String" }).returnType!)).toBe("Swift.String");
+    expect(resolveMethod("fixture.Robot", "pick", { returnType: null }).returnType).toBeNull();
+  });
 });
 
 describe("enumerateMethods", () => {
@@ -205,6 +215,14 @@ describe("ClassInstance method invocation", () => {
     const obj = robotType().init("R2");
     expect(obj.$method("tagged", { argTypes: ["Swift.Int"] }).call(7)).toBe("int:7");
     expect(obj.$method("tagged", { argTypes: ["Swift.String"] }).call("hi")).toBe("str:hi");
+  });
+
+  test("disambiguates a return-type-only overload by returnType", () => {
+    const obj = robotType().init("R2");
+    expect(obj.$method("pick", { returnType: "Swift.Int" }).call()).toEqual(int64(7));
+    expect(obj.$method("pick", { returnType: "Swift.String" }).call()).toBe("seven");
+    obj.$method("pick", { returnType: null }).call();
+    expect(obj.$field("name").read()).toBe("picked");
   });
 });
 

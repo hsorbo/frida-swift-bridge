@@ -386,6 +386,8 @@ public struct ConstrainedBox<T: Scalable> {
     public func stored() -> T { value }
     public func scaledStoredAsync(by k: Int) async -> Int { value.scaled(by: k) }
     public func storedAsync() async -> T { value }
+    public func pick() -> T { value }
+    public func pick() -> Int { -1 }
 }
 
 public func makeScaleGeneric() -> Int {
@@ -688,6 +690,18 @@ extension Squawker {
     public func squawkTwice() -> String { squawk() + squawk() }
 }
 
+// The extension's choose() shares the requirement's selector but is not its default.
+public protocol Chooser {
+    func choose() -> Int
+}
+extension Chooser {
+    public func choose() -> String { "ext" }
+}
+public struct IntChooser: Chooser {
+    public var n: Int
+    public func choose() -> Int { n }
+}
+
 public protocol Container {
     associatedtype Item
     var item: Item { get }
@@ -759,6 +773,9 @@ public final class Robot {
     public func move(by step: Int) -> Int { step * 10 }
     public func tagged(_ x: Int) -> String { "int:\(x)" }
     public func tagged(_ x: String) -> String { "str:\(x)" }
+    public func pick() -> Int { 7 }
+    public func pick() -> String { "seven" }
+    public func pick() { name = "picked" }
     public var badge: String {
         get { "[\(name)]" }
         set { name = newValue }

@@ -55,6 +55,12 @@ describe("protocol-extension members on a conforming type", () => {
     expect(w.scaledTwice()).toEqual(int64(30));
   });
 
+  test("an extension method differing from a requirement only in return type is not called through its witness", () => {
+    const c = (Swift.type("fixture.IntChooser") as StructType).new({ n: 4 });
+    expect(c.$method("choose", { returnType: "Swift.String", mutating: false }).call()).toBe("ext");
+    expect(c.$method("choose", { returnType: "Swift.Int", mutating: false }).call()).toEqual(int64(4));
+  });
+
   test("an extension method still ambiguous after filtering lists its overloads", () => {
     const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
     expect(() => n.scaledTwice(3)).toThrow(

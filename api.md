@@ -341,12 +341,15 @@ robot.at(5, 6);     // calls at(_:_:)
 
 When bare-name resolution is ambiguous — same arity, different labels; or a
 generic method — use `$method(name, options)` to get an explicit bound method.
-Options: `arity`, `labels`, `argTypes`, `static`, `typeArguments`, and (value
-types only) `mutating` and `consuming`.
+Options: `arity`, `labels`, `argTypes`, `returnType`, `static`, `typeArguments`,
+and (value types only) `mutating` and `consuming`. `argTypes` and `returnType`
+match the demangled type names exactly; `returnType: null` selects the overload
+returning `Void`.
 
 ```js
 robot.$method("move", { labels: ["to"] }).call(5);   // move(to:)
 robot.$method("move", { labels: ["by"] }).call(5);   // move(by:)
+robot.$method("pick", { returnType: "Swift.Int" }).call();   // pick() -> Int
 ```
 
 Static methods are called on the type wrapper via `ClassType.call` /
