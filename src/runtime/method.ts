@@ -142,10 +142,11 @@ export interface MethodResolveOptions extends BaseResolveOptions {
   typeArguments?: SwiftType[]; // one entry per generic parameter
 }
 
-// mutating is unrecoverable from the symbol; the caller supplies it. It only changes self routing
-// for small loadable receivers of generic or async methods, where it is required.
+// mutating and consuming are unrecoverable from the symbol; the caller supplies them. mutating only
+// changes self routing for small loadable receivers of generic or async methods, where it is required.
 export interface ValueMethodResolveOptions extends MethodResolveOptions {
   mutating?: boolean;
+  consuming?: boolean;
 }
 
 export interface RawMethodResolveOptions extends BaseResolveOptions {
@@ -155,11 +156,12 @@ export interface RawMethodResolveOptions extends BaseResolveOptions {
 
 export interface RawValueMethodResolveOptions extends RawMethodResolveOptions {
   mutating?: boolean;
+  consuming?: boolean;
 }
 
 export function lowerResolveOptions(stable: ValueMethodResolveOptions): RawValueMethodResolveOptions {
-  const { arity, labels, argTypes, static: isStatic, mutating, typeArguments } = stable;
-  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, static: isStatic, mutating };
+  const { arity, labels, argTypes, static: isStatic, mutating, consuming, typeArguments } = stable;
+  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, static: isStatic, mutating, consuming };
   if (typeArguments !== undefined) {
     raw.typeArguments = typeArguments.map((t) => metadataOf(t));
   }
@@ -1395,8 +1397,9 @@ export class BoundValueMethod {
 
   constructor(
     readonly resolved: ResolvedMethod,
-    receiver: Metadata,
-    private readonly self: NativePointer
+    private readonly receiver: Metadata,
+    private readonly self: NativePointer,
+    private readonly consuming: boolean
   ) {
     this.trailingSelf = !shouldPassIndirectly(receiver);
     this.fn = valueInvoker(resolved, receiver);
@@ -1411,9 +1414,16 @@ export class BoundValueMethod {
     if (args.length !== argTypes.length) {
       throw new Error(`${this.resolved.selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
+    const self = this.consuming ? this.copyOfSelf() : this.self;
     return callBorrowingArgs(argTypes, args, returnType, (argPtrs) =>
-      this.trailingSelf ? this.fn(this.self, ...argPtrs, this.self) : this.fn(this.self, ...argPtrs)
+      this.trailingSelf ? this.fn(self, ...argPtrs, self) : this.fn(self, ...argPtrs)
     );
+  }
+
+  private copyOfSelf(): NativePointer {
+    const copy = Memory.alloc(this.receiver.typeLayout.stride);
+    this.receiver.valueWitnesses.initializeWithCopy(copy, this.self);
+    return copy;
   }
 }
 
@@ -1429,7 +1439,7 @@ export function bindValueMethod(
   }
   return resolved.async === true
     ? new BoundAsyncMethod(resolved, self, valueSelfRouting(receiver, resolved.selector, options.mutating))
-    : new BoundValueMethod(resolved, receiver, self);
+    : new BoundValueMethod(resolved, receiver, self, options.consuming === true);
 }
 
 // buffer: (UnsafeRawBufferPointer) -> @out, via an asm trampoline. loadable: register params and

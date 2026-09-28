@@ -510,6 +510,12 @@ public final class Kennel {
     public var occupant: Token
     public init(_ w: Wrapper, occupant: Token) { self.w = w; self.occupant = occupant }
 }
+extension TokenBox {
+    public consuming func take() -> Int { token.id }
+}
+extension Wrapper {
+    public consuming func take() -> Int { token.id }
+}
 public func makeToken(_ id: Int) -> Token { Token(id: id) }
 public func makeWrapper(_ t: Token) -> Wrapper { Wrapper(token: t, a: 1, b: 2, c: 3, d: 4) }
 @inline(never)

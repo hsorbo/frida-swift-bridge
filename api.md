@@ -342,7 +342,7 @@ robot.at(5, 6);     // calls at(_:_:)
 When bare-name resolution is ambiguous — same arity, different labels; a
 generic method; or a generic or async method on a small value — use `$method(name, options)` to get
 an explicit bound method. Options: `arity`, `labels`, `argTypes`, `static`,
-`typeArguments`, and (value types only) `mutating`.
+`typeArguments`, and (value types only) `mutating` and `consuming`.
 
 ```js
 robot.$method("move", { labels: ["to"] }).call(5);   // move(to:)
@@ -383,6 +383,13 @@ still needs `{ mutating: true | false }`, since there the bridge can't tell how
 
 ```js
 box.$method("echo", { typeArguments: [Swift.type("Swift.Int")], mutating: false }).call(7);
+```
+
+A `consuming` method takes ownership of `self` and destroys it. Pass
+`{ consuming: true }` so the bridge hands it a copy and the value stays usable:
+
+```js
+box.$method("take", { consuming: true }).call();
 ```
 
 **Sync and async share one call site.** A call returns a decoded value for a
@@ -775,6 +782,11 @@ corrupts memory instead of failing cleanly.
   Plain methods don't need it, because the bridge passes `self` both ways; for
   generic and async ones pass `{ mutating: true | false }` to `$method` (see
   [Calling methods](#calling-methods)). Large receivers are unaffected.
+- **Whether a value-type method is `consuming`.** The mangled name does not
+  record it either, and here the bridge can't detect it and throw: without
+  `{ consuming: true }`, the callee destroys `self` while the value still owns
+  it, which is a double free for any value holding a reference. Plain sync
+  methods only for now.
 - **Generic type arguments.** A JavaScript value does not identify a Swift type
   (`5` could be `Int`, `Int32` or `Double`), so a generic method needs
   `{ typeArguments }`. The one exception: a type parameter that appears only as

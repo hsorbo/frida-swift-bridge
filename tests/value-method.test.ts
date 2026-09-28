@@ -1,8 +1,8 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadNoMetadata } from "./fixtures/load.js";
 
-import { ValueInstance, asSwiftObject, metadataFor } from "../src/abi.js";
-import { Swift } from "../src/index.js";
+import { ClassInstance, ValueInstance, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
+import { Swift, ClassType, StructType, SwiftObject } from "../src/index.js";
 
 function value(typeName: string, fields: { [k: string]: number }): ValueInstance {
   return ValueInstance.fromJS(metadataFor(typeName)!, fields);
@@ -101,6 +101,37 @@ describe("facade method routing on a small loadable value", () => {
   test("a bound value method from the facade is reusable", () => {
     const peek = accumulator(100).$method("peek", { mutating: false });
     expect(peek.call(1)).toEqual(int64(101));
+  });
+});
+
+describe("consuming methods on value types", () => {
+  beforeEach(() => { loadFixture(); });
+
+  function token(id: number): { facade: SwiftObject; view: ClassInstance } {
+    const facade = (typeOf(metadataFor("fixture.Token")!) as ClassType).init(id);
+    return { facade, view: new ClassInstance(facade.$handle) };
+  }
+
+  test("a consuming method on a small loadable struct leaves the caller's self intact", () => {
+    const { facade, view } = token(7);
+    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
+      .initializer({ labels: [null, "tag"] })
+      .call(facade, 5) as SwiftObject;
+    const before = view.retainCount;
+    const take = box.$method("take", { consuming: true });
+    expect(take.call()).toEqual(int64(7));
+    expect(take.call()).toEqual(int64(7));
+    expect(view.retainCount).toBe(before);
+  });
+
+  test("a consuming method on a large struct leaves the caller's self intact", () => {
+    const { facade, view } = token(9);
+    const wrapper = (typeOf(metadataFor("fixture.Wrapper")!) as StructType).call("make", facade) as SwiftObject;
+    const before = view.retainCount;
+    const take = wrapper.$method("take", { consuming: true });
+    expect(take.call()).toEqual(int64(9));
+    expect(take.call()).toEqual(int64(9));
+    expect(view.retainCount).toBe(before);
   });
 });
 
