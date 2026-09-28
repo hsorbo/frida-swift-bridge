@@ -119,11 +119,11 @@ describe("SwiftInterceptor.attach", () => {
   test("hooks a function taking and returning a concrete Array", () => {
     const Int = metadataFor("Swift.Int")!;
     const addr = fixtureExport("fixture.sumIntArray");
-    let argCount = 0;
+    let seenArgs: SwiftValue[][] | null = null;
     let seenRet: SwiftValue[] | null = null;
     const listener = SwiftInterceptor.attach(addr, {
       onEnter(args) {
-        argCount = args.length;
+        seenArgs = args.map((a) => (a as SwiftObject).$container!() as SwiftValue[]);
       },
       onLeave(ret) {
         seenRet = (ret as SwiftObject).$container!() as SwiftValue[];
@@ -131,7 +131,7 @@ describe("SwiftInterceptor.attach", () => {
     });
     makeSwiftNativeFunction(fixtureExport("fixture.makeSumIntArray"), Int, [])();
     listener.detach();
-    expect(argCount).toBe(1);
+    expect(seenArgs).toEqual([[int64(1), int64(2), int64(3)]]);
     expect(seenRet).toEqual([int64(6)]);
   });
 
@@ -220,14 +220,19 @@ describe("SwiftInterceptor.attach", () => {
     const Int = metadataFor("Swift.Int")!;
     const doubled = fixtureExport("fixture.genericDoubled");
     const driver = fixtureExport("fixture.makeGenericDoubled");
+    let seenArg: SwiftValue[] | null = null;
     let seen: SwiftValue[] | null = null;
     const listener = SwiftInterceptor.attach(doubled, {
+      onEnter(args) {
+        seenArg = (args[0] as SwiftObject).$container!() as SwiftValue[];
+      },
       onLeave(ret) {
         seen = (ret as SwiftObject).$container!() as SwiftValue[];
       },
     });
     makeSwiftNativeFunction(driver, Int, [])();
     listener.detach();
+    expect(seenArg).toEqual([int64(3), int64(4)]);
     expect(seen).toEqual([int64(3), int64(4), int64(3), int64(4)]);
   });
 

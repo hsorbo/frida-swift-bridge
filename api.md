@@ -677,8 +677,9 @@ out of a closure body, return a `SwiftThrow` (exported from
 
 `Swift.Interceptor.attach(target, callbacks)` hooks a Swift function and hands
 your callbacks the **decoded** Swift arguments and return value — structs
-exploded to objects, strings as JS strings, class/value returns as live facades,
-existentials projected to their dynamic value.
+exploded to objects, strings as JS strings, class returns and values holding
+references (an Array, say) as live facades, existentials projected to their
+dynamic value.
 
 ```js
 const listener = Swift.Interceptor.attach(addr, {

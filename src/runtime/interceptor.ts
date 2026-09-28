@@ -343,20 +343,24 @@ function materializeArgs(
     generics.push(new Metadata(cursor.gp()));
   }
 
-  const values = slots.map((s) =>
-    s.plan.kind === "metatype"
-      ? decodeMetatype(s.address)
-      : readValue(planMetadata(s.plan, generics, genericParams), s.address)
-  );
+  const values = slots.map((s) => {
+    if (s.plan.kind === "metatype") {
+      return decodeMetatype(s.address);
+    }
+    const metadata = planMetadata(s.plan, generics, genericParams);
+    return metadata.kind === MetadataKind.Class
+      ? readValue(metadata, s.address)
+      : decodeBorrowedValue(metadata, s.address);
+  });
   return { values, generics };
 }
 
 // Mirrors method.ts decodeReturn, but borrows: an interceptor only observes the caller's +1, so it
 // neither adopts nor destroys. A non-POD value embedding a managed reference can't be deep-copied
 // out, so it surfaces as a live facade over the borrowed storage, valid for the callback's duration;
-// everything else stays a snapshot. The borrowed address is the caller's storage, so writing through
-// it edits the return.
-function decodeReturnValue(metadata: Metadata, address: NativePointer): CallResult {
+// everything else stays a snapshot. An indirect address is the caller's storage, so writing through
+// it edits the argument or return.
+function decodeBorrowedValue(metadata: Metadata, address: NativePointer): CallResult {
   if (!metadata.valueWitnesses.isPOD && embedsManagedReference(metadata)) {
     return asSwiftObject(ValueInstance.borrow(metadata, address));
   }
@@ -380,14 +384,14 @@ function materializeReturn(
     if (indirectReturn === null) {
       throw new Error("indirect return address was not captured on enter");
     }
-    return decodeReturnValue(planMetadata(ret, generics, genericParams), indirectReturn);
+    return decodeBorrowedValue(planMetadata(ret, generics, genericParams), indirectReturn);
   }
   if (ret.kind !== "concrete") {
     const metadata = planMetadata(ret, generics, genericParams);
     if (metadata.kind === MetadataKind.Class) {
       return asSwiftObject(new ClassInstance(gpResult(context, 0)));
     }
-    return decodeReturnValue(metadata, Memory.alloc(8).writePointer(gpResult(context, 0)));
+    return decodeBorrowedValue(metadata, Memory.alloc(8).writePointer(gpResult(context, 0)));
   }
 
   const returnType = ret.metadata;
@@ -401,7 +405,7 @@ function materializeReturn(
     if (indirectReturn === null) {
       throw new Error("indirect return address was not captured on enter");
     }
-    return decodeReturnValue(returnType, indirectReturn);
+    return decodeBorrowedValue(returnType, indirectReturn);
   }
 
   // Direct multi-register return: the bytes live only in the result registers, so a non-POD value is
@@ -417,7 +421,7 @@ function materializeReturn(
       (n, cls) => fpResult(context, n, cls)
     );
   }
-  return decodeReturnValue(returnType, scratch);
+  return decodeBorrowedValue(returnType, scratch);
 }
 
 interface SwiftInvocationState {
