@@ -57,7 +57,7 @@ function readMangledName(at: NativePointer): MangledName | null {
   return ptr === null ? null : { address: ptr, length: symbolicMangledNameLength(ptr) };
 }
 
-function resolveProtocolConstraint(at: NativePointer): { protocol: ContextDescriptor | null; isObjC: boolean } {
+export function resolveProtocolConstraint(at: NativePointer): { protocol: ContextDescriptor | null; isObjC: boolean } {
   const raw = at.readS32();
   const isObjC = (raw & OBJC_PROTOCOL_BIT) !== 0;
   if (isObjC) {

@@ -5,6 +5,7 @@ import { resolveTypeByMangledName, symbolicMangledNameLength } from "./field-des
 import {
   GenericRequirementDescriptor,
   readGenericRequirementDescriptors,
+  resolveProtocolConstraint,
 } from "./generic-requirement-descriptor.js";
 import { RelativeDirectPointer } from "../basic/relative-pointer.js";
 
@@ -21,7 +22,6 @@ const OFFSETOF_REQ_PARAM = 0x4;
 const OFFSETOF_REQ_PROTOCOL = 0x8;
 const REQUIREMENT_KIND_MASK = 0x1f;
 const REQUIREMENT_KIND_PROTOCOL = 0x0;
-const PROTOCOL_REF_OBJC_BIT = 0x2;
 
 const FLAG_HAS_TYPE_PACKS = 0x1;
 const FLAG_HAS_CONDITIONAL_INVERTED_PROTOCOLS = 0x2;
@@ -162,17 +162,10 @@ function witnessTableFor(
     throw new Error("could not resolve conformance requirement subject");
   }
 
-  const protocol = resolveRequirementProtocol(requirement.add(OFFSETOF_REQ_PROTOCOL));
-  const witnessTable = conformsToProtocol(subject, protocol);
+  const { protocol } = resolveProtocolConstraint(requirement.add(OFFSETOF_REQ_PROTOCOL));
+  const witnessTable = conformsToProtocol(subject, protocol!);
   if (witnessTable === null) {
     throw new Error("type does not satisfy a conformance requirement");
   }
   return witnessTable;
-}
-
-function resolveRequirementProtocol(field: NativePointer): ContextDescriptor {
-  const offset = field.readS32() & ~PROTOCOL_REF_OBJC_BIT;
-  const address = field.add(offset & ~1);
-  const descriptor = (offset & 1) !== 0 ? address.readPointer().strip() : address;
-  return new ContextDescriptor(descriptor);
 }

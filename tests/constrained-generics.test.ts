@@ -2,7 +2,6 @@ import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift, requireDarwin } from "./swift.js";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift } from "../src/index.js";
 import { findType } from "../src/reflection/registry.js";
 import { MetadataKind, instantiateGenericMetadata } from "../src/abi/metadata.js";
 import { buildGenericMetadata, genericRequirements } from "../src/abi/generic-instantiation.js";
