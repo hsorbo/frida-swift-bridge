@@ -1,11 +1,9 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift, requireDarwin } from "./swift.js";
 
-import { StructType, ValueInstance, asSwiftObject, isResilientValueType, makeSwiftNativeFunction, resolveMethod, metadataFor, typeOf } from "../src/abi.js";
+import { isResilientValueType, metadataFor } from "../src/abi.js";
 
 import { Swift } from "../src/index.js";
-// markResilient drives auto-detection for a real Apple resilient framework on any OS; the
-// indirect-ABI machinery itself is fixture-tested in resilient-calling.test.ts.
 
 function loadCryptoKit(): void {
   requireSwift();
@@ -16,47 +14,36 @@ function loadCryptoKit(): void {
       throw new Error(`could not load CryptoKit: ${e}`);
     }
   }
-  Swift.markResilient("CryptoKit");
 }
 
-// Resilient init(size:): SymmetricKeySize @in, SymmetricKey @out, auto-lowered from plain metadata.
-// Result is the 1-word SecureBytes.Backing pointer.
-function makeKey(bitCount: number): NativePointer {
-  const sizeMd = metadataFor("CryptoKit.SymmetricKeySize")!;
-  const keyMd = metadataFor("CryptoKit.SymmetricKey")!;
-  const init = makeSwiftNativeFunction(
-    resolveMethod("CryptoKit.SymmetricKey", "init", { labels: ["size"] }).address,
-    keyMd,
-    [sizeMd]
-  );
-  const sizeBuf = Memory.alloc(sizeMd.typeLayout.stride);
-  sizeBuf.writeU64(bitCount);
-  return init(sizeBuf)!;
-}
-
-describe("resilient auto-detection (CryptoKit)", () => {
-  test("resilient value types are detected and called indirect from plain metadata", (ctx) => {
+describe("resilience in Apple frameworks", () => {
+  test("CryptoKit's resilient types are detected from its exports", (ctx) => {
     requireDarwin(ctx);
     loadCryptoKit();
 
     expect(isResilientValueType(metadataFor("CryptoKit.SymmetricKeySize")!)).toBe(true);
+    expect(isResilientValueType(metadataFor("CryptoKit.SymmetricKey")!)).toBe(true);
+    expect(isResilientValueType(metadataFor("CryptoKit.HPKE.KDF")!)).toBe(true);
     expect(isResilientValueType(metadataFor("Swift.Int")!)).toBe(false);
-
-    const keyMd = metadataFor("CryptoKit.SymmetricKey")!;
-    expect(ValueInstance.borrow(keyMd, makeKey(256)).get("bitCount")).toEqual(int64(256));
   });
 
-  test("constructs a resilient value type through the type wrapper", (ctx) => {
+  test("a resilient initializer takes and returns its values indirectly", (ctx) => {
     requireDarwin(ctx);
     loadCryptoKit();
 
-    const sizeMd = metadataFor("CryptoKit.SymmetricKeySize")!;
-    const sizeBuf = Memory.alloc(sizeMd.typeLayout.stride);
-    sizeBuf.writeU64(256);
+    const size = Swift.struct("CryptoKit.SymmetricKeySize")!.init({ bitCount: 256 })!;
+    const key = Swift.struct("CryptoKit.SymmetricKey")!.init({ size })!;
+    expect(key.bitCount).toEqual(int64(256));
+  });
 
-    const keyType = typeOf(metadataFor("CryptoKit.SymmetricKey")!) as StructType;
-    const key = keyType.initializer({ labels: ["size"] }).call(asSwiftObject(ValueInstance.borrow(sizeMd, sizeBuf)))!;
+  test("a @frozen struct marked frozen keeps the direct ABI", (ctx) => {
+    requireDarwin(ctx);
+    for (const name of ["Foundation.Data", "Foundation.Data.InlineData", "Foundation.Data.InlineSlice", "Foundation.Data.LargeSlice"]) {
+      Swift.markFrozen(name);
+    }
 
-    expect(key.$get("bitCount")).toEqual(int64(256));
+    expect(isResilientValueType(metadataFor("Foundation.Data")!)).toBe(false);
+    const data = Swift.struct("Foundation.Data")!.init({ count: 4 })!;
+    expect(data.count).toEqual(int64(4));
   });
 });
