@@ -113,6 +113,26 @@ describe("Interceptor self", () => {
     expect(() => Swift.Interceptor.attach(method.address, { onEnter() {} })).toThrow("pass { self");
   });
 
+  test("a hook that decodes nothing needs no self convention", () => {
+    const Int = Swift.type("Swift.Int")!;
+    const box = (Swift.type("fixture.SmallGenericBox") as StructType).new({ base: 1 });
+    const method = box.$method("scaledByAsync", { typeArguments: [Int], self: "borrowing" });
+    Swift.Interceptor.attachAsync(method.address, { onFirstSuspend() {} }).detach();
+  });
+
+  test("an onLeave-only hook reads a class self from swiftself on leave", () => {
+    const ada = robot("Ada");
+    let seen: SwiftObject | null = null;
+    const listener = Swift.Interceptor.attach(ada.$method("greet").address, {
+      onLeave() {
+        seen = this.self as SwiftObject;
+      },
+    });
+    ada.greet("X");
+    listener.detach();
+    expect(seen!.name).toBe("Ada");
+  });
+
   test("a stated self convention is used as given", () => {
     const Int = Swift.type("Swift.Int")!;
     const box = (Swift.type("fixture.SmallGenericBox") as StructType).new({ base: 10 });

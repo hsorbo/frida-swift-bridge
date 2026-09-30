@@ -768,9 +768,10 @@ Swift.Interceptor.attach(acc.$method("add").address, {
 A small value type's `self` goes by address when the method mutates it and in
 the argument registers otherwise, and the symbol doesn't say which. The bridge
 reads the method's code as for [calls](#calling-methods). When the code doesn't
-tell, `this.self` is `undefined`. For a generic method `attach` throws instead,
-because the type arguments come after `self`. Pass
-`{ self: "borrowing" | "mutating" }` as a third argument to say which.
+tell, `this.self` is `undefined`. A hook that decodes a generic method's
+arguments throws at `attach` instead, because the type arguments come after
+`self`. Pass `{ self: "borrowing" | "mutating" }` as a third argument to say
+which. `self` is decoded only when read.
 
 For async functions, `Swift.Interceptor.attachAsync(target, callbacks)` provides
 `onEnter(args, context)` (with `this.self`), `onFirstSuspend()`, and `onComplete(retval, error?)`,
