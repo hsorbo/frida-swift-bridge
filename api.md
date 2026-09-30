@@ -418,7 +418,8 @@ bridge can't pass `self` both ways. It reads the method's code instead: a
 mutating method takes `self` through the self register, and a borrowing one
 reads the arguments that a trailing `self` pushes further along. When the code
 shows neither, the call throws and asks for `{ self: "borrowing" }` or
-`{ self: "mutating" }`:
+`{ self: "mutating" }`. An async method's entry never shows it, so async ones
+always need the option:
 
 ```js
 box.$method("echo", { typeArguments: [Swift.type("Swift.Int")], self: "borrowing" }).call(7);
@@ -866,7 +867,8 @@ corrupts memory instead of failing cleanly.
   pass `{ self: "borrowing" | "mutating" }` to `$method` (see
   [Calling methods](#calling-methods)). Generic ones (including methods of a
   generic type with a fixed layout) need it only when the bridge can't tell
-  from the method's code. Large receivers are unaffected.
+  from the method's code, which is always the case for async ones. Large
+  receivers are unaffected.
 - **Whether a value-type method is `consuming`.** The mangled name does not
   record it either, and here the bridge can't detect it and throw: without
   `{ self: "consuming" }`, the callee destroys `self` while the value still owns

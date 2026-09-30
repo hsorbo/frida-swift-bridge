@@ -2079,8 +2079,8 @@ function genericAsyncResultShape(returnPlan: ArgPlan | null): AsyncResultShape |
   return asyncResultShape(metadata);
 }
 
-// Like BoundAsyncMethod, but generic/abstract params are @in pointers and type-metadata + witnesses
-// trail the formal args (indirect self only).
+// Like BoundAsyncMethod, but generic/abstract params are @in pointers, and type-metadata + witnesses
+// trail the formal args and any trailing value self.
 export class GenericBoundAsyncMethod {
   readonly address: NativePointer;
   readonly selector: string;
@@ -2092,14 +2092,11 @@ export class GenericBoundAsyncMethod {
   constructor(
     private readonly plan: GenericMethodPlan,
     private readonly self: NativePointer,
-    routing: SelfRouting,
+    private readonly routing: SelfRouting,
     private readonly consumedSelf: Metadata | null = null
   ) {
     if (plan.asyncFunctionPointer === undefined) {
       throw new Error(`${plan.selector} is not async`);
-    }
-    if (!routing.indirect) {
-      throw new Error(`${plan.selector}: trailing value self is unsupported for async generic methods`);
     }
     this.address = plan.address;
     this.selector = plan.selector;
@@ -2113,16 +2110,41 @@ export class GenericBoundAsyncMethod {
     if (args.length !== plans.length) {
       throw new Error(`${this.selector} expects ${plans.length} argument(s), got ${args.length}`);
     }
-    if (plans.some((p) => p.kind === "closure")) {
-      throw new Error(`${this.selector}: closure arguments are unsupported for async generic methods`);
-    }
-    const metas = plans.map(planMetadata);
-    const buffers = marshalArgsOrCleanup(metas, args);
+    const closures: SwiftClosure[] = []; // in scope until settle: Swift invokes them in-flight
+    const borrowed: { metadata: Metadata; ptr: NativePointer }[] = [];
     const cleanup = (): void => {
-      buffers.forEach((ptr, i) => destroyArgTemp(metas[i], ptr));
+      for (const b of borrowed) destroyArgTemp(b.metadata, b.ptr);
     };
-    const abstractArgs = plans.map((plan) => plan.kind === "generic" || plan.kind === "abstractIndirect");
-    const lowered = lowerAsyncArgs(metas, buffers, abstractArgs, this.result);
+    const lowered = new AsyncArgs(this.result?.kind === "indirect" ? 1 : 0);
+    try {
+      for (let i = 0; i < plans.length; i++) {
+        const plan = plans[i];
+        if (plan.kind === "closure") {
+          const closure = marshalClosure(plan, args[i]);
+          closures.push(closure);
+          lowered.pushWord(closure.fnPointer);
+          lowered.pushWord(closure.context);
+          continue;
+        }
+        const ptr = marshalArg(plan.metadata, args[i]);
+        borrowed.push({ metadata: plan.metadata, ptr });
+        if (plan.kind === "generic" || plan.kind === "abstractIndirect") {
+          lowered.pushWord(ptr);
+        } else {
+          lowered.push(plan.metadata, ptr);
+        }
+      }
+    } catch (e) {
+      cleanup();
+      throw e;
+    }
+    const self = this.consumedSelf === null ? this.self : copyOfValue(this.consumedSelf, this.self);
+    const options: AsyncCallOptions = { throws: this.plan.throws };
+    if (this.routing.indirect) {
+      options.receiver = self;
+    } else {
+      lowered.push(this.routing.receiver, self);
+    }
     for (const metadata of this.plan.typeArguments) {
       lowered.pushWord(metadata.handle);
     }
@@ -2130,8 +2152,6 @@ export class GenericBoundAsyncMethod {
       lowered.pushWord(witnessTable);
     }
     const { gp, fp } = lowered;
-    const self = this.consumedSelf === null ? this.self : copyOfValue(this.consumedSelf, this.self);
-    const options: AsyncCallOptions = { throws: this.plan.throws, receiver: self };
     if (fp.length > 0) {
       options.floatArgs = fp;
     }
@@ -2149,6 +2169,7 @@ export class GenericBoundAsyncMethod {
         } finally {
           cleanup();
           void self; // the trampoline embeds its address; keep it allocated until settle
+          void closures;
         }
       },
       (error) => {

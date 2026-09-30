@@ -66,6 +66,10 @@ describe("methods on a generic value type with a fixed layout in its generic con
     expect(value.field("raw").read()).toEqual(int64(13));
   });
 
+  test("async: a borrowing self is a direct trailing arg, followed by T's metadata and Scalable witness", async () => {
+    expect(await phantomScaled(10).method("scaledAsync", { self: "borrowing" }).call(3, 7)).toEqual(int64(31));
+  });
+
   test("the self convention is inferred without the self option", () => {
     const value = phantomScaled(10);
     expect(value.method("scaled").call(3, 7)).toEqual(int64(31));

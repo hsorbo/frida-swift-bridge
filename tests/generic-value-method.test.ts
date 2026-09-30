@@ -54,6 +54,24 @@ describe("generic methods on value receivers", () => {
       box("fixture.BigGenericBox", { a: 1, b: 2, c: 3, d: 4, e: 5 }).method("scaledBy", { typeArguments: [Int] }).call(3, 7)
     ).toEqual(int64(36));
   });
+
+  test("small receiver, async: a borrowing self trails the args, ahead of the metadata and witness", async () => {
+    const Int = metadataFor("Swift.Int")!;
+    const value = box("fixture.SmallGenericBox", { base: 10 });
+    expect(await value.method("scaledByAsync", { typeArguments: [Int], self: "borrowing" }).call(3, 7)).toEqual(int64(31));
+  });
+
+  test("small receiver, async: a mutating self rides in x20", async () => {
+    const Int = metadataFor("Swift.Int")!;
+    const value = box("fixture.SmallGenericBox", { base: 10 });
+    await value.method("accumulateAsync", { typeArguments: [Int], self: "mutating" }).call(3, 7);
+    expect(value.field("base").read()).toEqual(int64(31));
+  });
+
+  test("small receiver, async: the self option is required, as the entry never reveals it", () => {
+    const Int = metadataFor("Swift.Int")!;
+    expect(() => box("fixture.SmallGenericBox", { base: 10 }).method("scaledByAsync", { typeArguments: [Int] })).toThrow('{ self: "borrowing" }');
+  });
 });
 
 describe("inferred self convention of optimized generic methods on a small value type", () => {

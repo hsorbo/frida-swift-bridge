@@ -375,6 +375,8 @@ public struct SmallGenericBox {
     public mutating func accumulate<T: Scalable>(_ x: T, _ k: Int) { base += x.scaled(by: k) }
     public mutating func store<T: BinaryInteger>(_ x: T) { base = Int(truncatingIfNeeded: x) }
     public func ignore<T>(_ x: T) {}
+    public func scaledByAsync<T: Scalable>(_ x: T, _ k: Int) async -> Int { base + x.scaled(by: k) }
+    public mutating func accumulateAsync<T: Scalable>(_ x: T, _ k: Int) async { base += x.scaled(by: k) }
 }
 public struct BigGenericBox {
     public var a: Int; public var b: Int; public var c: Int; public var d: Int; public var e: Int
@@ -403,6 +405,7 @@ public struct PhantomScaled<T: Scalable> {
     public var raw: Int
     public func scaled(_ x: T, by k: Int) -> Int { raw + x.scaled(by: k) }
     public mutating func bump(_ x: T) { raw += x.scaled(by: 1) }
+    public func scaledAsync(_ x: T, by k: Int) async -> Int { raw + x.scaled(by: k) }
 }
 
 public func makeScaleGeneric() -> Int {
@@ -1576,6 +1579,14 @@ public final class AsyncCalc {
     public func pickLargerAsync<T: Comparable>(_ a: T, _ b: T) async -> T {
         await Task.yield()
         return a >= b ? a : b
+    }
+    public func mapAsync(_ n: Int, _ body: (Int) -> Int) async -> Int {
+        await Task.yield()
+        return base + body(n)
+    }
+    public func produceAsync<R>(_ n: Int, _ body: (Int) -> R) async -> R {
+        await Task.yield()
+        return body(n)
     }
     public static func combineAsync(_ a: Int, _ b: Int) async -> Int {
         await Task.yield()

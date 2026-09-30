@@ -62,6 +62,16 @@ describe("async method", () => {
     expect(await calc(100).$method("pickLargerAsync", { typeArguments: [typeOf(Int)] }).call(3, 8)).toEqual(int64(8));
   });
 
+  test("passes a loadable closure to an async method: calc(100).mapAsync(7, n => n * 6) ⇒ 142", async () => {
+    expect(await calc(100).$method("mapAsync", { typeArguments: [] }).call(7, Swift.closure((n: number) => Number(n) * 6))).toEqual(int64(142));
+  });
+
+  test("passes a closure producing the generic result to an async generic method: produceAsync<Int>", async () => {
+    const Int = metadataFor("Swift.Int")!;
+    const produced = calc(100).$method("produceAsync", { typeArguments: [typeOf(Int)] }).call(7, Swift.closure((n: number) => Number(n) + 1));
+    expect(await produced).toEqual(int64(8));
+  });
+
   test("async method on a small loadable value type trails self after the args: Accumulator.peekAsync(10) ⇒ 15", async () => {
     const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
     expect(await acc.method("peekAsync", { self: "borrowing" }).call(10)).toEqual(int64(15));
