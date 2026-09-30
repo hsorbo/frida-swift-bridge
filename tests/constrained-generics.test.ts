@@ -57,4 +57,33 @@ describe("constrained generic auto-assembly", () => {
     const box = metadataFor("fixture.ObjCProtocolBox", [metadataFor("fixture.ObjCConformer")!]);
     expect(typeName(box!)).toBe("fixture.ObjCProtocolBox<fixture.ObjCConformer>");
   });
+
+  test("an Objective-C protocol requirement rejects a non-conforming type", (ctx) => {
+    requireDarwin(ctx);
+    loadFixture();
+    expect(() => metadataFor("fixture.ObjCProtocolBox", [metadataFor("Swift.Int")!])).toThrow(/Objective-C protocol/);
+  });
+
+  test("a superclass requirement accepts the class and its subclasses only", () => {
+    loadFixture();
+    expect(typeName(metadataFor("fixture.BaseBox", [metadataFor("fixture.Base")!])!)).toBe("fixture.BaseBox<fixture.Base>");
+    expect(typeName(metadataFor("fixture.BaseBox", [metadataFor("fixture.Derived")!])!)).toBe("fixture.BaseBox<fixture.Derived>");
+    expect(() => metadataFor("fixture.BaseBox", [metadataFor("fixture.Pup")!])).toThrow(/superclass/);
+    expect(() => metadataFor("fixture.BaseBox", [metadataFor("Swift.Int")!])).toThrow(/superclass/);
+  });
+
+  test("an AnyObject requirement rejects value types", () => {
+    loadFixture();
+    expect(typeName(metadataFor("fixture.ObjectBox", [metadataFor("fixture.Pup")!])!)).toBe("fixture.ObjectBox<fixture.Pup>");
+    expect(() => metadataFor("fixture.ObjectBox", [metadataFor("Swift.Int")!])).toThrow(/class constraint/);
+  });
+
+  test("a same-type requirement on an associated type is checked", () => {
+    loadFixture();
+    const int = metadataFor("Swift.Int")!;
+    const ints = metadataFor("Swift.Array", [int])!;
+    expect(typeName(metadataFor("fixture.IntElements", [ints])!)).toBe("fixture.IntElements<Swift.Array<Swift.Int>>");
+    const strings = metadataFor("Swift.Array", [metadataFor("Swift.String")!])!;
+    expect(() => metadataFor("fixture.IntElements", [strings])).toThrow(/same-type/);
+  });
 });

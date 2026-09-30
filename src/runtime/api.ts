@@ -80,6 +80,11 @@ export interface SwiftCoreApi {
     NativePointer,
     [NativePointerValue, NativePointerValue, NativePointerValue, NativePointerValue, NativePointerValue]
   >;
+  swift_dynamicCastMetatype: NativeFunction<NativePointer, [NativePointerValue, NativePointerValue]>;
+  swift_dynamicCastTypeToObjCProtocolConditional: NativeFunction<
+    NativePointer,
+    [NativePointerValue, number | UInt64, NativePointerValue]
+  > | null;
 }
 
 let cachedSwiftCore: SwiftCoreApi | null = null;
@@ -210,6 +215,19 @@ export function getSwiftCoreApi(): SwiftCoreApi {
       "pointer",
       ["pointer", "pointer", "pointer", "pointer", "pointer"]
     ),
+    swift_dynamicCastMetatype: new NativeFunction(
+      lib.getExportByName("swift_dynamicCastMetatype"),
+      "pointer",
+      ["pointer", "pointer"]
+    ),
+    swift_dynamicCastTypeToObjCProtocolConditional:
+      Process.platform === "darwin"
+        ? new NativeFunction(lib.getExportByName("swift_dynamicCastTypeToObjCProtocolConditional"), "pointer", [
+            "pointer",
+            "size_t",
+            "pointer",
+          ])
+        : null,
   };
   return cachedSwiftCore;
 }

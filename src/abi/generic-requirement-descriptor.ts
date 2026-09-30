@@ -45,6 +45,7 @@ export interface GenericRequirementDescriptor {
   param: MangledName;
   protocol: ContextDescriptor | null;
   isObjCProtocol: boolean;
+  objCProtocol: NativePointer | null;
   sameTypeName: MangledName | null;
   layoutKind: GenericRequirementLayoutKind | null;
   conformance: ProtocolConformance | null;
@@ -57,19 +58,20 @@ function readMangledName(at: NativePointer): MangledName | null {
   return ptr === null ? null : { address: ptr, length: symbolicMangledNameLength(ptr) };
 }
 
-export function resolveProtocolConstraint(at: NativePointer): { protocol: ContextDescriptor | null; isObjC: boolean } {
+export function resolveProtocolConstraint(
+  at: NativePointer
+): { protocol: ContextDescriptor | null; isObjC: boolean; objCProtocol: NativePointer | null } {
   const raw = at.readS32();
   const isObjC = (raw & OBJC_PROTOCOL_BIT) !== 0;
-  if (isObjC) {
-    return { protocol: null, isObjC: true };
-  }
   const offset = raw & ~OBJC_PROTOCOL_BIT;
   if (offset === 0) {
-    return { protocol: null, isObjC: false };
+    return { protocol: null, isObjC, objCProtocol: null };
   }
   const address = at.add(offset & ~1);
   const resolved = (offset & 1) !== 0 ? address.readPointer().strip() : address;
-  return { protocol: new ContextDescriptor(resolved), isObjC: false };
+  return isObjC
+    ? { protocol: null, isObjC: true, objCProtocol: resolved }
+    : { protocol: new ContextDescriptor(resolved), isObjC: false, objCProtocol: null };
 }
 
 export function readGenericRequirementDescriptors(
@@ -85,12 +87,13 @@ export function readGenericRequirementDescriptors(
 
     let protocol: ContextDescriptor | null = null;
     let isObjCProtocol = false;
+    let objCProtocol: NativePointer | null = null;
     let sameTypeName: MangledName | null = null;
     let layoutKind: GenericRequirementLayoutKind | null = null;
     let conformance: ProtocolConformance | null = null;
     let invertedProtocols: InvertedProtocolsRequirement | null = null;
     if (kind === GenericRequirementKind.Protocol) {
-      ({ protocol, isObjC: isObjCProtocol } = resolveProtocolConstraint(address.add(OFFSETOF_UNION)));
+      ({ protocol, isObjC: isObjCProtocol, objCProtocol } = resolveProtocolConstraint(address.add(OFFSETOF_UNION)));
     } else if (
       kind === GenericRequirementKind.SameType ||
       kind === GenericRequirementKind.BaseClass ||
@@ -113,6 +116,7 @@ export function readGenericRequirementDescriptors(
       param,
       protocol,
       isObjCProtocol,
+      objCProtocol,
       sameTypeName,
       layoutKind,
       conformance,

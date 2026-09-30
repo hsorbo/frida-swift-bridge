@@ -528,6 +528,9 @@ public final class Vec2 {
 public class Base { public let kind: Int; public init(kind: Int) { self.kind = kind } }
 public final class Derived: Base { public init() { super.init(kind: 99) } }
 public func makeDerivedAsBase() -> Base { Derived() }
+public struct BaseBox<T: Base> { public var value: T }
+public struct ObjectBox<T: AnyObject> { public var value: T }
+public struct IntElements<C: Collection> where C.Element == Int { public var value: C }
 
 public class Creature {
     public var legs: Int

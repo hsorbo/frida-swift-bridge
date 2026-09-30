@@ -1,12 +1,15 @@
 import { ContextDescriptor } from "./context-descriptor.js";
-import { Metadata, instantiateGenericMetadata, genericHeaderOffset } from "./metadata.js";
+import { Metadata, MetadataKind, instantiateGenericMetadata, genericHeaderOffset } from "./metadata.js";
 import { conformsToProtocol } from "./protocol-conformance.js";
-import { resolveTypeByMangledName, symbolicMangledNameLength } from "./field-descriptor.js";
+import { resolveTypeByMangledName } from "./field-descriptor.js";
+import { isObjCExistential } from "./existential.js";
 import {
   GenericRequirementDescriptor,
+  GenericRequirementKind,
+  GenericRequirementLayoutKind,
   readGenericRequirementDescriptors,
-  resolveProtocolConstraint,
 } from "./generic-requirement-descriptor.js";
+import { getSwiftCoreApi } from "../runtime/api.js";
 import { ValueWitnessTable } from "./value-witness.js";
 import { RelativeDirectPointer, RelativeIndirectablePointer } from "../basic/relative-pointer.js";
 
@@ -20,10 +23,6 @@ const GENERIC_PARAM_KIND_MASK = 0x3f;
 const GENERIC_PARAM_KIND_TYPE = 0x0;
 
 const REQUIREMENT_SIZE = 0xc;
-const OFFSETOF_REQ_PARAM = 0x4;
-const OFFSETOF_REQ_PROTOCOL = 0x8;
-const REQUIREMENT_KIND_MASK = 0x1f;
-const REQUIREMENT_KIND_PROTOCOL = 0x0;
 
 const FLAG_HAS_TYPE_PACKS = 0x1;
 const FLAG_HAS_CONDITIONAL_INVERTED_PROTOCOLS = 0x2;
@@ -159,48 +158,88 @@ export function buildGenericMetadata(
     return instantiateGenericMetadata(descriptor, paramHandles);
   }
 
-  const paramVector = Memory.alloc(Math.max(1, paramHandles.length) * Process.pointerSize);
-  paramHandles.forEach((h, i) => paramVector.add(i * Process.pointerSize).writePointer(h));
+  const keyArguments = [...paramHandles];
+  const keyArgumentVector = Memory.alloc((paramHandles.length + numRequirements) * Process.pointerSize);
+  paramHandles.forEach((h, i) => keyArgumentVector.add(i * Process.pointerSize).writePointer(h));
 
-  const witnessTables: NativePointer[] = [];
-  const requirements = handle.add(genericRequirementsOffset(paramsOffset, numParams));
-  for (let i = 0; i < numRequirements; i++) {
-    const requirement = requirements.add(i * REQUIREMENT_SIZE);
-    const flags = requirement.readU32();
-    if ((flags & FLAG_HAS_KEY_ARGUMENT) === 0) {
-      continue;
+  for (const requirement of genericRequirements(descriptor)) {
+    const witnessTable = checkRequirement(descriptor, requirement, keyArgumentVector);
+    if (requirement.hasKeyArgument) {
+      if (witnessTable === null) {
+        throw new Error("only protocol conformance requirements are supported");
+      }
+      keyArgumentVector.add(keyArguments.length * Process.pointerSize).writePointer(witnessTable);
+      keyArguments.push(witnessTable);
     }
-    if ((flags & REQUIREMENT_KIND_MASK) !== REQUIREMENT_KIND_PROTOCOL) {
-      throw new Error("only protocol conformance requirements are supported");
-    }
-    witnessTables.push(witnessTableFor(descriptor, requirement, paramVector));
   }
 
-  return instantiateGenericMetadata(descriptor, [...paramHandles, ...witnessTables]);
+  return instantiateGenericMetadata(descriptor, keyArguments);
 }
 
-function witnessTableFor(
+// Mirrors the runtime's checkGenericRequirement; returns the witness table of a Swift protocol requirement.
+function checkRequirement(
   descriptor: ContextDescriptor,
-  requirement: NativePointer,
-  paramVector: NativePointer
-): NativePointer {
-  const subjectName = RelativeDirectPointer.resolve(requirement.add(OFFSETOF_REQ_PARAM));
-  if (subjectName === null) {
-    throw new Error("conformance requirement has no subject");
-  }
-  const subject = resolveTypeByMangledName(
-    { address: subjectName, length: symbolicMangledNameLength(subjectName) },
-    descriptor,
-    paramVector
-  );
+  requirement: GenericRequirementDescriptor,
+  keyArguments: NativePointer
+): NativePointer | null {
+  const subject = resolveTypeByMangledName(requirement.param, descriptor, keyArguments);
   if (subject === null) {
-    throw new Error("could not resolve conformance requirement subject");
+    throw new Error("could not resolve generic requirement subject");
   }
 
-  const { protocol } = resolveProtocolConstraint(requirement.add(OFFSETOF_REQ_PROTOCOL));
-  const witnessTable = conformsToProtocol(subject, protocol!);
-  if (witnessTable === null) {
-    throw new Error("type does not satisfy a conformance requirement");
+  switch (requirement.kind) {
+    case GenericRequirementKind.Protocol: {
+      if (requirement.isObjCProtocol) {
+        const cast = getSwiftCoreApi().swift_dynamicCastTypeToObjCProtocolConditional!;
+        const protocols = Memory.alloc(Process.pointerSize).writePointer(requirement.objCProtocol!);
+        if (cast(subject.handle, 1, protocols).isNull()) {
+          throw new Error("type does not conform to a required Objective-C protocol");
+        }
+        return null;
+      }
+      const witnessTable = conformsToProtocol(subject, requirement.protocol!);
+      if (witnessTable === null) {
+        throw new Error("type does not satisfy a conformance requirement");
+      }
+      return witnessTable;
+    }
+    case GenericRequirementKind.SameType: {
+      const other = resolveTypeByMangledName(requirement.sameTypeName!, descriptor, keyArguments);
+      if (other === null || !other.handle.equals(subject.handle)) {
+        throw new Error("type does not satisfy a same-type requirement");
+      }
+      return null;
+    }
+    case GenericRequirementKind.BaseClass: {
+      const superclass = resolveTypeByMangledName(requirement.sameTypeName!, descriptor, keyArguments);
+      if (superclass === null || getSwiftCoreApi().swift_dynamicCastMetatype(subject.handle, superclass.handle).isNull()) {
+        throw new Error("type is not a subclass of the required superclass");
+      }
+      return null;
+    }
+    case GenericRequirementKind.Layout: {
+      if (requirement.layoutKind !== GenericRequirementLayoutKind.Class) {
+        throw new Error(`unknown generic requirement layout kind ${requirement.layoutKind}`);
+      }
+      if (!satisfiesClassConstraint(subject)) {
+        throw new Error("type does not satisfy a class constraint");
+      }
+      return null;
+    }
+    default:
+      return null;
   }
-  return witnessTable;
+}
+
+function satisfiesClassConstraint(type: Metadata): boolean {
+  switch (type.kind) {
+    case MetadataKind.Class:
+    case MetadataKind.ObjCClassWrapper:
+    case MetadataKind.ForeignClass:
+      return true;
+    case MetadataKind.Existential:
+      return isObjCExistential(type);
+    default:
+      return false;
+  }
 }

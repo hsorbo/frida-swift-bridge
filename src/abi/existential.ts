@@ -16,6 +16,7 @@ const SPECIAL_PROTOCOL_MASK = 0x3f000000;
 const SPECIAL_PROTOCOL_ERROR = 0x01000000;
 const NOT_CLASS_CONSTRAINED = 0x80000000;
 const HAS_SUPERCLASS_CONSTRAINT = 0x40000000;
+const NUM_WITNESS_TABLES_MASK = 0x00ffffff;
 const PROTOCOL_DESCRIPTOR_REF_IS_OBJC = 1;
 
 const SHAPE_SPECIAL_KIND_MASK = 0xff;
@@ -43,6 +44,11 @@ export function existentialRepresentation(metadata: Metadata): ExistentialRepres
     return "error";
   }
   return (flags & NOT_CLASS_CONSTRAINED) !== 0 ? "opaque" : "class";
+}
+
+export function isObjCExistential(metadata: Metadata): boolean {
+  const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
+  return (flags & NOT_CLASS_CONSTRAINED) === 0 && (flags & NUM_WITNESS_TABLES_MASK) === 0;
 }
 
 export interface OpaqueExistential {
