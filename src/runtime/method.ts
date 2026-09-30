@@ -36,7 +36,9 @@ import {
   LoweredScalar,
   RegisterLocation,
   indirect,
+  argumentRegisterUse,
 } from "./calling-convention.js";
+import { probeSelfOwnership, RegisterRange } from "./value-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClass, SerialExecutorRef } from "./async-call.js";
 import { SwiftClosure, ClosureSpec, ClosureBody, LoadableClosureBody, SwiftThrow } from "./closure.js";
@@ -1614,7 +1616,7 @@ export type SelfRouting = { indirect: true } | { indirect: false; receiver: Meta
 // Value-type self is indirect (x20) when mutating/inout or large/non-POD; else it rides as a trailing
 // arg. Only a small loadable receiver's routing depends on `mutating`, which isn't recoverable from the
 // symbol. Plain calls pass self both ways (valueInvoker, BoundAsyncMethod); generic ones can't, since a
-// trailing self shifts the metadata args, so there the caller must state it.
+// trailing self shifts the metadata args, so there it's probed from the callee or stated by the caller.
 function valueSelfRouting(receiver: Metadata, selector: string, ownership: SelfOwnership | undefined): SelfRouting {
   if (shouldPassIndirectly(receiver)) {
     return { indirect: true };
@@ -2299,6 +2301,38 @@ export function bindGenericMethod(
   return plan.async ? new GenericBoundAsyncMethod(plan, self, routing) : new GenericBoundMethod(plan, self, routing);
 }
 
+// Unless stated, a small loadable self's ownership is read off which layout the callee uses: a
+// borrowing self trails the formal args, ahead of the implicit ones; a mutating self rides in x20.
+function genericValueSelfRouting(
+  receiver: Metadata,
+  plan: GenericMethodPlan,
+  ownership: SelfOwnership | undefined,
+  implicitWords: { trailingSelf: number; selfInRegister: number }
+): SelfRouting {
+  if (ownership === undefined && !shouldPassIndirectly(receiver)) {
+    ownership = probedSelfOwnership(receiver, plan, implicitWords);
+  }
+  return valueSelfRouting(receiver, plan.selector, ownership);
+}
+
+const probedSelfOwnerships = new Map<string, SelfOwnership | undefined>();
+
+function probedSelfOwnership(
+  receiver: Metadata,
+  plan: GenericMethodPlan,
+  implicitWords: { trailingSelf: number; selfInRegister: number }
+): SelfOwnership | undefined {
+  const argTypes = plan.argPlans.map(swiftArgType);
+  const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf);
+  const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister);
+  const key = `${plan.address}:${trailing.gp}:${trailing.fp}:${inRegister.gp}:${inRegister.fp}`;
+  if (!probedSelfOwnerships.has(key)) {
+    const directOnly: RegisterRange = { gp: [inRegister.gp, trailing.gp], fp: [inRegister.fp, trailing.fp] };
+    probedSelfOwnerships.set(key, probeSelfOwnership(plan.address, directOnly) ?? undefined);
+  }
+  return probedSelfOwnerships.get(key);
+}
+
 export function bindGenericValueMethod(
   receiver: Metadata,
   self: NativePointer,
@@ -2306,7 +2340,8 @@ export function bindGenericValueMethod(
   options: RawValueMethodResolveOptions = {}
 ): GenericBoundMethod | GenericBoundAsyncMethod {
   const plan = planGenericMethod(typeName(receiver), methodName, options);
-  const routing = valueSelfRouting(receiver, plan.selector, options.self);
+  const implicitWords = plan.typeArguments.length + plan.witnessTables.length;
+  const routing = genericValueSelfRouting(receiver, plan, options.self, { trailingSelf: implicitWords, selfInRegister: implicitWords });
   const consumed = consumedSelf(receiver, options);
   return plan.async
     ? new GenericBoundAsyncMethod(plan, self, routing, consumed)
@@ -2423,11 +2458,16 @@ export function bindGenericTypeValueMethod(
   options: RawValueMethodResolveOptions = {}
 ): GenericBoundMethod | GenericBoundAsyncMethod {
   const plan = planGenericTypeMethod(receiver, methodName, options, true);
-  const routing: SelfRouting = hasFixedLayoutInGenericContext(receiver.description)
-    ? valueSelfRouting(receiver, plan.selector, options.self)
-    : { indirect: true };
-  if (!routing.indirect) {
-    Object.assign(plan, keyGenericArguments(receiver));
+  let routing: SelfRouting = { indirect: true };
+  if (hasFixedLayoutInGenericContext(receiver.description)) {
+    const keyArguments = keyGenericArguments(receiver);
+    routing = genericValueSelfRouting(receiver, plan, options.self, {
+      trailingSelf: keyArguments.typeArguments.length + keyArguments.witnessTables.length,
+      selfInRegister: plan.typeArguments.length,
+    });
+    if (!routing.indirect) {
+      Object.assign(plan, keyArguments);
+    }
   }
   const consumed = consumedSelf(receiver, options);
   return plan.async

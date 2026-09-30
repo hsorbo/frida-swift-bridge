@@ -358,6 +358,10 @@ export class ArgumentAllocator {
     return size === 16 ? this.gp128() : this.gp(size);
   }
 
+  get registersUsed(): { gp: number; fp: number } {
+    return { gp: this.ngrn, fp: this.nsrn };
+  }
+
   private stackSlot(width: number): ArgLocation {
     const size = PACKS_STACK_ARGS ? width : Math.max(width, 8);
     const stackOffset = Math.ceil(this.stackSize / size) * size;
@@ -423,6 +427,22 @@ function lowerArg(arg: SwiftArgType): LoweredArg {
     return { indirect: true, pieces: [] };
   }
   return { indirect: false, pieces: loweredScalars(arg) };
+}
+
+// The GP and FP argument registers taken by argTypes followed by implicitWords metadata/witness pointers.
+export function argumentRegisterUse(argTypes: SwiftArgType[], implicitWords: number): { gp: number; fp: number } {
+  const allocator = new ArgumentAllocator();
+  for (const arg of argTypes.map(lowerArg)) {
+    if (arg.indirect) {
+      allocator.gp();
+    } else {
+      arg.pieces.forEach((piece) => allocator.scalar(piece));
+    }
+  }
+  for (let i = 0; i < implicitWords; i++) {
+    allocator.gp();
+  }
+  return allocator.registersUsed;
 }
 
 // The arguments are laid out in a frame of every argument register, GP then FP, followed by the

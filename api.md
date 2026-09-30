@@ -411,11 +411,14 @@ acc.add(3);      // writes back through self
 acc.total;       // 8
 ```
 
-A generic method on a small value type (`String`, `Int`, small structs) still
-needs `{ self: "borrowing" }` or `{ self: "mutating" }`, since there the bridge
-can't tell how `self` is passed. So does any method of a small generic value
-type whose layout doesn't depend on its type arguments (every stored property
-is class-bound or non-generic):
+For a generic method on a small value type (`String`, `Int`, small structs),
+and for any method of a small generic value type whose layout doesn't depend on
+its type arguments (every stored property is class-bound or non-generic), the
+bridge can't pass `self` both ways. It reads the method's code instead: a
+mutating method takes `self` through the self register, and a borrowing one
+reads the arguments that a trailing `self` pushes further along. When the code
+shows neither, the call throws and asks for `{ self: "borrowing" }` or
+`{ self: "mutating" }`:
 
 ```js
 box.$method("echo", { typeArguments: [Swift.type("Swift.Int")], self: "borrowing" }).call(7);
@@ -860,9 +863,10 @@ corrupts memory instead of failing cleanly.
   it decides whether `self` is passed as a pointer or in registers. Plain
   methods, sync or async, don't need it, because the bridge passes `self` both
   ways, unless an async method's arguments leave `self` no register; for those
-  and for generic ones (including methods of a generic type with a fixed
-  layout) pass `{ self: "borrowing" | "mutating" }` to `$method` (see
-  [Calling methods](#calling-methods)). Large receivers are unaffected.
+  pass `{ self: "borrowing" | "mutating" }` to `$method` (see
+  [Calling methods](#calling-methods)). Generic ones (including methods of a
+  generic type with a fixed layout) need it only when the bridge can't tell
+  from the method's code. Large receivers are unaffected.
 - **Whether a value-type method is `consuming`.** The mangled name does not
   record it either, and here the bridge can't detect it and throw: without
   `{ self: "consuming" }`, the callee destroys `self` while the value still owns

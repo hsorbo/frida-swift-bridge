@@ -21,3 +21,18 @@ struct HiddenTagged: Tagged {
     let n: Int
     func tag() -> Int { n }
 }
+
+// Generic methods on a small value type: -O keeps only the register uses that reveal self's convention.
+public protocol Weighed {
+    func weight() -> Int
+}
+extension Int: Weighed {
+    public func weight() -> Int { self }
+}
+public struct Counter {
+    public var total: Int
+    public func weighted<T: Weighed>(_ x: T) -> Int { total &+ x.weight() }
+    public mutating func add<T: Weighed>(_ x: T) { total &+= x.weight() }
+    public mutating func reset<T>(_ x: T) { total = 0 }
+    public func ignore<T>(_ x: T) -> Int { 42 }
+}

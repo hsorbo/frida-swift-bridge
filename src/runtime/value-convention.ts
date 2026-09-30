@@ -221,6 +221,37 @@ export function probeValueConvention(image: Module, token: string): ValueConvent
   return passthroughGetters.some((g) => (resolveType(g.resultType)?.valueWitnesses.size ?? 0) > 0) ? "direct" : null;
 }
 
+export interface RegisterRange {
+  gp: [number, number];
+  fp: [number, number];
+}
+
+// A small loadable self goes by address in swiftself when the method mutates, else as the last formal
+// argument, which pushes the generic arguments into registers a mutating callee never receives.
+export function probeSelfOwnership(method: NativePointer, directOnly: RegisterRange): "mutating" | "borrowing" | null {
+  const arch = ARCH_PROBES[Process.arch];
+  if (arch === undefined) {
+    return null;
+  }
+  const uses = new Map<string, RegisterUse>();
+  guarded(() => traceEntryRegisterUses(arch, method, uses, 0, { left: MAX_INSTRUCTIONS }));
+  if (uses.get(arch.asyncContextRegister) === "read") {
+    return null;
+  }
+  const fpRegisters = arch.argumentRegisters.filter((r) => /^(v|xmm)\d/.test(r));
+  const gpRegisters = arch.argumentRegisters.filter((r) => !fpRegisters.includes(r));
+  const directOnlyRegisters = [
+    ...gpRegisters.slice(directOnly.gp[0], directOnly.gp[1]),
+    ...fpRegisters.slice(directOnly.fp[0], directOnly.fp[1]),
+  ];
+  const readsSelfRegister = uses.get(arch.selfRegister) === "read";
+  const readsDirectOnly = directOnlyRegisters.some((r) => uses.get(r) === "read");
+  if (readsSelfRegister === readsDirectOnly) {
+    return null;
+  }
+  return readsSelfRegister ? "mutating" : "borrowing";
+}
+
 function demangledTypeName(token: string): string | null {
   return demangle(`$s${token}Mn`)?.replace(/^nominal type descriptor for /, "") ?? null;
 }
@@ -311,12 +342,13 @@ function traceEntryRegisterUses(
 ): TraceOutcome {
   let cursor = start;
   const constants: Constants = new Map();
+  const saved = new Set<string>();
   while (budget.left-- > 0) {
     const insn = Instruction.parse(cursor);
     if (arch.trapMnemonics.has(insn.mnemonic)) {
       return "trapped";
     }
-    recordRegisterUses(arch, insn, uses);
+    recordRegisterUses(arch, insn, uses, saved);
     const flow = arch.controlFlow(insn, constants);
     arch.trackConstants(insn, constants);
     switch (flow.kind) {
@@ -360,11 +392,18 @@ function resolvedFlow(kind: "jump" | "call", insn: Instruction, constant: Consta
   return { kind, target: constant!.value };
 }
 
-function recordRegisterUses(arch: ArchProbe, insn: Instruction, uses: Map<string, RegisterUse>): void {
+// A frame saves each callee-saved register once; storing its entry value again spills it as data
+// (-Onone keeps swiftself in a debug slot).
+function recordRegisterUses(arch: ArchProbe, insn: Instruction, uses: Map<string, RegisterUse>, saved: Set<string>): void {
   const { read, written } = arch.quirkyAccess(insn) ?? (insn as Arm64Instruction | X86Instruction).regsAccessed;
   const frameSave = arch.isFrameSave(insn);
   for (const r of read.map(arch.canonicalRegister)) {
-    if (!uses.has(r) && !(frameSave && arch.calleeSavedRegisters.has(r))) {
+    if (uses.has(r)) {
+      continue;
+    }
+    if (frameSave && arch.calleeSavedRegisters.has(r) && !saved.has(r)) {
+      saved.add(r);
+    } else {
       uses.set(r, "read");
     }
   }

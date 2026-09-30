@@ -372,6 +372,9 @@ public struct SmallGenericBox {
     public var base: Int
     public func echo<T>(_ x: T) -> T { x }
     public func scaledBy<T: Scalable>(_ x: T, _ k: Int) -> Int { base + x.scaled(by: k) }
+    public mutating func accumulate<T: Scalable>(_ x: T, _ k: Int) { base += x.scaled(by: k) }
+    public mutating func store<T: BinaryInteger>(_ x: T) { base = Int(truncatingIfNeeded: x) }
+    public func ignore<T>(_ x: T) {}
 }
 public struct BigGenericBox {
     public var a: Int; public var b: Int; public var c: Int; public var d: Int; public var e: Int

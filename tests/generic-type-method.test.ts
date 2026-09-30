@@ -66,8 +66,11 @@ describe("methods on a generic value type with a fixed layout in its generic con
     expect(value.field("raw").read()).toEqual(int64(13));
   });
 
-  test("the self option is required", () => {
-    expect(() => phantomScaled(10).method("scaled")).toThrow('$method("scaled", { self: "borrowing" }).call(...)');
+  test("the self convention is inferred without the self option", () => {
+    const value = phantomScaled(10);
+    expect(value.method("scaled").call(3, 7)).toEqual(int64(31));
+    value.method("bump").call(3);
+    expect(value.field("raw").read()).toEqual(int64(13));
   });
 });
 
