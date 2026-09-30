@@ -773,8 +773,28 @@ arguments throws at `attach` instead, because the type arguments come after
 `self`. Pass `{ self: "borrowing" | "mutating" }` as a third argument to say
 which. `self` is decoded only when read.
 
+`this.typeArguments` names the type arguments of the call in both callbacks: the
+enclosing generic type's first, then the function's own, and `[]` when nothing
+is generic. A static member of a generic type has no `self`, so this is where
+its type's arguments show:
+
+```js
+// static HKDF<H>.deriveKey<A1, B1>(inputKeyMaterial:salt:info:outputByteCount:)
+Swift.Interceptor.attach(deriveKey, {
+    onEnter(args) {
+        console.log(this.typeArguments);   // ["CryptoKit.SHA256", "Foundation.Data", "Swift.Array<Swift.UInt8>"]
+    },
+});
+```
+
+A non-mutating method of a generic struct whose layout doesn't depend on its
+type arguments passes `self` by value ahead of them, where the bridge can't find
+them. Decoding its arguments throws at `attach`, and reading
+`this.typeArguments` throws.
+
 For async functions, `Swift.Interceptor.attachAsync(target, callbacks)` provides
-`onEnter(args, context)` (with `this.self`), `onFirstSuspend()`, and `onComplete(retval, error?)`,
+`onEnter(args, context)` (with `this.self` and `this.typeArguments`), `onFirstSuspend()`, and
+`onComplete(retval, error?)` (with `this.typeArguments`),
 so you observe the real completion after the continuation resumes rather than
 the initial suspend. See `tests/async-interceptor.test.ts`.
 

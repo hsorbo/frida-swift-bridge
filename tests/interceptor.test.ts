@@ -3,7 +3,7 @@ import { fixtureExport, existentialMetadata, loadFixture } from "./fixtures/load
 
 import { Swift, type SwiftValue, type SwiftObject, type CallResult } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
+import { SwiftInterceptor, type SwiftInvocationContext } from "../src/runtime/interceptor.js";
 import { requireFpRegisterHooks } from "./swift.js";
 
 import { metadataFor, ClassInstance, asSwiftObject } from "../src/abi.js";
@@ -621,5 +621,42 @@ describe("SwiftInterceptor.attach on members of generic types", () => {
     const scaled = fixtureExport("fixture.PhantomScaled.scaled(");
     expect(() => SwiftInterceptor.attach(scaled, { onEnter() {} })).toThrow(/fixed-layout generic value passes self by value/);
     SwiftInterceptor.attach(scaled, { onLeave() {} }).detach();
+  });
+
+  function typeArgumentsDuringDrive(symbol: string, callbacks: "onEnter" | "onLeave"): (string[] | undefined)[] {
+    const seen: (string[] | undefined)[] = [];
+    const record = function (this: SwiftInvocationContext): void {
+      seen.push(this.typeArguments);
+    };
+    const listener = SwiftInterceptor.attach(fixtureExport(symbol), { [callbacks]: record });
+    makeSwiftNativeFunction(fixtureExport("fixture.driveKeyed"), metadataFor("Swift.Int")!, [])();
+    listener.detach();
+    return seen;
+  }
+
+  test("this.typeArguments lists the type's arguments, then the method's own", () => {
+    expect(typeArgumentsDuringDrive("static fixture.Keyed.first<", "onEnter")).toEqual([["Swift.String", "Swift.Int"]]);
+    expect(typeArgumentsDuringDrive("fixture.Keyed.paired<", "onEnter")).toEqual([["Swift.String", "Swift.Int"]]);
+    expect(typeArgumentsDuringDrive("fixture.KeyedHolder.paired<", "onEnter")).toEqual([["Swift.String", "Swift.Int"]]);
+    expect(typeArgumentsDuringDrive("fixture.cellPaired<", "onEnter")).toEqual([["Swift.String", "Swift.Int"]]);
+  });
+
+  test("this.typeArguments is captured for a hook with only onLeave", () => {
+    expect(typeArgumentsDuringDrive("static fixture.Keyed.echo(", "onLeave")).toEqual([["Swift.String"]]);
+  });
+
+  test("this.typeArguments is empty for a non-generic function", () => {
+    const seen: (string[] | undefined)[] = [];
+    const listener = SwiftInterceptor.attach(fixtureExport("fixture.addInts"), {
+      onEnter() {
+        seen.push(this.typeArguments);
+      },
+      onLeave() {
+        seen.push(this.typeArguments);
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.addInts"), metadataFor("Swift.Int")!, [metadataFor("Swift.Int")!, metadataFor("Swift.Int")!])(intValue(1), intValue(2));
+    listener.detach();
+    expect(seen).toEqual([[], []]);
   });
 });

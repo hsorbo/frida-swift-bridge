@@ -2,7 +2,7 @@ import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift } from "./swift.js";
 import { loadFixture } from "./fixtures/load.js";
 
-import { AsyncFunctionPointer, driveAsyncCall } from "../src/abi.js";
+import { AsyncFunctionPointer, driveAsyncCall, metadataFor, typeOf, type ClassType } from "../src/abi.js";
 
 import { Swift } from "../src/index.js";
 const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
@@ -13,6 +13,7 @@ const DIVIDE_ASYNC = "$s7fixture11divideAsyncyS2i_SitYaKF";
 const DIVIDE_ASYNC_AFP = DIVIDE_ASYNC + "Tu";
 const SPILL_INTS_ASYNC = "$s7fixture14spillIntsAsyncyS2i_S7is5Int32VSitYaF";
 const DRIVE_SPILL_INTS_ASYNC = "$s7fixture19driveSpillIntsAsyncSiyF";
+const CALC_ECHO_ASYNC = "$s7fixture9AsyncCalcC04echoB0yxxYalF";
 
 function driver(module: Module): (x: number) => number {
   const fn = new NativeFunction(module.getExportByName(DRIVE), "long", ["long"]);
@@ -242,6 +243,34 @@ describe("async interceptor", () => {
       expect(asyncContext!.isNull()).toBe(false);
     } finally {
       listener.detach();
+    }
+  });
+
+  test("this.typeArguments is set in onEnter and captured for onComplete", async () => {
+    requireSwift();
+    const module = loadFixture();
+    const calc = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).init(100);
+    const echo = calc.$method("echoAsync", { typeArguments: [typeOf(metadataFor("Swift.String")!)] });
+    const seen: { onEnter?: string[]; onComplete?: string[] } = {};
+    const completed = signal();
+    const listener = Swift.Interceptor.attachAsync(module.getExportByName(CALC_ECHO_ASYNC), {
+      onEnter() {
+        seen.onEnter = this.typeArguments;
+      },
+    });
+    const completionOnly = Swift.Interceptor.attachAsync(module.getExportByName(CALC_ECHO_ASYNC), {
+      onComplete() {
+        seen.onComplete = this.typeArguments;
+        completed.fire();
+      },
+    });
+    try {
+      expect(await echo.call("hi")).toBe("hi");
+      await completed.fired;
+      expect(seen).toEqual({ onEnter: ["Swift.String"], onComplete: ["Swift.String"] });
+    } finally {
+      listener.detach();
+      completionOnly.detach();
     }
   });
 });

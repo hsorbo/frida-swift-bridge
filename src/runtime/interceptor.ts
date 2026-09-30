@@ -36,7 +36,7 @@ import { typeName } from "./type-name.js";
 import { asSwiftObject } from "./object-facade.js";
 import { CallResult, SelfOwnership, witnessTableCount } from "./method.js";
 
-export type SwiftInvocationContext = InvocationContext & { self?: CallResult };
+export type SwiftInvocationContext = InvocationContext & { self?: CallResult; typeArguments?: string[] };
 
 export interface SwiftInvocationCallbacks {
   onEnter?: (this: SwiftInvocationContext, args: SwiftValue[]) => void;
@@ -351,6 +351,19 @@ function knownReceiver(shape: CallShape, decodesArgs: boolean): Receiver | null 
     throw new Error(unlocatable);
   }
   return shape.receiver?.trailing === null ? null : shape.receiver;
+}
+
+function exposeTypeArguments(invocation: object, generics: Metadata[] | string): void {
+  let names: string[] | undefined;
+  Object.defineProperty(invocation, "typeArguments", {
+    configurable: true,
+    get: () => {
+      if (typeof generics === "string") {
+        throw new Error(generics);
+      }
+      return (names ??= generics.map((m) => typeName(m)));
+    },
+  });
 }
 
 // Decoded only when read. A self in swiftself is still there on leave: the register is callee-saved.
@@ -678,7 +691,9 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
   const returnNeedsGenerics = ret !== null && (ret.kind === "param" || ret.kind === "use") && genericParams.length > 0;
   const decodesArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
   const receiver = knownReceiver(shape, decodesArgs);
-  const wantsArgs = decodesArgs || (receiver?.trailing === true && callbacks.onLeave !== undefined);
+  const unlocatable = unlocatableGenerics(shape);
+  const capturesGenerics = callbacks.onLeave !== undefined && genericParams.length > 0 && unlocatable === null;
+  const wantsArgs = decodesArgs || (receiver?.trailing === true && callbacks.onLeave !== undefined) || capturesGenerics;
 
   const onEnter =
     wantsArgs || captureIndirect
@@ -691,6 +706,7 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
           if (wantsArgs) {
             const { values, generics, trailingSelf } = materializeArgs(context, args, environment, 0, receiver);
             state.generics = generics;
+            exposeTypeArguments(this, generics);
             if (trailingSelf !== null) {
               state.trailingSelf = trailingSelf;
             }
@@ -712,6 +728,7 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
           if (receiver !== null) {
             exposeSelf(this, receiver, state.trailingSelf ?? selfRegister(context));
           }
+          exposeTypeArguments(this, state.generics ?? unlocatable ?? []);
           const swiftErrorRegister = errorRegister(context); // swiftcc returns a thrown error here
           if (throws && !swiftErrorRegister.isNull()) {
             callbacks.onLeave!.call(this, null, decodeThrownError(swiftErrorRegister));
@@ -737,7 +754,7 @@ export interface SwiftAsyncCallbacks {
   onEnter?: (this: SwiftInvocationContext, args: SwiftValue[], context: NativePointer) => void;
   // The entry partial function returning: reached the first suspension, not logical completion.
   onFirstSuspend?: (this: InvocationContext) => void;
-  onComplete?: (this: InvocationContext, retval: CallResult, error?: SwiftValue) => void;
+  onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: CallResult, error?: SwiftValue) => void;
 }
 
 function resolveAsyncEntry(target: NativePointer): NativePointer {
@@ -753,6 +770,7 @@ interface CompletionEntry {
   ret: TypePlan | null;
   generics: Metadata[];
   genericParams: string[];
+  typeArguments: Metadata[] | string;
   outBuffer: NativePointer | null;
   throws: boolean;
   owner: Set<CompletionEntry>;
@@ -810,6 +828,7 @@ function completionErrorValue(context: CpuContext): NativePointer {
 }
 
 function fireCompletion(entry: CompletionEntry, context: CpuContext, self: InvocationContext): void {
+  exposeTypeArguments(self, entry.typeArguments);
   const error = completionErrorValue(context);
   if (entry.throws && !error.isNull()) {
     entry.callbacks.onComplete!.call(self, null, decodeThrownError(error));
@@ -936,9 +955,11 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
   const returnNeedsGenerics = wantsCompletion && ret !== null && (ret.kind === "param" || ret.kind === "use") && genericParams.length > 0;
   const wantsArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
   const receiver = knownReceiver(shape, wantsArgs);
+  const unlocatable = unlocatableGenerics(shape);
+  const capturesGenerics = wantsCompletion && genericParams.length > 0 && unlocatable === null;
   const liveEntries = new Set<CompletionEntry>();
 
-  const armCompletion = (context: CpuContext, generics: Metadata[]): void => {
+  const armCompletion = (context: CpuContext, generics: Metadata[] | null): void => {
     const trampoline = getCompletionTrampoline();
     const taskContext = asyncContextRegister(context);
     const ctx = new AsyncContext(taskContext);
@@ -952,8 +973,9 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
     const entry: CompletionEntry = {
       callbacks,
       ret,
-      generics,
+      generics: generics ?? [],
       genericParams,
+      typeArguments: generics ?? unlocatable ?? [],
       outBuffer: indirectReturn ? gpArg(context, 0) : null,
       throws,
       owner: liveEntries,
@@ -967,10 +989,11 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
     wantsArgs || wantsCompletion
       ? function (this: SwiftInvocationContext) {
           const context = this.context;
-          let generics: Metadata[] = [];
-          if (wantsArgs) {
+          let generics: Metadata[] | null = null;
+          if (wantsArgs || capturesGenerics) {
             const materialized = materializeArgs(context, args, environment, argRegBase, receiver);
             generics = materialized.generics;
+            exposeTypeArguments(this, generics);
             if (receiver !== null) {
               exposeSelf(this, receiver, materialized.trailingSelf ?? selfRegister(context));
             }
