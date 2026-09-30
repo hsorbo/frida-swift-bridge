@@ -7,6 +7,10 @@ import { SwiftInterceptor, type SwiftInvocationContext } from "../src/runtime/in
 import { requireFpRegisterHooks } from "./swift.js";
 
 import { metadataFor, ClassInstance, asSwiftObject } from "../src/abi.js";
+
+const MAKE_LINK = "$s7fixture8makeLinkyAA0C0VSSF";
+const LINK_ADDRESS = "$s7fixture11linkAddressySSAA4LinkVF";
+
 function intValue(v: number): NativePointer {
   const p = Memory.alloc(8);
   p.writeU64(v);
@@ -568,6 +572,23 @@ describe("SwiftInterceptor.attach", () => {
     expect(isValue).toBe(true);
     expect(a).toEqual(int64(1));
     expect(tokenMatches).toBe(true);
+  });
+
+  test("hands back a struct holding a class existential as a live value facade", () => {
+    const module = loadFixture();
+    const link = Swift.function(module, MAKE_LINK).call("frida.re") as SwiftObject;
+    let address: SwiftValue = null;
+    const listener = SwiftInterceptor.attach(module.getExportByName(LINK_ADDRESS), {
+      onEnter(args) {
+        address = (args[0] as SwiftObject).address;
+      },
+    });
+    try {
+      expect(Swift.function(module, LINK_ADDRESS).call(link)).toBe("frida.re");
+      expect(address).toBe("frida.re");
+    } finally {
+      listener.detach();
+    }
   });
 });
 

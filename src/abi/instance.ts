@@ -5,6 +5,7 @@ import { enumerateTupleElements } from "./tuple.js";
 import { readString, writeString } from "./string.js";
 import {
   existentialRepresentation,
+  isClassExistential,
   extendedExistentialSpecialKind,
   ExtendedExistentialSpecialKind,
   projectOpaqueExistential,
@@ -316,13 +317,19 @@ export function embedsManagedReference(metadata: Metadata): boolean {
   let result = false;
   for (const field of enumerateFields(metadata.description)) {
     const fieldType = fieldTypeIn(metadata, field);
-    if (fieldType !== null && embedsManagedReference(fieldType)) {
+    if (fieldType !== null && (isClassExistentialField(fieldType) || embedsManagedReference(fieldType))) {
       result = true;
       break;
     }
   }
   managedRefCache.set(key, result);
   return result;
+}
+
+// A top-level existential is projected to its dynamic value, but a stored class existential is a reference.
+function isClassExistentialField(metadata: Metadata): boolean {
+  const isExistential = metadata.kind === MetadataKind.Existential || metadata.kind === MetadataKind.ExtendedExistential;
+  return isExistential && isClassExistential(metadata);
 }
 
 function readExistential(metadata: Metadata, address: NativePointer): SwiftValue {

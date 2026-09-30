@@ -1653,6 +1653,31 @@ public func makeTupleAsync(_ a: Int, _ b: Int) async -> (Int, String) {
     return (a + b, "sum")
 }
 
+public protocol Endpoint: AnyObject {
+    var address: String { get }
+}
+public final class Host: Endpoint {
+    public let address: String
+    public init(address: String) { self.address = address }
+}
+public struct Link {
+    let endpoint: any Endpoint
+    public var address: String { endpoint.address }
+}
+public func makeLink(_ address: String) -> Link { Link(endpoint: Host(address: address)) }
+public func linkAddress(_ link: Link) -> String { link.address }
+public func resolveLinkAsync(_ link: Link) async -> (Link, Host) {
+    await Task.yield()
+    return (link, Host(address: link.address + "/resolved"))
+}
+#if canImport(ObjectiveC)
+import ObjectiveC
+public func pairLinkAsync(_ link: Link, _ object: NSObject) async -> (Link, NSObject) {
+    await Task.yield()
+    return (link, object)
+}
+#endif
+
 public protocol AsyncScaler {
     func scaled(_ x: Int) async -> Int
     func scaledTwice(_ x: Int) async -> Int

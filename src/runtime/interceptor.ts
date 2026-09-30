@@ -1,6 +1,7 @@
 import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { readValue, embedsManagedReference, SwiftValue } from "../abi/instance.js";
 import { ValueInstance } from "../abi/value.js";
+import { enumerateTupleElements } from "../abi/tuple.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { ClassMetadata, classMetadataOf } from "../abi/class-metadata.js";
 import { genericParamsAreKey, hasFixedLayoutInGenericContext } from "../abi/generic-instantiation.js";
@@ -613,9 +614,19 @@ function materializeArgs(
 // out, so it surfaces as a live facade over the borrowed storage, valid for the callback's duration;
 // everything else stays a snapshot. An indirect address is the caller's storage, so writing through
 // it edits the argument or return.
-function decodeBorrowedValue(metadata: Metadata, address: NativePointer): CallResult {
+function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent: ValueInstance | null = null): CallResult {
+  if (metadata.kind === MetadataKind.Tuple) {
+    const tuple = ValueInstance.borrow(metadata, address, parent);
+    return [...enumerateTupleElements(metadata)].map((e) => decodeBorrowedValue(e.type, address.add(e.offset), tuple));
+  }
+  if (metadata.kind === MetadataKind.Class) {
+    return asSwiftObject(new ClassInstance(address.readPointer()));
+  }
+  if (metadata.kind === MetadataKind.ObjCClassWrapper) {
+    return address.readPointer();
+  }
   if (!metadata.valueWitnesses.isPOD && embedsManagedReference(metadata)) {
-    return asSwiftObject(ValueInstance.borrow(metadata, address));
+    return asSwiftObject(ValueInstance.borrow(metadata, address, parent));
   }
   return readValue(metadata, address);
 }

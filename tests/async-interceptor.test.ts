@@ -1,10 +1,13 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { requireSwift } from "./swift.js";
+import { requireDarwin, requireSwift } from "./swift.js";
 import { loadFixture } from "./fixtures/load.js";
 
 import { AsyncFunctionPointer, driveAsyncCall, metadataFor, typeOf, type ClassType } from "../src/abi.js";
+import { lookUpObjCClass } from "../src/runtime/objc.js";
 
-import { Swift } from "../src/index.js";
+import { Swift, type SwiftObject } from "../src/index.js";
+
+declare function gc(): void;
 const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
 const DRIVE = "$s7fixture17driveComputeAsyncyS2iF";
 const MAKE_QUAD_ASYNC = "$s7fixture13makeQuadAsyncyAA0dC0VSiYaF";
@@ -14,6 +17,9 @@ const DIVIDE_ASYNC_AFP = DIVIDE_ASYNC + "Tu";
 const SPILL_INTS_ASYNC = "$s7fixture14spillIntsAsyncyS2i_S7is5Int32VSitYaF";
 const DRIVE_SPILL_INTS_ASYNC = "$s7fixture19driveSpillIntsAsyncSiyF";
 const CALC_ECHO_ASYNC = "$s7fixture9AsyncCalcC04echoB0yxxYalF";
+const MAKE_LINK = "$s7fixture8makeLinkyAA0C0VSSF";
+const RESOLVE_LINK_ASYNC = "$s7fixture16resolveLinkAsyncyAA0C0V_AA4HostCtADYaF";
+const PAIR_LINK_ASYNC = "$s7fixture13pairLinkAsyncyAA0C0V_So8NSObjectCtAD_AFtYaF";
 
 function driver(module: Module): (x: number) => number {
   const fn = new NativeFunction(module.getExportByName(DRIVE), "long", ["long"]);
@@ -28,6 +34,13 @@ function signal(): { fire: () => void; fired: Promise<void> } {
     fire = resolve;
   });
   return { fire, fired };
+}
+
+function newNSObject(): NativePointer {
+  const libobjc = Process.getModuleByName("libobjc.A.dylib");
+  const msgSend = new NativeFunction(libobjc.getExportByName("objc_msgSend"), "pointer", ["pointer", "pointer"]);
+  const selRegisterName = new NativeFunction(libobjc.getExportByName("sel_registerName"), "pointer", ["pointer"]);
+  return msgSend(lookUpObjCClass("NSObject")!, selRegisterName(Memory.allocUtf8String("new"))) as NativePointer;
 }
 
 function afp(module: Module, symbol: string): AsyncFunctionPointer {
@@ -271,6 +284,57 @@ describe("async interceptor", () => {
     } finally {
       listener.detach();
       completionOnly.detach();
+    }
+  });
+
+  test("onComplete destructures a tuple return, its elements live past a gc", async () => {
+    requireSwift();
+    const module = loadFixture();
+    const link = Swift.function(module, MAKE_LINK).call("frida.re") as SwiftObject;
+    const seen: { enter?: string; link?: string; host?: string } = {};
+    const completed = signal();
+    const listener = Swift.Interceptor.attachAsync(module.getExportByName(RESOLVE_LINK_ASYNC), {
+      onEnter(args) {
+        seen.enter = (args[0] as SwiftObject).address as string;
+      },
+      onComplete(retval) {
+        const [resolved, host] = retval as SwiftObject[];
+        gc();
+        seen.link = resolved.address as string;
+        seen.host = host.address as string;
+        completed.fire();
+      },
+    });
+    try {
+      const [, host] = (await Swift.asyncFunction(module, RESOLVE_LINK_ASYNC).call(link)) as SwiftObject[];
+      expect(host.address).toBe("frida.re/resolved");
+      await completed.fired;
+      expect(seen).toEqual({ enter: "frida.re", link: "frida.re", host: "frida.re/resolved" });
+    } finally {
+      listener.detach();
+    }
+  });
+
+  test("onComplete hands back an ObjC class tuple element as a raw pointer", async (ctx) => {
+    requireDarwin(ctx);
+    const module = loadFixture();
+    const link = Swift.function(module, MAKE_LINK).call("frida.re") as SwiftObject;
+    const object = newNSObject();
+    let element: unknown;
+    const completed = signal();
+    const listener = Swift.Interceptor.attachAsync(module.getExportByName(PAIR_LINK_ASYNC), {
+      onComplete(retval) {
+        element = (retval as unknown[])[1];
+        completed.fire();
+      },
+    });
+    try {
+      await Swift.asyncFunction(module, PAIR_LINK_ASYNC).call(link, object);
+      await completed.fired;
+      expect(element instanceof NativePointer).toBe(true);
+      expect((element as NativePointer).equals(object)).toBe(true);
+    } finally {
+      listener.detach();
     }
   });
 });
