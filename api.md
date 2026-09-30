@@ -432,6 +432,19 @@ A `consuming` method takes ownership of `self` and destroys it. Pass
 box.$method("take", { self: "consuming" }).call();
 ```
 
+An `inout` parameter takes a value facade and writes the result back into it. A
+`$field` view works too, and writes into its parent:
+
+```js
+const n = Swift.type("Swift.Int").new(21);
+robot.doubled(n);        // func doubled(_ n: inout Int)
+n.$fields;               // 42
+robot.doubled(acc.$field("total"));
+```
+
+A consuming (`__owned`) parameter takes any argument; the callee gets its own
+copy.
+
 **Sync and async share one call site.** A call returns a decoded value for a
 synchronous method and a `Promise` for an `async` one — same syntax, you just
 `await` the async case. See [Async and actors](#async-and-actors).
@@ -640,9 +653,11 @@ rename(robot, "new");     // null
 ```
 
 The only option the stable wrapper accepts is `{ throws: true }` for a Swift
-`throws` function (see [Errors](#errors)). Consuming (`__owned`) parameters,
-generics, witness tables, and other lowering controls are rejected here — reach
-for the raw primitive under `/abi` when you need them.
+`throws` function (see [Errors](#errors)). Consuming (`__owned`) and `inout`
+parameters are handled as for methods when the address has a symbol; without
+one, every parameter is assumed to be borrowed. Generics, witness tables, and
+other lowering controls are not supported here — reach for the raw primitive
+under `/abi` when you need them.
 
 Finding an address is ordinary Frida work: `Module.getGlobalExportByName` with a
 mangled symbol, a scan of `module.enumerateExports()` filtered through
@@ -679,10 +694,9 @@ const computeAsync = Swift.function(app, "$s5MyApp12computeAsyncyS2iYaF");
 await computeAsync.call(21);    // 42
 ```
 
-Generic functions and methods of generic types are rejected, as are consuming
-(`__owned`) and `inout` parameters; reach for `/abi` for those. An initializer
-consumes its arguments, so it is rejected too: construct through
-`Swift.type(...).init`.
+Generic functions and methods of generic types are rejected; reach for `/abi`
+for those. An initializer consumes its arguments, so it is rejected too:
+construct through `Swift.type(...).init`.
 
 ## Closures
 

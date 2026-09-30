@@ -25,6 +25,8 @@ import {
   SwiftAccessorSignature,
   ParsedSwiftSignature,
   splitTopLevel,
+  splitParamConvention,
+  ParamConvention,
 } from "./symbolication.js";
 import {
   makeSwiftNativeFunction,
@@ -169,6 +171,7 @@ export interface ResolvedMethod {
   witnessTables?: NativePointer[];
   abstractArgs?: boolean[];
   abstractReturn?: boolean;
+  argConventions?: ParamConvention[];
   origin?: MemberOrigin;
 }
 
@@ -357,44 +360,70 @@ function destroyArgTemp(metadata: Metadata, ptr: NativePointer): void {
   }
 }
 
-function marshalArgsOrCleanup(argTypes: Metadata[], args: CallArg[]): NativePointer[] {
+// An owned arg's temp is consumed by the callee, and an inout arg is the caller's own value.
+function destroyBorrowedTemps(argTypes: Metadata[], buffers: NativePointer[], conventions: ParamConvention[]): void {
+  buffers.forEach((ptr, i) => {
+    if ((conventions[i] ?? "borrowed") === "borrowed") {
+      destroyArgTemp(argTypes[i], ptr);
+    }
+  });
+}
+
+// inout passes the caller's value by address, so the callee's writes land in it.
+function inoutArg(metadata: Metadata, value: CallArg): NativePointer {
+  const arg = rawArg(value);
+  if (!(arg instanceof ValueInstance)) {
+    throw new Error(`an inout ${typeName(metadata)} argument must be a value facade to write back into`);
+  }
+  if (!arg.metadata.handle.equals(metadata.handle)) {
+    throw new Error(`argument is a ${typeName(arg.metadata)} value, expected ${typeName(metadata)}`);
+  }
+  arg.checkLive();
+  return arg.handle;
+}
+
+// A class arg marshals as a bare borrowed pointer, so an owned (+1) one needs its own retain.
+function marshalArgsOrCleanup(argTypes: Metadata[], args: CallArg[], conventions: ParamConvention[] = []): NativePointer[] {
   const buffers: NativePointer[] = [];
   try {
     for (let i = 0; i < argTypes.length; i++) {
-      buffers.push(marshalArg(argTypes[i], args[i]));
+      buffers.push(conventions[i] === "inout" ? inoutArg(argTypes[i], args[i]) : marshalArg(argTypes[i], args[i]));
     }
   } catch (e) {
-    buffers.forEach((ptr, i) => destroyArgTemp(argTypes[i], ptr));
+    buffers.forEach((ptr, i) => {
+      if (conventions[i] !== "inout") {
+        destroyArgTemp(argTypes[i], ptr);
+      }
+    });
     throw e;
   }
-  return buffers;
-}
-
-// A class arg marshals as a bare borrowed pointer, so a +1/consumed callee needs its own retain.
-export function marshalConsumedArgs(argTypes: Metadata[], args: CallArg[]): NativePointer[] {
-  const buffers = marshalArgsOrCleanup(argTypes, args);
-  for (let i = 0; i < argTypes.length; i++) {
-    if (argTypes[i].kind === MetadataKind.Class) {
+  conventions.forEach((convention, i) => {
+    if (convention === "owned" && argTypes[i].kind === MetadataKind.Class) {
       new ClassInstance(buffers[i].readPointer()).retain();
     }
-  }
+  });
   return buffers;
 }
 
-export function callBorrowingArgs(
+export function marshalConsumedArgs(argTypes: Metadata[], args: CallArg[]): NativePointer[] {
+  return marshalArgsOrCleanup(argTypes, args, argTypes.map(() => "owned"));
+}
+
+export function callMarshalled(
   argTypes: Metadata[],
   args: CallArg[],
   returnType: Metadata | null,
-  invoke: (argPtrs: NativePointer[]) => NativePointer | null
+  invoke: (argPtrs: NativePointer[]) => NativePointer | null,
+  conventions: ParamConvention[] = []
 ): CallResult {
   if (args.length !== argTypes.length) {
     throw new Error(`expected ${argTypes.length} argument(s), got ${args.length}`);
   }
-  const argPtrs = marshalArgsOrCleanup(argTypes, args);
+  const argPtrs = marshalArgsOrCleanup(argTypes, args, conventions);
   try {
     return decodeReturn(returnType, invoke(argPtrs));
   } finally {
-    argPtrs.forEach((ptr, i) => destroyArgTemp(argTypes[i], ptr));
+    destroyBorrowedTemps(argTypes, argPtrs, conventions);
   }
 }
 
@@ -411,18 +440,9 @@ function methodKind(name: string): MethodKind {
   return name === "init" || name === "__allocating_init" ? "init" : "method";
 }
 
-// The marshalled path borrows every argument; a consuming (__owned) or inout parameter would
-// double-free or desync self.
-const NON_BORROWING_ARG = /^(?:__owned|inout)\s/;
-
-export function assertBorrowingArgs(argTypeNames: string[], selector: string): void {
-  const offending = argTypeNames.find((n) => NON_BORROWING_ARG.test(n));
-  if (offending !== undefined) {
-    throw new Error(
-      `${selector} has a non-borrowing parameter (${offending}); its calling convention is unsupported ` +
-        `by the stable API. Bind it through /abi, supplying the ABI signature and ownership by hand.`
-    );
-  }
+function splitParams(argTypeNames: string[]): { types: string[]; conventions: ParamConvention[] } {
+  const params = argTypeNames.map(splitParamConvention);
+  return { types: params.map((p) => p.type), conventions: params.map((p) => p.convention) };
 }
 
 function sequenceEqual<T>(actual: T[], wanted: T[]): boolean {
@@ -1021,9 +1041,9 @@ function resolveMethodIn(
     }
 
     const { isStatic, signature, mangled } = candidates[0];
-    assertBorrowingArgs(signature.argTypeNames, signature.selector);
+    const params = splitParams(signature.argTypeNames);
     const address = candidates[0].address.strip();
-    const argTypes = signature.argTypeNames.map((name) => {
+    const argTypes = params.types.map((name) => {
       const metadata = resolveTypeExpr(name, () => null);
       if (metadata === null) {
         throw new Error(`cannot resolve argument type ${name} of ${signature.selector}`);
@@ -1047,16 +1067,24 @@ function resolveMethodIn(
       asyncFunctionPointer = afp;
     }
     const origin = memberOrigin(address, className);
-    return { address, argTypes, returnType, throws: signature.throws, isStatic, selector: signature.selector, async: signature.async, asyncFunctionPointer, origin };
+    return { address, argTypes, returnType, throws: signature.throws, isStatic, selector: signature.selector, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin };
   }
   return null;
+}
+
+function passedByAddress(resolved: ResolvedMethod, i: number): boolean {
+  return resolved.abstractArgs?.[i] === true || resolved.argConventions?.[i] === "inout";
+}
+
+function loweredArgTypes(resolved: ResolvedMethod): SwiftArgType[] {
+  return resolved.argTypes.map((t, i) => (passedByAddress(resolved, i) ? indirect(t) : t));
 }
 
 // Keyed by full signature, not bare address: an index invocation must not reuse a symbol-route
 // invoker built for different types at the same impl.
 function instanceInvokerKey(resolved: ResolvedMethod): string {
   const ret = resolved.returnType === null ? "v" : `${resolved.returnType.handle}${resolved.abstractReturn ? "@" : ""}`;
-  const args = resolved.argTypes.map((t, i) => `${t.handle}${resolved.abstractArgs?.[i] ? "@" : ""}`).join(",");
+  const args = resolved.argTypes.map((t, i) => `${t.handle}${passedByAddress(resolved, i) ? "@" : ""}`).join(",");
   const witness = resolved.witnessSelf === undefined ? "" : `|${resolved.witnessSelf.handle}`;
   return `${resolved.address}|self|${ret}|${args}|${resolved.throws ? "t" : "n"}${witness}`;
 }
@@ -1075,10 +1103,8 @@ function invokerFor(resolved: ResolvedMethod): SwiftNativeFunction {
   const key = instanceInvokerKey(resolved);
   let fn = invokerCache.get(key);
   if (fn === undefined) {
-    const { abstractArgs, abstractReturn } = resolved;
-    const argTypes = resolved.argTypes.map((t, i): SwiftArgType => (abstractArgs?.[i] ? indirect(t) : t));
-    const returnType = resolved.returnType !== null && abstractReturn ? indirect(resolved.returnType) : resolved.returnType;
-    fn = makeSwiftNativeFunction(resolved.address, returnType, argTypes, {
+    const returnType = resolved.returnType !== null && resolved.abstractReturn ? indirect(resolved.returnType) : resolved.returnType;
+    fn = makeSwiftNativeFunction(resolved.address, returnType, loweredArgTypes(resolved), {
       hasSelf: true,
       throws: resolved.throws,
       ...witnessSelfArgs(resolved.witnessSelf, resolved.witnessTables),
@@ -1115,7 +1141,7 @@ export class BoundMethod {
     if (args.length !== argTypes.length) {
       throw new Error(`${this.resolved.selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
-    return callBorrowingArgs(argTypes, args, returnType, (argPtrs) => this.fn(this.self, ...argPtrs));
+    return callMarshalled(argTypes, args, returnType, (argPtrs) => this.fn(this.self, ...argPtrs), this.resolved.argConventions);
   }
 }
 
@@ -1200,15 +1226,11 @@ class AsyncArgs {
   }
 }
 
-function lowerAsyncArgs(
-  argTypes: Metadata[],
-  buffers: NativePointer[],
-  abstractArgs: boolean[],
-  result: AsyncResultShape | null
-): AsyncArgs {
+function lowerAsyncArgs(resolved: ResolvedMethod, buffers: NativePointer[], result: AsyncResultShape | null): AsyncArgs {
+  const { argTypes } = resolved;
   const lowered = new AsyncArgs(result?.kind === "indirect" ? 1 : 0);
   for (let i = 0; i < argTypes.length; i++) {
-    if (abstractArgs[i]) {
+    if (passedByAddress(resolved, i)) {
       lowered.pushWord(buffers[i]);
     } else {
       lowered.push(argTypes[i], buffers[i]);
@@ -1264,11 +1286,12 @@ export class BoundAsyncMethod {
     if (args.length !== argTypes.length) {
       throw new Error(`${this.resolved.selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
-    const buffers = marshalArgsOrCleanup(argTypes, args);
+    const conventions = this.resolved.argConventions ?? [];
+    const buffers = marshalArgsOrCleanup(argTypes, args, conventions);
     const cleanup = (): void => {
-      buffers.forEach((ptr, i) => destroyArgTemp(argTypes[i], ptr));
+      destroyBorrowedTemps(argTypes, buffers, conventions);
     };
-    const lowered = lowerAsyncArgs(argTypes, buffers, this.resolved.abstractArgs ?? [], this.result);
+    const lowered = lowerAsyncArgs(this.resolved, buffers, this.result);
     const options: AsyncCallOptions = { throws };
     if (this.executor !== null) {
       options.onActor = this.executor;
@@ -1494,14 +1517,16 @@ function resolveAsyncSymbol(module: Module, mangled: string, signature: SwiftFun
   };
 }
 
-function resolveSignatureTypes(signature: SwiftFunctionSignature): { argTypes: Metadata[]; returnType: Metadata | null } {
+function resolveSignatureTypes(
+  signature: SwiftFunctionSignature
+): { argTypes: Metadata[]; returnType: Metadata | null; argConventions: ParamConvention[] } {
   if (methodKind(signature.name) === "init") {
     throw new Error(
       `${signature.selector} is an initializer, which consumes its arguments; construct through Swift.type(...).init`
     );
   }
-  assertBorrowingArgs(signature.argTypeNames, signature.selector);
-  const argTypes = signature.argTypeNames.map((name) => {
+  const params = splitParams(signature.argTypeNames);
+  const argTypes = params.types.map((name) => {
     const metadata = resolveTypeExpr(name, () => null);
     if (metadata === null) {
       throw new Error(`cannot resolve argument type ${name} of ${signature.selector}`);
@@ -1515,14 +1540,14 @@ function resolveSignatureTypes(signature: SwiftFunctionSignature): { argTypes: M
       throw new Error(`cannot resolve return type ${signature.returnTypeName} of ${signature.selector}`);
     }
   }
-  return { argTypes, returnType };
+  return { argTypes, returnType, argConventions: params.conventions };
 }
 
 function staticInvokerFor(resolved: ResolvedMethod): SwiftNativeFunction {
   const key = `${resolved.address}:static`;
   let fn = invokerCache.get(key);
   if (fn === undefined) {
-    fn = makeSwiftNativeFunction(resolved.address, resolved.returnType, resolved.argTypes, {
+    fn = makeSwiftNativeFunction(resolved.address, resolved.returnType, loweredArgTypes(resolved), {
       throws: resolved.throws,
     });
     invokerCache.set(key, fn);
@@ -1551,7 +1576,7 @@ export class BoundStaticMethod {
     if (args.length !== argTypes.length) {
       throw new Error(`${this.resolved.selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
-    return callBorrowingArgs(argTypes, args, returnType, (argPtrs) => this.fn(...argPtrs));
+    return callMarshalled(argTypes, args, returnType, (argPtrs) => this.fn(...argPtrs), this.resolved.argConventions);
   }
 }
 
@@ -1590,8 +1615,8 @@ export class BoundValueInitializer {
     if (args.length !== argTypes.length) {
       throw new Error(`${selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
-    const buffers = marshalConsumedArgs(argTypes, args);
-    const ret = this.fn(...buffers);
+    const conventions = argTypes.map((_, i): ParamConvention => (this.resolved.argConventions?.[i] === "inout" ? "inout" : "owned"));
+    const ret = this.fn(...marshalArgsOrCleanup(argTypes, args, conventions));
     if (ret === null) {
       throw new Error(`${selector} returned no value`);
     }
@@ -1638,7 +1663,7 @@ function valueInvoker(resolved: ResolvedMethod, receiver: Metadata): SwiftNative
   const key = `${resolved.address}:value-self`;
   let fn = invokerCache.get(key);
   if (fn === undefined) {
-    const argTypes = shouldPassIndirectly(receiver) ? resolved.argTypes : [...resolved.argTypes, receiver];
+    const argTypes = shouldPassIndirectly(receiver) ? loweredArgTypes(resolved) : [...loweredArgTypes(resolved), receiver];
     fn = makeSwiftNativeFunction(resolved.address, resolved.returnType, argTypes, {
       hasSelf: true,
       throws: resolved.throws,
@@ -1675,10 +1700,16 @@ export class BoundValueMethod {
     if (args.length !== argTypes.length) {
       throw new Error(`${this.resolved.selector} expects ${argTypes.length} argument(s), got ${args.length}`);
     }
-    return callBorrowingArgs(argTypes, args, returnType, (argPtrs) => {
-      const self = this.consuming ? copyOfValue(this.receiver, this.self) : this.self;
-      return this.trailingSelf ? this.fn(self, ...argPtrs, self) : this.fn(self, ...argPtrs);
-    });
+    return callMarshalled(
+      argTypes,
+      args,
+      returnType,
+      (argPtrs) => {
+        const self = this.consuming ? copyOfValue(this.receiver, this.self) : this.self;
+        return this.trailingSelf ? this.fn(self, ...argPtrs, self) : this.fn(self, ...argPtrs);
+      },
+      this.resolved.argConventions
+    );
   }
 }
 
@@ -1921,6 +1952,17 @@ function optionalIsAddressOnly(
   throw new Error(`unsupported compound generic signature type ${expr} (Optional payload must be a generic parameter)`);
 }
 
+// inout passes the caller's value by address whatever its layout.
+function planParam(plan: ArgPlan, convention: ParamConvention, selector: string): ArgPlan {
+  if (convention === "borrowed") {
+    return plan;
+  }
+  if (plan.kind === "closure") {
+    throw new Error(`${selector}: ${convention} closure parameters are unsupported`);
+  }
+  return convention === "inout" && plan.kind === "concrete" ? { kind: "abstractIndirect", metadata: plan.metadata } : plan;
+}
+
 function swiftArgType(plan: ArgPlan): SwiftArgType {
   switch (plan.kind) {
     case "generic":
@@ -1997,7 +2039,28 @@ export interface GenericMethodPlan {
   asyncFunctionPointer?: AsyncFunctionPointer;
   typeArguments: Metadata[];
   witnessTables: NativePointer[];
+  argConventions: ParamConvention[];
   origin: MemberOrigin;
+}
+
+interface PlannedArgs {
+  ptrs: NativePointer[];
+  closures: (SwiftClosure | null)[]; // referenced through the call: Swift invokes them in-flight
+  destroyBorrowedTemps(): void;
+}
+
+function marshalPlannedArgs(plan: GenericMethodPlan, args: CallArg[]): PlannedArgs {
+  const plans = plan.argPlans;
+  const closures = plans.map((p, i) => (p.kind === "closure" ? marshalClosure(p, args[i]) : null));
+  const valueIndices = plans.flatMap((p, i) => (p.kind === "closure" ? [] : [i]));
+  const metas = valueIndices.map((i) => planMetadata(plans[i]));
+  const conventions = valueIndices.map((i) => plan.argConventions[i]);
+  const buffers = marshalArgsOrCleanup(metas, valueIndices.map((i) => args[i]), conventions);
+  return {
+    ptrs: plans.map((_, i) => closures[i]?.value() ?? buffers[valueIndices.indexOf(i)]),
+    closures,
+    destroyBorrowedTemps: () => destroyBorrowedTemps(metas, buffers, conventions),
+  };
 }
 
 // Type-metadata + witness pointers trail the formal args, so a trailing-exploded value self lands
@@ -2032,37 +2095,15 @@ export class GenericBoundMethod {
     if (args.length !== plans.length) {
       throw new Error(`${this.selector} expects ${plans.length} argument(s), got ${args.length}`);
     }
-    const closures: SwiftClosure[] = []; // in scope through the call: Swift invokes them in-flight
-    const argPtrs: NativePointer[] = [];
-    const borrowed: { metadata: Metadata; ptr: NativePointer }[] = [];
-    try {
-      for (let i = 0; i < plans.length; i++) {
-        const plan = plans[i];
-        if (plan.kind === "closure") {
-          const closure = marshalClosure(plan, args[i]);
-          closures.push(closure);
-          argPtrs.push(closure.value());
-          continue;
-        }
-        const ptr = marshalArg(plan.metadata, args[i]);
-        argPtrs.push(ptr);
-        if (plan.metadata.kind !== MetadataKind.Class && !plan.metadata.valueWitnesses.isPOD) {
-          borrowed.push({ metadata: plan.metadata, ptr });
-        }
-      }
-    } catch (e) {
-      for (const b of borrowed) destroyArgTemp(b.metadata, b.ptr);
-      throw e;
-    }
+    const marshalled = marshalPlannedArgs(this.plan, args);
+    const argPtrs = marshalled.ptrs;
     const returnType = this.plan.returnPlan === null ? null : planMetadata(this.plan.returnPlan);
     try {
       const self = this.consumedSelf === null ? this.self : copyOfValue(this.consumedSelf, this.self);
       const ret = this.indirectSelf ? this.fn(self, ...argPtrs) : this.fn(...argPtrs, self);
       return decodeReturn(returnType, ret);
     } finally {
-      for (const b of borrowed) {
-        b.metadata.valueWitnesses.destroy(b.ptr);
-      }
+      marshalled.destroyBorrowedTemps();
     }
   }
 }
@@ -2110,34 +2151,23 @@ export class GenericBoundAsyncMethod {
     if (args.length !== plans.length) {
       throw new Error(`${this.selector} expects ${plans.length} argument(s), got ${args.length}`);
     }
-    const closures: SwiftClosure[] = []; // in scope until settle: Swift invokes them in-flight
-    const borrowed: { metadata: Metadata; ptr: NativePointer }[] = [];
+    const marshalled = marshalPlannedArgs(this.plan, args);
+    const { closures } = marshalled;
     const cleanup = (): void => {
-      for (const b of borrowed) destroyArgTemp(b.metadata, b.ptr);
+      marshalled.destroyBorrowedTemps();
     };
     const lowered = new AsyncArgs(this.result?.kind === "indirect" ? 1 : 0);
-    try {
-      for (let i = 0; i < plans.length; i++) {
-        const plan = plans[i];
-        if (plan.kind === "closure") {
-          const closure = marshalClosure(plan, args[i]);
-          closures.push(closure);
-          lowered.pushWord(closure.fnPointer);
-          lowered.pushWord(closure.context);
-          continue;
-        }
-        const ptr = marshalArg(plan.metadata, args[i]);
-        borrowed.push({ metadata: plan.metadata, ptr });
-        if (plan.kind === "generic" || plan.kind === "abstractIndirect") {
-          lowered.pushWord(ptr);
-        } else {
-          lowered.push(plan.metadata, ptr);
-        }
+    plans.forEach((plan, i) => {
+      const closure = closures[i];
+      if (closure !== null) {
+        lowered.pushWord(closure.fnPointer);
+        lowered.pushWord(closure.context);
+      } else if (plan.kind === "generic" || plan.kind === "abstractIndirect") {
+        lowered.pushWord(marshalled.ptrs[i]);
+      } else {
+        lowered.push(planMetadata(plan), marshalled.ptrs[i]);
       }
-    } catch (e) {
-      cleanup();
-      throw e;
-    }
+    });
     const self = this.consumedSelf === null ? this.self : copyOfValue(this.consumedSelf, this.self);
     const options: AsyncCallOptions = { throws: this.plan.throws };
     if (this.routing.indirect) {
@@ -2287,12 +2317,12 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
   if (resolvedTypeArguments.length !== signature.genericParams.length) {
     throw new Error(`${signature.selector} needs ${signature.genericParams.length} type argument(s), got ${typeArguments.length}`);
   }
-  assertBorrowingArgs(signature.argTypeNames, signature.selector);
+  const params = splitParams(signature.argTypeNames);
   const classBoundParams = new Set(
     signature.conformanceRequirements.filter((r) => requirementBound(r).classBound).map((r) => r.subject)
   );
-  const argPlans = signature.argTypeNames.map((n) =>
-    planGenericType(n, signature.genericParams, resolvedTypeArguments, classBoundParams)
+  const argPlans = params.types.map((n, i) =>
+    planParam(planGenericType(n, signature.genericParams, resolvedTypeArguments, classBoundParams), params.conventions[i], signature.selector)
   );
   const returnPlan =
     signature.returnTypeName === null
@@ -2308,7 +2338,7 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     }
   }
   const origin = memberOrigin(address, fullName);
-  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, origin };
+  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin };
 }
 
 export function bindGenericMethod(
@@ -2443,9 +2473,11 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     throw new Error(`ambiguous method ${methodName} on ${unboundName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`);
   }
   const { address, signature, mangled } = candidates[0];
-  assertBorrowingArgs(signature.argTypeNames, signature.selector);
+  const params = splitParams(signature.argTypeNames);
   const classBound = classBoundTypeParams(findType(unboundName)!, typeParams);
-  const argPlans = signature.argTypeNames.map((n) => planTypeMemberArg(n, typeParams, typeArguments, classBound));
+  const argPlans = params.types.map((n, i) =>
+    planParam(planTypeMemberArg(n, typeParams, typeArguments, classBound), params.conventions[i], signature.selector)
+  );
   const returnPlan =
     signature.returnTypeName === null
       ? null
@@ -2468,6 +2500,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     asyncFunctionPointer,
     typeArguments: trailsSelfMetadata ? [receiver] : [],
     witnessTables: [],
+    argConventions: params.conventions,
     origin: memberOrigin(address, unboundName),
   };
 }
@@ -3141,9 +3174,9 @@ function resolveWitnessSignature(
   table: WitnessTable,
   signature: SwiftFunctionSignature,
   classBound: Set<string>
-): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector" | "abstractArgs" | "abstractReturn"> {
-  assertBorrowingArgs(signature.argTypeNames, signature.selector);
-  const argTypes = signature.argTypeNames.map((name) => {
+): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector" | "abstractArgs" | "abstractReturn" | "argConventions"> {
+  const params = splitParams(signature.argTypeNames);
+  const argTypes = params.types.map((name) => {
     const metadata = resolveTypeExpr(name, (n) => resolveWitnessSelfOrAssociatedType(table, n));
     if (metadata === null) {
       throw new Error(`cannot resolve argument type ${name} of ${signature.selector}`);
@@ -3163,8 +3196,9 @@ function resolveWitnessSignature(
     returnType,
     throws: signature.throws,
     selector: signature.selector,
-    abstractArgs: signature.argTypeNames.map(isAbstract),
+    abstractArgs: params.types.map(isAbstract),
     abstractReturn: signature.returnTypeName !== null && isAbstract(signature.returnTypeName),
+    argConventions: params.conventions,
   };
 }
 

@@ -7,8 +7,8 @@ import { ClassInstance } from "../abi/heap-object.js";
 import { asSwiftObject, SwiftClassObject, SwiftValueObject, RAW } from "./object-facade.js";
 import { SwiftValue } from "../abi/instance.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
-import { makeSwiftNativeFunction } from "./calling-convention.js";
-import { parseSwiftSignature, resolveType, symbolicate } from "./symbolication.js";
+import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
+import { parseSwiftSignature, resolveType, symbolicate, splitParamConvention, ParamConvention } from "./symbolication.js";
 import {
   BoundMethod,
   BoundAsyncMethod,
@@ -17,14 +17,13 @@ import {
   narrowBoundMethod,
   narrowBoundInitializer,
   marshalConsumedArgs,
-  assertBorrowingArgs,
   CallArg,
   CallResult,
   MethodResolveOptions,
   PropertyInfo,
   bindStaticMethod,
   bindValueInitializer,
-  callBorrowingArgs,
+  callMarshalled,
   enumerateMethods,
   ModuleScope,
   enumerateProperties,
@@ -556,18 +555,11 @@ function concreteMetadataOf(type: NativeFunctionType, role: string): Metadata {
   return metadata;
 }
 
-// Best-effort: an address with no exported symbol (stripped/private) is assumed to borrow its
-// arguments, the only convention callBorrowingArgs is safe for. A consuming (__owned) or inout
-// parameter must be bound through /abi's makeSwiftNativeFunction with { consumedArgs }.
-function rejectNonBorrowing(address: NativePointer): void {
+// Best-effort: an address with no exported symbol (stripped/private) is assumed to borrow its arguments.
+function paramConventionsAt(address: NativePointer): ParamConvention[] {
   const symbol = symbolicate(address);
-  if (symbol === null) {
-    return;
-  }
-  const parsed = parseSwiftSignature(symbol.demangled);
-  if (parsed !== null && parsed.kind === "function") {
-    assertBorrowingArgs(parsed.argTypeNames, symbol.demangled);
-  }
+  const parsed = symbol === null ? null : parseSwiftSignature(symbol.demangled);
+  return parsed !== null && parsed.kind === "function" ? parsed.argTypeNames.map((n) => splitParamConvention(n).convention) : [];
 }
 
 export function swiftFunction(
@@ -576,12 +568,13 @@ export function swiftFunction(
   argTypes: NativeFunctionType[],
   options: MarshalledFunctionOptions = {}
 ): (...args: CallArg[]) => CallResult {
-  rejectNonBorrowing(address);
+  const conventions = paramConventionsAt(address);
   const argMetadata = argTypes.map((t, i) => concreteMetadataOf(t, `argument type ${i}`));
   const returnMetadata = returnType === null ? null : concreteMetadataOf(returnType, "return type");
-  const raw = makeSwiftNativeFunction(address, returnMetadata, argMetadata, { throws: options.throws });
+  const lowered = argMetadata.map((m, i) => (conventions[i] === "inout" ? indirect(m) : m));
+  const raw = makeSwiftNativeFunction(address, returnMetadata, lowered, { throws: options.throws });
   return (...args: CallArg[]): CallResult =>
-    callBorrowingArgs(argMetadata, args, returnMetadata, (argPtrs) => raw(...argPtrs));
+    callMarshalled(argMetadata, args, returnMetadata, (argPtrs) => raw(...argPtrs), conventions);
 }
 
 export function typeFromDescriptor(descriptor: ContextDescriptor): SwiftType {

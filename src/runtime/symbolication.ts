@@ -365,9 +365,21 @@ export function splitBoundTypeName(name: string): { base: string; arguments: str
   return { base: name.slice(0, lt), arguments: splitTopLevel(name.slice(lt + 1, -1), ",") };
 }
 
+export type ParamConvention = "borrowed" | "owned" | "inout";
+
+const OWNERSHIP_MODIFIER = /^(__owned|consuming|inout)\s+/;
+
+export function splitParamConvention(name: string): { convention: ParamConvention; type: string } {
+  const match = OWNERSHIP_MODIFIER.exec(name.trim());
+  if (match === null) {
+    return { convention: "borrowed", type: name };
+  }
+  return { convention: match[1] === "inout" ? "inout" : "owned", type: name.trim().slice(match[0].length) };
+}
+
 // Desugars A? / [A] / [K: V] / Base<...>, resolving each leaf via resolveParam (generics) or findType.
 // A leading borrow modifier (init params spell a non-consuming String as `__shared String`) is not
-// part of the type and is dropped; __owned/inout are rejected upstream, not here.
+// part of the type and is dropped; __owned/inout are split off upstream, by splitParamConvention.
 export function resolveTypeExpr(
   expr: string,
   resolveParam: (name: string) => Metadata | null

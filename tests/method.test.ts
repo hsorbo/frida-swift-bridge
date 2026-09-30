@@ -47,10 +47,8 @@ describe("resolveMethod", () => {
     expect(typeName(m.returnType!)).toBe("Swift.String");
   });
 
-  test("rejects a consuming parameter, directing to /abi", () => {
-    expect(() => resolveMethod("fixture.Robot", "absorb")).toThrow(
-      /non-borrowing parameter.*unsupported.*\/abi/s
-    );
+  test("records a consuming parameter's convention", () => {
+    expect(resolveMethod("fixture.Robot", "absorb").argConventions).toEqual(["owned"]);
   });
 
   test("distinguishes a static method", () => {

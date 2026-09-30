@@ -105,14 +105,6 @@ describe("Swift.NativeFunction (marshalled)", () => {
     expect(view.retainCount).toBe(before);
   });
 
-  test("rejects a consuming (__owned) parameter, pointing to /abi", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const Wrapper = typeOf(metadataFor("fixture.Wrapper")!);
-    expect(() =>
-      Swift.NativeFunction(fixtureExport("fixture.consumeWrapper"), Int, [Wrapper])
-    ).toThrow(/non-borrowing parameter[\s\S]*\/abi/);
-  });
-
   test("rejects a class instance where a value type is expected", () => {
     const Int = typeOf(metadataFor("Swift.Int")!);
     const String_ = typeOf(metadataFor("Swift.String")!);

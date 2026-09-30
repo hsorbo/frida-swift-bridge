@@ -93,6 +93,8 @@ public struct Accumulator {
         total += amount
     }
     public func peek(_ x: Int) -> Int { total + x }
+    public func drain(into sink: inout Int) { sink += total }
+    public static func doubled(_ n: inout Int) { n *= 2 }
     public mutating func addEight(_ a: Int, _ b: Int, _ c: Int, _ d: Int, _ e: Int, _ f: Int, _ g: Int, _ h: Int) {
         total += a + b + c + d + e + f + g + h
     }
@@ -341,6 +343,8 @@ public func scaleGeneric<T: Scalable>(_ x: T, by factor: Int) -> Int {
 public final class Box {
     public init() {}
     public func echo<T>(_ x: T) -> T { x }
+    public func kept<T>(_ x: __owned T) -> T { x }
+    public func swapped<T>(_ a: inout T, _ b: inout T) { swap(&a, &b) }
     public func pick<A, B>(_ a: A, _ b: B) -> A { a }
     public func scaled<T: Scalable>(_ x: T, by k: Int) -> Int { x.scaled(by: k) }
     // [T] is a fixed-layout buffer (direct); T? is address-only in the generic callee (indirect).
@@ -1084,6 +1088,8 @@ public final class Robot {
     public static func make(name: String) -> Robot { Robot(name: name) }
     public func merged(with other: Robot) -> String { "\(name)+\(other.name)" }
     public func absorb(_ other: __owned Robot) -> String { other.name }
+    public func doubled(_ n: inout Int) { n *= 2 }
+    public func exclaim(_ s: inout String) { s += "!" }
     public func alias() -> any Named { Widget(label: name) }
     public func at(_ x: Int) -> Int { x }
     public func at(_ x: Int, _ y: Int) -> Int { x + y }
@@ -1579,6 +1585,10 @@ public final class AsyncCalc {
     public func pickLargerAsync<T: Comparable>(_ a: T, _ b: T) async -> T {
         await Task.yield()
         return a >= b ? a : b
+    }
+    public func accumulateAsync(_ total: inout Int) async {
+        await Task.yield()
+        total += base
     }
     public func mapAsync(_ n: Int, _ body: (Int) -> Int) async -> Int {
         await Task.yield()
