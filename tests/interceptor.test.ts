@@ -570,3 +570,56 @@ describe("SwiftInterceptor.attach", () => {
     expect(tokenMatches).toBe(true);
   });
 });
+
+describe("SwiftInterceptor.attach on members of generic types", () => {
+  function hookDuringDrive(symbol: string): { args: SwiftValue[]; ret: CallResult }[] {
+    const calls: { args: SwiftValue[]; ret: CallResult }[] = [];
+    let args: SwiftValue[] = [];
+    const listener = SwiftInterceptor.attach(fixtureExport(symbol), {
+      onEnter(a) {
+        args = a;
+      },
+      onLeave(ret) {
+        calls.push({ args, ret });
+      },
+    });
+    makeSwiftNativeFunction(fixtureExport("fixture.driveKeyed"), metadataFor("Swift.Int")!, [])();
+    listener.detach();
+    return calls;
+  }
+
+  test("a static member of a generic struct receives the type's arguments explicitly", () => {
+    expect(hookDuringDrive("static fixture.Keyed.echo(")).toEqual([{ args: ["a"], ret: "a" }]);
+  });
+
+  test("a generic static member of a generic struct receives the type's arguments before its own", () => {
+    expect(hookDuringDrive("static fixture.Keyed.first<")).toEqual([{ args: [int64(7), "b"], ret: int64(7) }]);
+  });
+
+  test("an initializer of a generic struct has no self to carry the type's arguments", () => {
+    expect(hookDuringDrive("fixture.Keyed.init(")).toEqual([{ args: ["c"], ret: { value: "c" } }]);
+  });
+
+  test("a method of an address-only generic struct recovers the type's arguments from its Self metadata", () => {
+    expect(hookDuringDrive("fixture.Keyed.get(")).toEqual([{ args: [], ret: "c" }]);
+    expect(hookDuringDrive("fixture.Keyed.paired<")).toEqual([{ args: [int64(8)], ret: "c" }]);
+  });
+
+  test("a generic class recovers the type's arguments from its isa or metatype", () => {
+    expect(hookDuringDrive("fixture.KeyedHolder.paired<")).toEqual([{ args: [int64(9)], ret: int64(9) }]);
+    const [make] = hookDuringDrive("fixture.KeyedHolder.make(");
+    expect(make.args).toEqual(["e"]);
+  });
+
+  test("a class argument carries its type arguments, so they are not passed", () => {
+    const [call] = hookDuringDrive("fixture.cellPaired<");
+    expect(call.args[1]).toEqual(int64(10));
+    expect(call.ret).toEqual(int64(10));
+  });
+
+  test("a borrowing method of a fixed-layout generic value hides its type arguments behind self", () => {
+    const scaled = fixtureExport("fixture.PhantomScaled.scaled(");
+    expect(() => SwiftInterceptor.attach(scaled, { onEnter() {} })).toThrow(/fixed-layout generic value passes self by value/);
+    SwiftInterceptor.attach(scaled, { onLeave() {} }).detach();
+  });
+});

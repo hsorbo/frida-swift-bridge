@@ -1137,6 +1137,33 @@ public class GenericHolder<T: Scalable> {
     public func scaledStoredAsync(by k: Int) async -> Int { value.scaled(by: k) }
 }
 public func makeHolder(_ n: Int) -> GenericHolder<Int> { GenericHolder(value: n) }
+
+// The type's parameters are passed ahead of the method's own, unless self carries them: an
+// address-only value's Self metadata, a class's isa or metatype. A class argument carries its own.
+public struct Keyed<T> {
+    public var value: T
+    public init(_ value: T) { self.value = value }
+    public static func echo(_ x: T) -> T { x }
+    public static func first<U>(_ u: U, _ x: T) -> U { u }
+    public func get() -> T { value }
+    public func paired<U>(_ u: U) -> T { value }
+}
+public class KeyedHolder<T> {
+    public var value: T
+    public init(_ value: T) { self.value = value }
+    public func paired<U>(_ u: U) -> U { u }
+    public class func make(_ value: T) -> KeyedHolder<T> { KeyedHolder(value) }
+}
+public func cellPaired<T, U>(_ cell: Cell<T>, _ u: U) -> U { u }
+public func driveKeyed() -> Int {
+    let keyed = Keyed("c")
+    _ = Keyed<String>.echo("a")
+    _ = Keyed<String>.first(7, "b")
+    _ = keyed.get()
+    _ = keyed.paired(8)
+    _ = KeyedHolder<String>.make("e").paired(9)
+    return cellPaired(Cell("f"), 10)
+}
 public final class LabeledHolder: GenericHolder<Int> {
     public let label: String
     public init(value: Int, label: String) { self.label = label; super.init(value: value) }

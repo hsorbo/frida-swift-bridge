@@ -108,18 +108,20 @@ export function hasFixedLayoutInGenericContext(descriptor: ContextDescriptor): b
   return witnesses !== null && !new ValueWitnessTable(witnesses, NULL).isIncomplete;
 }
 
+// One entry per generic parameter in scope, the enclosing contexts' first.
+export function genericParamsAreKey(descriptor: ContextDescriptor): boolean[] {
+  const base = genericHeaderOffset(descriptor);
+  const numParams = descriptor.handle.add(base).readU16();
+  return Array.from(
+    { length: numParams },
+    (_, i) => (descriptor.handle.add(base + OFFSETOF_GENERIC_PARAMS + i).readU8() & FLAG_HAS_KEY_ARGUMENT) !== 0
+  );
+}
+
 export function keyGenericArguments(metadata: Metadata): { typeArguments: Metadata[]; witnessTables: NativePointer[] } {
   const descriptor = metadata.description;
-  const base = genericHeaderOffset(descriptor);
-  const handle = descriptor.handle;
-  const numParams = handle.add(base).readU16();
-  const numKeyArguments = handle.add(base + OFFSETOF_NUM_KEY_ARGUMENTS).readU16();
-  let numKeyParams = 0;
-  for (let i = 0; i < numParams; i++) {
-    if ((handle.add(base + OFFSETOF_GENERIC_PARAMS + i).readU8() & FLAG_HAS_KEY_ARGUMENT) !== 0) {
-      numKeyParams++;
-    }
-  }
+  const numKeyArguments = descriptor.handle.add(genericHeaderOffset(descriptor) + OFFSETOF_NUM_KEY_ARGUMENTS).readU16();
+  const numKeyParams = genericParamsAreKey(descriptor).filter((isKey) => isKey).length;
   const keyArguments: NativePointer[] = [];
   for (let i = 0; i < numKeyArguments; i++) {
     keyArguments.push(metadata.genericArguments.add(i * Process.pointerSize).readPointer());

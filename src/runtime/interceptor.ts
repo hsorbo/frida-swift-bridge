@@ -2,6 +2,8 @@ import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { readValue, embedsManagedReference, SwiftValue } from "../abi/instance.js";
 import { ValueInstance } from "../abi/value.js";
 import { ClassInstance } from "../abi/heap-object.js";
+import { ClassMetadata, classMetadataOf } from "../abi/class-metadata.js";
+import { genericParamsAreKey, hasFixedLayoutInGenericContext } from "../abi/generic-instantiation.js";
 import { decodeThrownError } from "./thrown-error.js";
 import {
   shouldPassIndirectly,
@@ -22,12 +24,14 @@ import {
   hasOpaqueLayout,
   parseFunctionTypeSpelling,
   splitBoundTypeName,
+  splitParamConvention,
+  splitTopLevel,
   REFERENCE_CONTAINERS,
   resolveType,
   SwiftFunctionSignature,
 } from "./symbolication.js";
 import { findType } from "../reflection/registry.js";
-import { ContextDescriptorKind } from "../abi/context-descriptor.js";
+import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject } from "./object-facade.js";
 import { CallResult, SelfOwnership, witnessTableCount } from "./method.js";
@@ -59,7 +63,7 @@ interface Receiver {
 interface CallShape {
   args: TypePlan[];
   ret: TypePlan | null;
-  genericParams: string[];
+  generics: GenericEnvironment;
   throws: boolean;
   receiver: Receiver | null;
 }
@@ -133,6 +137,147 @@ function isIndirectPlan(plan: TypePlan): boolean {
   return plan.kind === "param" || (plan.kind === "use" && plan.indirect);
 }
 
+// After the formal arguments and a trailing self, IRGen passes an address-only value self's Self
+// metadata, then each parameter no argument carries, the enclosing type's before the method's own.
+type ParamSource =
+  | { kind: "passed" }
+  | { kind: "carried"; from: "selfMetadata" | "selfObject" | "selfMetatype" | number; type: ContextDescriptor | null; path: number[] };
+
+interface GenericEnvironment {
+  params: string[];
+  sources: ParamSource[];
+  passesSelfMetadata: boolean;
+  undecodable: string | null;
+}
+
+function genericParamName(depth: number, index: number): string {
+  let name = "";
+  do {
+    name += String.fromCharCode(65 + (index % 26));
+    index = Math.floor(index / 26);
+  } while (index > 0);
+  return depth === 0 ? name : `${name}${depth}`;
+}
+
+// Each generic context opens a depth; a parameter that isn't a key argument is never passed.
+function typeParams(type: ContextDescriptor): { names: string[]; depth: number } {
+  const counts: number[] = [];
+  for (let c: ContextDescriptor | null = type; c !== null; c = c.parent) {
+    if (c.isType && c.isGeneric) {
+      counts.unshift(genericParamsAreKey(c).length);
+    }
+  }
+  const isKey = genericParamsAreKey(type);
+  const names: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (const count of counts) {
+    if (count === start) {
+      continue;
+    }
+    for (let i = start; i < count; i++) {
+      if (isKey[i]) {
+        names.push(genericParamName(depth, i - start));
+      }
+    }
+    start = count;
+    depth++;
+  }
+  return { names, depth };
+}
+
+function nominalArguments(expr: string): string[] | null {
+  if (expr.endsWith("?")) {
+    return [expr.slice(0, -1)];
+  }
+  if (expr.startsWith("[") && expr.endsWith("]")) {
+    return splitTopLevel(expr.slice(1, -1), ":");
+  }
+  const { arguments: args } = splitBoundTypeName(expr);
+  return args.length > 0 && parseFunctionTypeSpelling(expr) === null ? args : null;
+}
+
+function paramPaths(expr: string, params: string[], path: number[]): { param: string; path: number[] }[] {
+  expr = expr.trim();
+  if (params.includes(expr)) {
+    return [{ param: expr, path }];
+  }
+  return (nominalArguments(expr) ?? []).flatMap((arg, i) => paramPaths(arg, params, [...path, i]));
+}
+
+function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOwnership | undefined): GenericEnvironment {
+  const isStatic = /^(static|class) /.test(signature.context);
+  const type = findType(signature.context.replace(/^(static|class) /, "").replace(/< where .*>$/, ""));
+  const outer = type?.isGeneric ? typeParams(type) : { names: [], depth: 0 };
+  const params = [...outer.names, ...signature.genericParams.map((_, i) => genericParamName(outer.depth, i))];
+  const carried = new Map<string, ParamSource>();
+  let passesSelfMetadata = false;
+  let undecodable: string | null = null;
+  if (outer.names.length > 0) {
+    let from: "selfMetadata" | "selfObject" | "selfMetatype" | null = null;
+    if (type!.kind === ContextDescriptorKind.Class) {
+      from = isStatic || signature.name === "__allocating_init" ? "selfMetatype" : "selfObject";
+    } else if (!isStatic && signature.name !== "init") {
+      if (hasFixedLayoutInGenericContext(type!) && ownership !== "mutating") {
+        undecodable = `cannot locate the type arguments of ${signature.context}.${signature.selector}: a fixed-layout generic value passes self by value`;
+      } else {
+        from = "selfMetadata";
+        passesSelfMetadata = true;
+      }
+    }
+    if (from !== null) {
+      outer.names.forEach((name, i) => carried.set(name, { kind: "carried", from: from!, type, path: [i] }));
+    }
+  }
+  signature.argTypeNames.forEach((name, arg) => {
+    const { convention, type: expr } = splitParamConvention(name);
+    const { base, arguments: args } = splitBoundTypeName(expr.trim());
+    const argType = findType(base);
+    if (convention === "inout" || argType?.kind !== ContextDescriptorKind.Class) {
+      return;
+    }
+    for (const { param, path } of args.flatMap((a, i) => paramPaths(a, params, [i]))) {
+      if (!carried.has(param)) {
+        carried.set(param, { kind: "carried", from: arg, type: argType, path });
+      }
+    }
+  });
+  return { params, sources: params.map((p) => carried.get(p) ?? { kind: "passed" }), passesSelfMetadata, undecodable };
+}
+
+function classIn(metadata: ClassMetadata, type: ContextDescriptor): ClassMetadata {
+  for (let c: ClassMetadata | null = metadata; c !== null; c = c.superclass) {
+    if (c.isTypeMetadata && c.description.handle.equals(type.handle.strip())) {
+      return c;
+    }
+  }
+  throw new Error(`${type.fullTypeName} is not a superclass of the object`);
+}
+
+function carriedMetadata(
+  source: Extract<ParamSource, { kind: "carried" }>,
+  context: CpuContext,
+  slotObject: (arg: number) => NativePointer,
+  selfMetadata: Metadata | null
+): Metadata {
+  let handle: NativePointer;
+  if (source.from === "selfMetadata") {
+    handle = selfMetadata!.handle;
+  } else {
+    const metadata =
+      source.from === "selfMetatype"
+        ? new ClassMetadata(selfRegister(context))
+        : classMetadataOf(source.from === "selfObject" ? selfRegister(context) : slotObject(source.from));
+    handle = classIn(metadata, source.type!).handle;
+  }
+  for (const index of source.path) {
+    const args =
+      new Metadata(handle).kind === MetadataKind.Class ? new ClassMetadata(handle).genericArguments : new Metadata(handle).genericArguments;
+    handle = args.add(index * Process.pointerSize).readPointer();
+  }
+  return new Metadata(handle);
+}
+
 function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = false): CallShape {
   const symbol = symbolicate(target);
   if (symbol === null) {
@@ -147,14 +292,15 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
     if (parsed.genericParams.length > 0 && !parsed.simpleGenerics) {
       throw new Error(`unsupported generic signature: ${symbol.demangled}`);
     }
-    const gp = parsed.genericParams;
+    const generics = genericEnvironment(parsed, ownership);
+    const gp = generics.params;
     const args = parsed.argTypeNames.map((n) => planType(n, gp));
     const probe = (metadata: Metadata): SelfOwnership | null =>
       ownership ?? (isAsync ? null : probedOwnership(target, args, parsed, metadata));
     return {
       args,
       ret: parsed.returnTypeName === null ? null : planType(parsed.returnTypeName, gp),
-      genericParams: gp,
+      generics,
       throws: parsed.throws,
       receiver: receiverOf(parsed.context, probe),
     };
@@ -165,11 +311,12 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
     throw new Error(`could not resolve accessor type: ${symbol.demangled}`);
   }
   const member: TypePlan = { kind: "concrete", metadata: memberType };
+  const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null };
   switch (parsed.kind) {
     case "getter":
-      return { args: [], ret: member, genericParams: [], throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
+      return { args: [], ret: member, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
     case "setter":
-      return { args: [member], ret: null, genericParams: [], throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
+      return { args: [member], ret: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
     default:
       throw new Error(`cannot hook a 'modify' accessor (coroutine ABI): ${symbol.demangled}`);
   }
@@ -187,15 +334,23 @@ function receiverOf(context: string, ownership: (metadata: Metadata) => SelfOwne
   return { metadata, trailing: known === null ? null : known !== "mutating" };
 }
 
-// A generic method's type arguments follow a trailing self, so decoding them needs its convention.
-function knownReceiver({ receiver, genericParams }: CallShape, decodesArgs: boolean): Receiver | null {
-  if (receiver?.trailing !== null) {
-    return receiver;
+// A generic method's type arguments follow a trailing self, so locating them needs its convention.
+function unlocatableGenerics({ receiver, generics }: CallShape): string | null {
+  if (generics.undecodable !== null) {
+    return generics.undecodable;
   }
-  if (decodesArgs && genericParams.length > 0) {
-    throw new Error(`cannot tell how a generic method of ${typeName(receiver.metadata)} takes self; pass { self: "borrowing" | "mutating" }`);
+  if (receiver?.trailing === null && generics.params.length > 0) {
+    return `cannot tell how a generic method of ${typeName(receiver.metadata)} takes self; pass { self: "borrowing" | "mutating" }`;
   }
   return null;
+}
+
+function knownReceiver(shape: CallShape, decodesArgs: boolean): Receiver | null {
+  const unlocatable = unlocatableGenerics(shape);
+  if (decodesArgs && unlocatable !== null) {
+    throw new Error(unlocatable);
+  }
+  return shape.receiver?.trailing === null ? null : shape.receiver;
 }
 
 // Decoded only when read. A self in swiftself is still there on leave: the register is callee-saved.
@@ -378,7 +533,7 @@ interface MaterializedArgs {
 function materializeArgs(
   context: CpuContext,
   args: TypePlan[],
-  genericParams: string[],
+  environment: GenericEnvironment,
   startReg = 0,
   receiver: Receiver | null = null
 ): MaterializedArgs {
@@ -420,17 +575,19 @@ function materializeArgs(
     }
   }
 
-  const generics: Metadata[] = [];
-  for (let i = 0; i < genericParams.length; i++) {
-    generics.push(new Metadata(cursor.gp()));
-  }
+  const selfMetadata = environment.passesSelfMetadata ? new Metadata(cursor.gp()) : null;
+  const generics = environment.sources.map((source) =>
+    source.kind === "passed"
+      ? new Metadata(cursor.gp())
+      : carriedMetadata(source, context, (arg) => slots[arg].address.readPointer(), selfMetadata)
+  );
 
   const values = (): SwiftValue[] =>
     slots.map((s) => {
       if (s.plan.kind === "metatype") {
         return decodeMetatype(s.address);
       }
-      const metadata = planMetadata(s.plan, generics, genericParams);
+      const metadata = planMetadata(s.plan, generics, environment.params);
       return metadata.kind === MetadataKind.Class
         ? readValue(metadata, s.address)
         : decodeBorrowedValue(metadata, s.address);
@@ -515,7 +672,8 @@ interface SwiftInvocationState {
 
 function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
   const shape = callShape(target, options.self);
-  const { args, ret, genericParams, throws } = shape;
+  const { args, ret, generics: environment, throws } = shape;
+  const genericParams = environment.params;
   const captureIndirect = returnIsIndirect(ret);
   const returnNeedsGenerics = ret !== null && (ret.kind === "param" || ret.kind === "use") && genericParams.length > 0;
   const decodesArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
@@ -531,7 +689,7 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
             state.indirectReturn = indirectResultRegister(context);
           }
           if (wantsArgs) {
-            const { values, generics, trailingSelf } = materializeArgs(context, args, genericParams, 0, receiver);
+            const { values, generics, trailingSelf } = materializeArgs(context, args, environment, 0, receiver);
             state.generics = generics;
             if (trailingSelf !== null) {
               state.trailingSelf = trailingSelf;
@@ -769,7 +927,8 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
   }
   const code = resolveAsyncEntry(target);
   const shape = callShape(code, options.self, true);
-  const { args, ret, genericParams, throws } = shape;
+  const { args, ret, generics: environment, throws } = shape;
+  const genericParams = environment.params;
 
   const wantsCompletion = callbacks.onComplete !== undefined;
   const indirectReturn = returnIsIndirect(ret);
@@ -810,7 +969,7 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
           const context = this.context;
           let generics: Metadata[] = [];
           if (wantsArgs) {
-            const materialized = materializeArgs(context, args, genericParams, argRegBase, receiver);
+            const materialized = materializeArgs(context, args, environment, argRegBase, receiver);
             generics = materialized.generics;
             if (receiver !== null) {
               exposeSelf(this, receiver, materialized.trailingSelf ?? selfRegister(context));
