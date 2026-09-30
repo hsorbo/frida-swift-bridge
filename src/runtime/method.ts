@@ -74,7 +74,7 @@ import {
   GenericRequirementLayoutKind,
 } from "../abi/generic-requirement-descriptor.js";
 import { WitnessTable } from "../abi/witness-table.js";
-import { genericRequirements } from "../abi/generic-instantiation.js";
+import { genericRequirements, hasFixedLayoutInGenericContext, keyGenericArguments } from "../abi/generic-instantiation.js";
 import type { SwiftType } from "./swift-type.js";
 import { metadataOf } from "./swift-type.js";
 
@@ -2368,9 +2368,10 @@ function genericTypeArguments(receiver: Metadata): { unboundName: string; typePa
   return { unboundName: base, typeParams: typeArguments.map((_, i) => String.fromCharCode(65 + i)), typeArguments };
 }
 
-// Methods on a generic type, no method-level generics. self is always indirect (class: object in
-// x20; value: its bytes, address-only in the generic context). A value type trails its Self metadata
+// Methods on a generic type, no method-level generics. self is indirect (class: object in x20;
+// value: its bytes, address-only in the generic context). A value type trails its Self metadata
 // — the callee reads T's metadata + witnesses from that vector; a class recovers them from the isa.
+// A value type whose layout is fixed in the generic context is routed by bindGenericTypeValueMethod.
 function planGenericTypeMethod(receiver: Metadata, methodName: string, options: RawMethodResolveOptions, trailsSelfMetadata: boolean): GenericMethodPlan {
   const { unboundName, typeParams, typeArguments } = genericTypeArguments(receiver);
   const candidates = matchingMethods(
@@ -2422,10 +2423,16 @@ export function bindGenericTypeValueMethod(
   options: RawValueMethodResolveOptions = {}
 ): GenericBoundMethod | GenericBoundAsyncMethod {
   const plan = planGenericTypeMethod(receiver, methodName, options, true);
+  const routing: SelfRouting = hasFixedLayoutInGenericContext(receiver.description)
+    ? valueSelfRouting(receiver, plan.selector, options.self)
+    : { indirect: true };
+  if (!routing.indirect) {
+    Object.assign(plan, keyGenericArguments(receiver));
+  }
   const consumed = consumedSelf(receiver, options);
   return plan.async
-    ? new GenericBoundAsyncMethod(plan, self, { indirect: true }, consumed)
-    : new GenericBoundMethod(plan, self, { indirect: true }, consumed);
+    ? new GenericBoundAsyncMethod(plan, self, routing, consumed)
+    : new GenericBoundMethod(plan, self, routing, consumed);
 }
 
 export function bindGenericTypeClassMethod(

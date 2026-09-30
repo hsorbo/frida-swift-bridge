@@ -394,6 +394,13 @@ public struct ConstrainedBox<T: Scalable> {
     public func pick() -> T { value }
     public func pick() -> Int { -1 }
 }
+// No stored T, so the layout is fixed in the generic context: a borrowing self rides as a direct
+// trailing arg followed by T's metadata and Scalable witness; a mutating self is inout in x20.
+public struct PhantomScaled<T: Scalable> {
+    public var raw: Int
+    public func scaled(_ x: T, by k: Int) -> Int { raw + x.scaled(by: k) }
+    public mutating func bump(_ x: T) { raw += x.scaled(by: 1) }
+}
 
 public func makeScaleGeneric() -> Int {
     return scaleGeneric(6, by: 7)
@@ -1174,6 +1181,7 @@ import ObjectiveC
 public final class ObjCConformer: NSObject {}
 public struct ObjCProtocolBox<T: NSObjectProtocol> {
     public var value: T
+    public func holds(_ x: T) -> Bool { value.isEqual(x) }
 }
 extension Box {
     public func scaledIfObject<T: NSObjectProtocol, U: Scalable>(_ x: T, _ u: U, by k: Int) -> Int {
@@ -1196,6 +1204,7 @@ public final class ObjCRefBox<T: NSObjectProtocol> {
 }
 public enum ObjCBoxes {
     public static func conformerRefBox(_ c: ObjCConformer) -> ObjCRefBox<ObjCConformer> { ObjCRefBox(value: c) }
+    public static func conformerValueBox(_ c: ObjCConformer) -> ObjCProtocolBox<ObjCConformer> { ObjCProtocolBox(value: c) }
 }
 #endif
 

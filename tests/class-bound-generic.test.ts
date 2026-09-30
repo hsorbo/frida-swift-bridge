@@ -96,6 +96,15 @@ describe("class-bound generic parameters of Objective-C types", () => {
     expect((holder.held() as SwiftObject).$handle.equals(conformer.$handle)).toBe(true);
   });
 
+  test("a method of a generic struct whose only field is class-bound passes self directly", (ctx) => {
+    requireDarwin(ctx);
+    const conformer = classType("fixture.ObjCConformer").init();
+    const other = classType("fixture.ObjCConformer").init();
+    const valueBox = (Swift.type("fixture.ObjCBoxes") as EnumType).call("conformerValueBox", conformer) as SwiftObject;
+    expect(valueBox.$method("holds", { self: "borrowing" }).call(conformer)).toBe(true);
+    expect(valueBox.$method("holds", { self: "borrowing" }).call(other)).toBe(false);
+  });
+
   test("a pure Objective-C class is a type argument", (ctx) => {
     requireDarwin(ctx);
     const NSObject = typeOf(resolveType("__C.NSObject")!);

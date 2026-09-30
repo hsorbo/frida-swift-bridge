@@ -48,6 +48,29 @@ describe("methods on a generic value type", () => {
   });
 });
 
+describe("methods on a generic value type with a fixed layout in its generic context", () => {
+  beforeEach(() => { loadFixture(); });
+
+  function phantomScaled(raw: number): ValueInstance {
+    return ValueInstance.fromJS(metadataFor("fixture.PhantomScaled", [metadataFor("Swift.Int")!])!, { raw });
+  }
+
+  test("a borrowing self is a direct trailing arg, followed by T's metadata and Scalable witness", () => {
+    // 10 + 3.scaled(by: 7) = 31.
+    expect(phantomScaled(10).method("scaled", { self: "borrowing" }).call(3, 7)).toEqual(int64(31));
+  });
+
+  test("a mutating self is inout in x20 with Self metadata trailing", () => {
+    const value = phantomScaled(10);
+    value.method("bump", { self: "mutating" }).call(3);
+    expect(value.field("raw").read()).toEqual(int64(13));
+  });
+
+  test("the self option is required", () => {
+    expect(() => phantomScaled(10).method("scaled")).toThrow('$method("scaled", { self: "borrowing" }).call(...)');
+  });
+});
+
 describe("methods on a generic class", () => {
   test("self in x20, Self metadata + (T: Scalable) witness recovered from the object isa", () => {
     // 3.scaled(by: 7) = 21, with no trailing type args.

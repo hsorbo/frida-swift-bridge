@@ -7,9 +7,11 @@ import {
   readGenericRequirementDescriptors,
   resolveProtocolConstraint,
 } from "./generic-requirement-descriptor.js";
-import { RelativeDirectPointer } from "../basic/relative-pointer.js";
+import { ValueWitnessTable } from "./value-witness.js";
+import { RelativeDirectPointer, RelativeIndirectablePointer } from "../basic/relative-pointer.js";
 
 const OFFSETOF_NUM_REQUIREMENTS = 0x2;
+const OFFSETOF_NUM_KEY_ARGUMENTS = 0x4;
 const OFFSETOF_HEADER_FLAGS = 0x6;
 const OFFSETOF_GENERIC_PARAMS = 0x8;
 
@@ -33,6 +35,8 @@ const SIZEOF_CONDITIONAL_INVERTIBLE_PROTOCOL_SET = 0x2;
 const SIZEOF_CONDITIONAL_REQUIREMENT_COUNT = 0x2;
 const SIZEOF_VALUE_HEADER = 0x4;
 const SIZEOF_VALUE_DESCRIPTOR = 0x4;
+
+const OFFSETOF_PATTERN_VALUE_WITNESSES = 0xc;
 
 // Params are padded to a 4-byte boundary before the requirements array begins.
 function genericRequirementsOffset(paramsOffset: number, numParams: number): number {
@@ -94,6 +98,37 @@ export function genericRequirements(descriptor: ContextDescriptor): GenericRequi
   const paramsOffset = base + OFFSETOF_GENERIC_PARAMS;
   const requirementsOffset = genericRequirementsOffset(paramsOffset, numParams);
   return readGenericRequirementDescriptors(handle.add(requirementsOffset), numRequirements);
+}
+
+// The instantiation pattern's witnesses describe the type in its own generic context, and are
+// Incomplete exactly when its layout depends on the generic arguments.
+export function hasFixedLayoutInGenericContext(descriptor: ContextDescriptor): boolean {
+  const patternField = descriptor.handle.add(genericHeaderOffset(descriptor) - RelativeDirectPointer.sizeOf);
+  const pattern = RelativeDirectPointer.resolve(patternField);
+  const witnesses = pattern === null ? null : RelativeIndirectablePointer.resolve(pattern.add(OFFSETOF_PATTERN_VALUE_WITNESSES));
+  return witnesses !== null && !new ValueWitnessTable(witnesses, NULL).isIncomplete;
+}
+
+export function keyGenericArguments(metadata: Metadata): { typeArguments: Metadata[]; witnessTables: NativePointer[] } {
+  const descriptor = metadata.description;
+  const base = genericHeaderOffset(descriptor);
+  const handle = descriptor.handle;
+  const numParams = handle.add(base).readU16();
+  const numKeyArguments = handle.add(base + OFFSETOF_NUM_KEY_ARGUMENTS).readU16();
+  let numKeyParams = 0;
+  for (let i = 0; i < numParams; i++) {
+    if ((handle.add(base + OFFSETOF_GENERIC_PARAMS + i).readU8() & FLAG_HAS_KEY_ARGUMENT) !== 0) {
+      numKeyParams++;
+    }
+  }
+  const keyArguments: NativePointer[] = [];
+  for (let i = 0; i < numKeyArguments; i++) {
+    keyArguments.push(metadata.genericArguments.add(i * Process.pointerSize).readPointer());
+  }
+  return {
+    typeArguments: keyArguments.slice(0, numKeyParams).map((h) => new Metadata(h)),
+    witnessTables: keyArguments.slice(numKeyParams),
+  };
 }
 
 export function buildGenericMetadata(
