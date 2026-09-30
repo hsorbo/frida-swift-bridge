@@ -99,6 +99,8 @@ export {
   SwiftInterceptorApi,
   SwiftInvocationCallbacks,
   SwiftAsyncCallbacks,
+  SwiftInvocationContext,
+  SwiftInterceptorOptions,
 } from "./runtime/interceptor.js";
 export { isSwiftObject } from "./runtime/method.js";
 export type { ModuleRegistry, ModuleNamespace, ModuleMember } from "./runtime/module-namespace.js";

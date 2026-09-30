@@ -1737,3 +1737,12 @@ public struct CodableCard: Codable {
 
     public var hiddenDoubled: Int { Hidden(n: 21).n * 2 }
 }
+
+// Accessors with bodies big enough to hook; a stored property's are one or two instructions.
+public struct Gauge {
+    public var raw: Int
+    public var level: Int {
+        get { raw / 2 + raw % 7 }
+        set { raw = newValue * 2 + newValue % 3 }
+    }
+}

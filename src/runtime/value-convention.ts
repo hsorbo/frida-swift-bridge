@@ -384,12 +384,30 @@ function traceEntryRegisterUses(
 
 // An unbound lazy-binding slot points back into its own image's PLT, whose resolver saves every
 // argument register; only a slot already bound to another image is followed.
+// -Onone code on x86-64 Darwin calls memset before its first use of self. Like any C function it
+// returns with the callee-saved registers intact; it is known by the address imports bind to, which
+// Darwin reaches through a resolver stub in the same image.
 function resolvedFlow(kind: "jump" | "call", insn: Instruction, constant: Constant | undefined): Flow {
+  if (kind === "jump" && constant !== undefined && memoryFills().has(constant.value.strip().toString())) {
+    return { kind: "return" };
+  }
   const targetImage = constant && Process.findModuleByAddress(constant.value);
   if (!targetImage || (constant!.loaded && targetImage.base.equals(Process.findModuleByAddress(insn.address)?.base ?? NULL))) {
     return { kind: "stop" };
   }
   return { kind, target: constant!.value };
+}
+
+let memoryFillAddresses: Set<string> | null = null;
+
+function memoryFills(): Set<string> {
+  if (memoryFillAddresses === null) {
+    const dlsym = new NativeFunction(Module.getGlobalExportByName("dlsym"), "pointer", ["pointer", "pointer"]);
+    const defaultHandle = Process.platform === "darwin" ? NULL.sub(2) : NULL;
+    const addresses = ["memset", "bzero"].map((name) => dlsym(defaultHandle, Memory.allocUtf8String(name)) as NativePointer);
+    memoryFillAddresses = new Set(addresses.filter((a) => !a.isNull()).map((a) => a.strip().toString()));
+  }
+  return memoryFillAddresses;
 }
 
 // A frame saves each callee-saved register once; storing its entry value again spills it as data

@@ -2008,6 +2008,10 @@ function objCRuntimeName(swiftName: string): string {
   return `_TtP${swiftName.split(".").map((part) => `${part.length}${part}`).join("")}_`;
 }
 
+export function witnessTableCount(signature: SwiftFunctionSignature): number {
+  return signature.conformanceRequirements.filter((req) => requirementBound(req).witnessed !== null).length;
+}
+
 function autoWitnessTables(
   signature: SwiftFunctionSignature,
   typeArguments: Metadata[]

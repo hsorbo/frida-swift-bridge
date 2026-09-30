@@ -754,8 +754,26 @@ Swift.Interceptor.attach(addr, {
 });
 ```
 
+A method's or accessor's receiver is `this.self` in both callbacks: a facade
+for a class, and decoded like an argument for a value. For a mutating method,
+`onLeave` sees the updated value:
+
+```js
+Swift.Interceptor.attach(acc.$method("add").address, {
+    onEnter(args) { console.log("before", this.self.total); },
+    onLeave() { console.log("after", this.self.total); },
+});
+```
+
+A small value type's `self` goes by address when the method mutates it and in
+the argument registers otherwise, and the symbol doesn't say which. The bridge
+reads the method's code as for [calls](#calling-methods). When the code doesn't
+tell, `this.self` is `undefined`. For a generic method `attach` throws instead,
+because the type arguments come after `self`. Pass
+`{ self: "borrowing" | "mutating" }` as a third argument to say which.
+
 For async functions, `Swift.Interceptor.attachAsync(target, callbacks)` provides
-`onEnter(args, context)`, `onFirstSuspend()`, and `onComplete(retval, error?)`,
+`onEnter(args, context)` (with `this.self`), `onFirstSuspend()`, and `onComplete(retval, error?)`,
 so you observe the real completion after the continuation resumes rather than
 the initial suspend. See `tests/async-interceptor.test.ts`.
 
