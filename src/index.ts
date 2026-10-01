@@ -166,7 +166,7 @@ export const Swift = {
 
   *enumerateClasses(module?: Module): Generator<ClassType> {
     for (const descriptor of nameable(swiftClasses(module))) {
-      yield new ClassType(descriptor);
+      yield typeFromDescriptor(descriptor) as ClassType;
     }
   },
 
@@ -176,7 +176,7 @@ export const Swift = {
 
   *enumerateStructs(module?: Module): Generator<StructType> {
     for (const descriptor of nameable(swiftStructs(module))) {
-      yield new StructType(descriptor);
+      yield typeFromDescriptor(descriptor) as StructType;
     }
   },
 
@@ -186,7 +186,7 @@ export const Swift = {
 
   *enumerateEnums(module?: Module): Generator<EnumType> {
     for (const descriptor of nameable(swiftEnums(module))) {
-      yield new EnumType(descriptor);
+      yield typeFromDescriptor(descriptor) as EnumType;
     }
   },
 

@@ -301,7 +301,7 @@ export class ObjCClassWrapperType extends SwiftType {
 export class ForeignClassType extends SwiftType {
   get $superClass(): ForeignClassType | null {
     const superclass = metadataOf(this).handle.add(2 * Process.pointerSize).readPointer().strip();
-    return superclass.isNull() ? null : new ForeignClassType(new Metadata(superclass));
+    return superclass.isNull() ? null : (typeOf(new Metadata(superclass)) as ForeignClassType);
   }
 }
 
@@ -678,7 +678,19 @@ export function swiftFunction(
     callMarshalled(argMetadata, args, returnMetadata, (argPtrs) => raw(...argPtrs), conventions);
 }
 
-export function typeFromDescriptor(descriptor: ContextDescriptor): SwiftType {
+const wrappers = new Map<string, SwiftType>();
+
+function cachedWrapper<T extends SwiftType>(key: NativePointer, make: () => T): T {
+  const id = key.toString();
+  let wrapper = wrappers.get(id);
+  if (wrapper === undefined) {
+    wrapper = make();
+    wrappers.set(id, wrapper);
+  }
+  return wrapper as T;
+}
+
+function wrapperFromDescriptor(descriptor: ContextDescriptor): SwiftType {
   switch (descriptor.kind) {
     case ContextDescriptorKind.Class:
       return new ClassType(descriptor);
@@ -691,7 +703,11 @@ export function typeFromDescriptor(descriptor: ContextDescriptor): SwiftType {
   }
 }
 
-export function typeOf(metadata: Metadata): SwiftType {
+export function typeFromDescriptor(descriptor: ContextDescriptor): SwiftType {
+  return cachedWrapper(descriptor.handle, () => wrapperFromDescriptor(descriptor));
+}
+
+function wrapperFromMetadata(metadata: Metadata): SwiftType {
   switch (metadata.kind) {
     case MetadataKind.Struct:
       return new StructType(metadata);
@@ -718,4 +734,33 @@ export function typeOf(metadata: Metadata): SwiftType {
     default:
       return new SwiftType(metadata);
   }
+}
+
+function nominalDescriptorOf(metadata: Metadata): ContextDescriptor | null {
+  switch (metadata.kind) {
+    case MetadataKind.Struct:
+    case MetadataKind.Enum:
+    case MetadataKind.Optional:
+      return metadata.description;
+    case MetadataKind.Class: {
+      const cls = new ClassMetadata(metadata.handle);
+      return cls.isTypeMetadata ? cls.description : null;
+    }
+    default:
+      return null;
+  }
+}
+
+// A non-generic nominal type has one wrapper, shared by its descriptor and its metadata; every
+// generic specialization and every structural type is keyed by its runtime-uniqued metadata.
+export function typeOf(metadata: Metadata): SwiftType {
+  const descriptor = nominalDescriptorOf(metadata);
+  if (descriptor === null || descriptor.isGeneric) {
+    return cachedWrapper(metadata.handle, () => wrapperFromMetadata(metadata));
+  }
+  const wrapper = cachedWrapper(descriptor.handle, () => wrapperFromMetadata(metadata));
+  const state = rawState.get(wrapper)!;
+  state.metadata ??= metadata;
+  state.descriptor ??= descriptor;
+  return wrapper;
 }

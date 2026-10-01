@@ -230,3 +230,39 @@ describe("type-level member lookups by kind", () => {
     expect(Accumulator.$typeMethods()).not.toContain("peek(_:)");
   });
 });
+
+describe("type wrapper identity", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("one descriptor yields one wrapper, shared with its instances' $type", () => {
+    const Robot = Swift.type("fixture.Robot") as ClassType;
+    expect(Swift.type("fixture.Robot")).toBe(Robot);
+    expect(Swift.modules.fixture.Robot).toBe(Robot);
+    expect(Robot.init("R2").$type).toBe(Robot);
+    expect(typeOf(metadataFor("fixture.Robot")!)).toBe(Robot);
+  });
+
+  test("a value's $type is the wrapper its name resolves to", () => {
+    const Rect = Swift.type("fixture.Rect") as StructType;
+    expect(Rect.$new({ width: 1, height: 2 }).$type).toBe(Rect);
+  });
+
+  test("a metadata-backed wrapper joins the descriptor's entry with its metadata realized", () => {
+    const metadata = metadataFor("fixture.Point")!;
+    const fromMetadata = typeOf(metadata);
+    expect(Swift.type("fixture.Point")).toBe(fromMetadata);
+    expect(metadataOf(fromMetadata).handle.equals(metadata.handle)).toBe(true);
+  });
+
+  test("each specialization of a generic type is its own wrapper, apart from the unbound one", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const pairOfInt = typeOf(metadataFor("fixture.Pair", [Int])!);
+    expect(typeOf(metadataFor("fixture.Pair", [Int])!)).toBe(pairOfInt);
+    expect(Swift.type("fixture.Pair")).not.toBe(pairOfInt);
+    expect(typeOf(metadataFor("fixture.Pair", [metadataFor("Swift.String")!])!)).not.toBe(pairOfInt);
+  });
+
+  test("runtime-uniqued structural metadata yields one wrapper", () => {
+    expect(typeOf(mangledType("Si_Sit"))).toBe(typeOf(mangledType("Si_Sit")));
+  });
+});
