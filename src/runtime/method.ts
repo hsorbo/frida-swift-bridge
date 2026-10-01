@@ -798,12 +798,16 @@ function definingModuleMembers(fullName: string): TypeMembers {
     throw new Error(`no module owns ${fullName}`);
   }
   const token = mangledTypeToken(descriptor);
-  let members = scanMembers(module, fullName, token);
-  if (token !== null && members.methods.length === 0 && members.accessors.length === 0) {
-    members = scanMembers(module, fullName, null);
-  }
+  const members = scanMembers(module, fullName, token === null || tokenIsSpelled(module, token) ? token : null);
   tableCache.set(fullName, members);
   return members;
+}
+
+// A spelling the runtime and the compiler disagree on (a private discriminator, say) diverges for all
+// of a type's symbols or none, so a token no symbol leads with is what calls for the unfiltered scan;
+// a type with symbols but no members is not.
+function tokenIsSpelled(module: Module, token: string): boolean {
+  return swiftExportsOfTokens(module, [token])[0].length > 0 || initializerSymbolsWithPrefix(module, `$s${token}`).length > 0;
 }
 
 function scanMembers(module: Module, fullName: string, token: string | null): TypeMembers {
@@ -3365,3 +3369,4 @@ export function classifyWitnessOrigin(table: WitnessTable, requirement: Protocol
     ? { kind: "default", symbol: demangled, dispatch }
     : { kind: "override", symbol: demangled, dispatch };
 }
+
