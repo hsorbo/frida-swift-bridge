@@ -31,7 +31,7 @@ import {
   bindConformanceMethod,
 } from "./method.js";
 import { findType, swiftTypes } from "../reflection/registry.js";
-import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache, FacadeMembers, FacadeCallable } from "./facade-members.js";
+import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 import {
   NominalType,
   ClassType,
@@ -376,11 +376,8 @@ export function typeFacade<T extends SwiftTypeFacade>(target: T): T {
   return new Proxy(target, typeFacadeHandler as ProxyHandler<T>);
 }
 
-interface TypeFacadeState {
-  members: FacadeMembers;
-  callable: (name: string) => FacadeCallable;
+interface TypeFacadeState extends MemberProxyParts<SwiftTypeFacade> {
   cases: Map<string, boolean> | null;
-  has: (key: string) => boolean;
 }
 
 const typeFacadeStates = new WeakMap<SwiftTypeFacade, TypeFacadeState>();
@@ -390,9 +387,30 @@ function typeFacadeState(target: SwiftTypeFacade): TypeFacadeState {
   if (state === undefined) {
     state = {
       members: facadeMembers(() => target.$type.name, true),
+      reserved: RESERVED,
       callable: callableCache((method, args) => target.$typeMethod(method, invokeOptions(args)).call(...args)),
       cases: null,
       has: (key) => typeFacadeHas(target, key),
+      bridgeMember: (t, key) => {
+        if (key === "hasOwnProperty") {
+          return typeFacadeState(t).has;
+        }
+        const member = Reflect.get(t, key, t);
+        return typeof member === "function" && key !== "constructor" ? member.bind(t) : member;
+      },
+      read: (key) => getStaticProperty(metadataOf(target.$type), key),
+      write: (key, value) => setStaticProperty(metadataOf(target.$type), key, value),
+      fallback: (t, key) => {
+        const hasPayload = enumCases(t).get(key);
+        if (hasPayload !== undefined) {
+          const enumType = t as SwiftEnum;
+          return hasPayload ? (payload: SwiftValue) => enumType.$case(key, payload) : enumType.$case(key);
+        }
+        return nestedType(t, key) ?? undefined;
+      },
+      ownKeys: (t, own) => [...new Set([...own.methods, ...own.properties, ...enumCases(t).keys(), ...nestedTypeNames(t)])],
+      owner: () => target.$type.name,
+      propertyNoun: "static property",
     };
     typeFacadeStates.set(target, state);
   }
@@ -440,61 +458,4 @@ function typeFacadeHas(target: SwiftTypeFacade, key: string): boolean {
   return m.methods.has(key) || m.properties.has(key) || enumCases(target).has(key) || nestedType(target, key) !== null;
 }
 
-const typeFacadeHandler: ProxyHandler<SwiftTypeFacade> = {
-  has(t, key) {
-    return typeof key === "string" ? typeFacadeHas(t, key) : Reflect.has(t, key);
-  },
-  get(t, key) {
-    if (typeof key === "symbol") {
-      return Reflect.get(t, key);
-    }
-    if (key === "hasOwnProperty") {
-      return typeFacadeState(t).has;
-    }
-    if (isBridgeMember(key, RESERVED)) {
-      const member = Reflect.get(t, key, t);
-      return typeof member === "function" && key !== "constructor" ? member.bind(t) : member;
-    }
-    if (POISON.has(key)) {
-      return undefined;
-    }
-    const state = typeFacadeState(t);
-    const m = state.members.including(key);
-    if (m.properties.has(key)) {
-      return getStaticProperty(metadataOf(t.$type), key);
-    }
-    if (m.methods.has(key)) {
-      return state.callable(key);
-    }
-    const hasPayload = enumCases(t).get(key);
-    if (hasPayload !== undefined) {
-      const enumType = t as SwiftEnum;
-      return hasPayload ? (payload: SwiftValue) => enumType.$case(key, payload) : enumType.$case(key);
-    }
-    return nestedType(t, key) ?? undefined;
-  },
-  set(t, key, value) {
-    if (typeof key !== "string") {
-      return false;
-    }
-    const m = isBridgeMember(key, RESERVED) || POISON.has(key) ? null : typeFacadeState(t).members.including(key);
-    if (m === null || !m.properties.has(key)) {
-      throw new Error(`no static property ${key} on ${t.$type.name}`);
-    }
-    if (!m.writableProperties.has(key)) {
-      throw new Error(`${key} on ${t.$type.name} is read-only`);
-    }
-    setStaticProperty(metadataOf(t.$type), key, value);
-    return true;
-  },
-  ownKeys(t) {
-    const m = typeFacadeState(t).members.own();
-    return [...new Set([...m.methods, ...m.properties, ...enumCases(t).keys(), ...nestedTypeNames(t)])];
-  },
-  getOwnPropertyDescriptor(t, key) {
-    if (typeof key !== "string" || !typeFacadeHas(t, key)) {
-      return undefined;
-    }
-    return { writable: typeFacadeState(t).members.own().writableProperties.has(key), configurable: true, enumerable: true };
-  },
-};
+const typeFacadeHandler = memberProxyHandler<SwiftTypeFacade>(typeFacadeState);

@@ -81,6 +81,75 @@ export function facadeMembers(typeName: () => string, isStatic: boolean): Facade
 
 export type FacadeCallable = (...args: CallArg[]) => CallResult | Promise<CallResult>;
 
+// What a facade's proxy needs from its target: the Swift member index and how to read, write and
+// call a member, plus its own bridge members and the keys only it answers (enum cases, nested types).
+export interface MemberProxyParts<T extends object> {
+  members: FacadeMembers;
+  reserved: Set<string>;
+  has(key: string): boolean;
+  bridgeMember(target: T, key: string | symbol): unknown;
+  read(key: string): CallResult;
+  write(key: string, value: CallArg): void;
+  callable(key: string): FacadeCallable;
+  fallback(target: T, key: string): unknown;
+  ownKeys(target: T, own: MemberIndex): string[];
+  owner(): string;
+  propertyNoun: string;
+}
+
+// Swift members answer to their bare names and resolve when read; the bridge's own are $-prefixed
+// or reserved; POISON names are never members.
+export function memberProxyHandler<T extends object>(partsOf: (target: T) => MemberProxyParts<T>): ProxyHandler<T> {
+  return {
+    has(t, key) {
+      return typeof key === "string" ? partsOf(t).has(key) : Reflect.has(t, key);
+    },
+    get(t, key) {
+      const parts = partsOf(t);
+      if (typeof key === "symbol" || isBridgeMember(key, parts.reserved)) {
+        return parts.bridgeMember(t, key);
+      }
+      if (POISON.has(key)) {
+        return undefined;
+      }
+      const m = parts.members.including(key);
+      if (m.properties.has(key)) {
+        return parts.read(key);
+      }
+      if (m.methods.has(key)) {
+        return parts.callable(key);
+      }
+      return parts.fallback(t, key);
+    },
+    set(t, key, value) {
+      if (typeof key !== "string") {
+        return false;
+      }
+      const parts = partsOf(t);
+      const m = isBridgeMember(key, parts.reserved) || POISON.has(key) ? null : parts.members.including(key);
+      if (m === null || !m.properties.has(key)) {
+        throw new Error(`no ${parts.propertyNoun} ${key} on ${parts.owner()}`);
+      }
+      if (!m.writableProperties.has(key)) {
+        throw new Error(`${key} on ${parts.owner()} is read-only`);
+      }
+      parts.write(key, value as CallArg);
+      return true;
+    },
+    ownKeys(t) {
+      const parts = partsOf(t);
+      return parts.ownKeys(t, parts.members.own());
+    },
+    getOwnPropertyDescriptor(t, key) {
+      const parts = partsOf(t);
+      if (typeof key !== "string" || !parts.has(key)) {
+        return undefined;
+      }
+      return { writable: parts.members.own().writableProperties.has(key), configurable: true, enumerable: true };
+    },
+  };
+}
+
 // One function per name, so a facade's method compares equal to itself across reads.
 export function callableCache(invoke: (name: string, args: CallArg[]) => CallResult | Promise<CallResult>): (name: string) => FacadeCallable {
   const callables = new Map<string, FacadeCallable>();

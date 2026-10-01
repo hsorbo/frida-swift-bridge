@@ -12,7 +12,7 @@ import {
   splitSelector,
 } from "./method.js";
 import { SwiftType, NominalType, ClassType, StructType, EnumType } from "./swift-type.js";
-import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache } from "./facade-members.js";
+import { POISON, invokeOptions, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 
 const RESERVED = new Set([
   "toString",
@@ -141,11 +141,18 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
     return m.methods.has(key) || m.properties.has(key);
   };
 
-  const proxy = new Proxy(target, {
-    has(t, key) {
-      return typeof key === "string" ? has(key) : Reflect.has(t, key);
-    },
-    get(t, key) {
+  const parts: MemberProxyParts<typeof target> = {
+    members,
+    reserved: RESERVED,
+    has,
+    read: readProperty,
+    write: writeProperty,
+    callable,
+    fallback: () => undefined,
+    ownKeys: (_t, own) => ["$handle", ...own.methods, ...own.properties],
+    owner: fullName,
+    propertyNoun: "property",
+    bridgeMember(t, key) {
       if (typeof key === "symbol") {
         if (key === RAW) {
           return t;
@@ -195,42 +202,9 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
         case "constructor":
           return Reflect.get(t, key);
       }
-      if (key.startsWith("$") || POISON.has(key)) {
-        return undefined;
-      }
-      const m = members.including(key);
-      if (m.properties.has(key)) {
-        return readProperty(key);
-      }
-      if (m.methods.has(key)) {
-        return callable(key);
-      }
       return undefined;
     },
-    set(_t, key, v) {
-      if (typeof key !== "string") {
-        return false;
-      }
-      const m = isBridgeMember(key, RESERVED) || POISON.has(key) ? null : members.including(key);
-      if (m === null || !m.properties.has(key)) {
-        throw new Error(`no property ${key} on ${fullName()}`);
-      }
-      if (!m.writableProperties.has(key)) {
-        throw new Error(`${key} on ${fullName()} is read-only`);
-      }
-      writeProperty(key, v);
-      return true;
-    },
-    ownKeys() {
-      const m = members.own();
-      return ["$handle", ...m.methods, ...m.properties];
-    },
-    getOwnPropertyDescriptor(_t, key) {
-      if (typeof key !== "string" || !has(key)) {
-        return undefined;
-      }
-      return { writable: members.own().writableProperties.has(key), configurable: true, enumerable: true };
-    },
-  });
+  };
+  const proxy = new Proxy(target, memberProxyHandler(() => parts));
   return proxy as unknown as SwiftObject;
 }

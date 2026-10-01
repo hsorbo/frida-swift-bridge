@@ -4,13 +4,11 @@ import { findType, swiftTypes } from "../reflection/registry.js";
 import { typeFromDescriptor } from "./swift-type.js";
 import { SwiftTypeFacade } from "./type-facade.js";
 import { Protocol, StableProtocol } from "./protocol.js";
+import { POISON } from "./facade-members.js";
 
 export type ModuleMember = SwiftTypeFacade | StableProtocol;
 export type ModuleNamespace = { readonly [name: string]: ModuleMember };
 export type ModuleRegistry = { readonly [module: string]: ModuleNamespace };
-
-// A synthesized `then` would make a namespace thenable and silently break `await`.
-const POISON = new Set(["then", "catch", "finally"]);
 
 const ENUMERABLE = { writable: false, configurable: true, enumerable: true };
 
