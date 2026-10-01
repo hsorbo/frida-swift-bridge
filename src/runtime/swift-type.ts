@@ -225,6 +225,10 @@ export abstract class NominalType extends SwiftType {
     return getStaticProperty(metadataOf(this), name);
   }
 
+  $set(name: string, value: CallArg): void {
+    setStaticProperty(metadataOf(this), name, value);
+  }
+
   abstract $typeMethod(name: string, options?: MemberLookupOptions): SwiftBoundMethod;
   abstract $initializer(options?: MemberLookupOptions): SwiftBoundInitializer | SwiftClassBoundInitializer;
   protected abstract hasInitializer(labels: string[]): boolean;

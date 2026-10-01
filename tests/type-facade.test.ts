@@ -30,6 +30,17 @@ describe("Swift type member sugar", () => {
     expect(Duckling.nursery).toBe("duck nursery");
   });
 
+  test("$set mirrors assignment to a static var", () => {
+    const Duckling = Swift.type("fixture.Duckling")!;
+    Duckling.$set("flockSize", 14);
+    try {
+      expect(Duckling.$get("flockSize")).toEqual(int64(14));
+    } finally {
+      Duckling.flockSize = 12;
+    }
+    expect(() => Duckling.$set("motto", "quark")).toThrow("no static setter for motto on fixture.Duckling");
+  });
+
   test("assigns a static var through its setter; a let and an unknown name throw", () => {
     const Duckling = Swift.type("fixture.Duckling")!;
     Duckling.flockSize = 13;

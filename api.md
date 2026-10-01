@@ -228,7 +228,8 @@ On a `NominalType`:
   `type.$initializer(options?)`: look up one member of that kind. See
   [Calling methods](#calling-methods).
 - `type.$properties`: the properties as `{ name, typeName, isStatic, writable }`.
-- `type.$get(name)`: reads a static property.
+- `type.$get(name)` / `type.$set(name, value)`: read a static property, write a
+  static `var`.
 
 The lists span every loaded module: they include members that other modules
 add in extensions, and members a conformed-to protocol provides through a
@@ -628,6 +629,7 @@ const Robot = Swift.type("MyApp.Robot");
 Robot.fleetSize;              // 12
 Robot.$get("fleetSize");      // the same, by name
 Robot.fleetSize = 13;
+Robot.$set("fleetSize", 13);  // the same, by name
 ```
 
 For direct access to a stored field's storage, `$field(name)` returns a live
