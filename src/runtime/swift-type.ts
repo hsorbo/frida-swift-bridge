@@ -30,6 +30,8 @@ import {
   getStaticProperty,
   lowerResolveOptions,
   findMethod,
+  findMember,
+  FoundMember,
   bindConformanceMethod,
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
@@ -167,10 +169,23 @@ export class SwiftType {
 
 export class ValueType extends SwiftType {
   method(name: string, options: MethodResolveOptions = {}): SwiftBoundMethod {
+    const raw = lowerResolveOptions(options);
+    // An initializer is not a static member, so it is matched without the static filter.
+    const lookup = name === "init" ? raw : { ...raw, static: true };
     if (isUnboundGeneric(this)) {
-      return unboundGenericMethod(this.name, name, lowerResolveOptions({ ...options, static: true }));
+      return unboundGenericMethod(this.name, name, lookup);
     }
-    return narrowBoundMethod(bindStaticMethod(metadataOf(this), name, lowerResolveOptions(options)));
+    if (findMethod(this.name, name, lookup) === null) {
+      const generic = genericMember(this.name, name, lookup);
+      if (generic !== null) {
+        return generic;
+      }
+    }
+    if (name === "init") {
+      const init = bindValueInitializer(metadataOf(this), raw);
+      return { address: init.address, origin: init.resolved.origin!, call: (...args) => init.call(...args) };
+    }
+    return narrowBoundMethod(bindStaticMethod(metadataOf(this), name, raw));
   }
 
   call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
@@ -399,7 +414,7 @@ export class ClassType extends SwiftType {
     const resolved = findMethod(this.fullName, name, raw);
     const selfMetadata = metadataOf(this).handle;
     if (resolved === null) {
-      return narrowBoundMethod(bindConformanceMethod(this.fullName, selfMetadata, name, raw));
+      return genericMember(this.fullName, name, raw) ?? narrowBoundMethod(bindConformanceMethod(this.fullName, selfMetadata, name, raw));
     }
     return narrowBoundMethod(
       resolved.async === true
@@ -537,24 +552,37 @@ function isUnboundGeneric(type: SwiftType): boolean {
   return state.metadata === null && state.descriptor !== null && state.descriptor.isGeneric;
 }
 
-// Every specialization shares a member's unspecialized code, so it is found (and hookable) without
-// type arguments; calling it would need them as self metadata, so call refuses rather than guess.
-function unboundGenericMethod(
-  typeName: string,
-  name: string,
-  options: ReturnType<typeof lowerResolveOptions>
-): SwiftBoundMethod {
-  const resolved = findMethod(typeName, name, options);
-  if (resolved === null) {
-    throw new Error(`no method ${name} on ${typeName}`);
-  }
+type LookupOptions = ReturnType<typeof lowerResolveOptions>;
+
+// A member found by name alone: its address can be hooked, but call refuses rather than guess at
+// what binding it needs.
+function addressOnly(member: FoundMember, refusal: string): SwiftBoundMethod {
   return {
-    address: resolved.address,
-    origin: resolved.origin!,
+    address: member.address,
+    origin: member.origin,
     call: () => {
-      throw new Error(`${typeName}.${resolved.selector} needs ${typeName}'s type arguments`);
+      throw new Error(refusal);
     },
   };
+}
+
+// Every specialization shares a member's unspecialized code, so it is found without type arguments;
+// calling it would need them as self metadata.
+function unboundGenericMethod(typeName: string, name: string, options: LookupOptions): SwiftBoundMethod {
+  const member = findMember(typeName, name, options);
+  if (member === null) {
+    throw new Error(`no method ${name} on ${typeName}`);
+  }
+  return addressOnly(member, `${typeName}.${member.selector} needs ${typeName}'s type arguments`);
+}
+
+// A generic member, e.g. init<D>(data: D), which findMethod skips.
+function genericMember(typeName: string, name: string, options: LookupOptions): SwiftBoundMethod | null {
+  const member = findMember(typeName, name, options);
+  if (member === null || !member.generic) {
+    return null;
+  }
+  return addressOnly(member, `${typeName}.${member.selector} is generic; calling it through its type is not supported yet`);
 }
 
 function metadataDescriptorOf(type: SwiftType): ContextDescriptor {

@@ -801,6 +801,15 @@ Swift.Interceptor.attach(deriveKey.address, { /* ... */ });
 deriveKey.call(key, 32);   // throws: "... needs CryptoKit.HKDF's type arguments"
 ```
 
+A generic member is found the same way, initializers included through
+`method("init")`. Its `call` throws, so hook it or call it another way:
+
+```js
+// init<D: ContiguousBytes>(data: D)
+const initData = Swift.struct("CryptoKit.SymmetricKey").method("init", { labels: ["data"] });
+Swift.Interceptor.attach(initData.address, { /* ... */ });
+```
+
 A non-mutating method of a generic struct whose layout doesn't depend on its
 type arguments passes `self` by value ahead of them, where the bridge can't find
 them. Decoding its arguments throws at `attach`, and reading

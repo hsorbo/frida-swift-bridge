@@ -1017,6 +1017,35 @@ export function findMethod(
   );
 }
 
+export interface FoundMember {
+  address: NativePointer;
+  selector: string;
+  generic: boolean;
+  origin: MemberOrigin;
+}
+
+// Finds a member by name and overload filters alone. No type is resolved, so unlike findMethod it
+// also finds generic members and members whose types mention the receiver's type parameters.
+export function findMember(
+  typeName: string,
+  methodName: string,
+  options: RawMethodResolveOptions = {}
+): FoundMember | null {
+  const fullName = canonicalTypeName(typeName);
+  const candidates = matchingMethods(fullName, options, (c) => c.name === methodName);
+  if (candidates.length === 0) {
+    return null;
+  }
+  if (candidates.length > 1) {
+    throw new Error(
+      `ambiguous method ${methodName} on ${fullName}: ${describeOverloads(candidates)} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
+    );
+  }
+  const { signature } = candidates[0];
+  const address = candidates[0].address.strip();
+  return { address, selector: signature.selector, generic: signature.genericParams.length > 0, origin: memberOrigin(address, fullName) };
+}
+
 function resolveMethodIn(
   fullName: string,
   methodName: string,

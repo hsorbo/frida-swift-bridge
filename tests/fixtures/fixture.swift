@@ -1168,6 +1168,13 @@ public func driveKeyed() -> Int {
     _ = KeyedHolder<String>.label(12)
     return cellPaired(Cell("f"), 10)
 }
+// A generic initializer beside a plain one, like CryptoKit's SymmetricKey.init<D: ContiguousBytes>(data:).
+public struct Sized {
+    public var count: Int
+    public init(count: Int) { self.count = count }
+    public init<C: Collection>(of c: C) { self.count = c.count }
+}
+public func driveSized() -> Int { Sized(of: [1, 2, 3]).count }
 public final class LabeledHolder: GenericHolder<Int> {
     public let label: String
     public init(value: Int, label: String) { self.label = label; super.init(value: value) }

@@ -303,7 +303,7 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
       ret: parsed.returnTypeName === null ? null : planType(parsed.returnTypeName, gp),
       generics,
       throws: parsed.throws,
-      receiver: receiverOf(parsed.context, probe),
+      receiver: receiverOf(parsed.context, probe, parsed.name === "init"),
     };
   }
 
@@ -323,12 +323,20 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
   }
 }
 
-function receiverOf(context: string, ownership: (metadata: Metadata) => SelfOwnership | null): Receiver | null {
+// A class's initializing init takes the instance as self; a value type's init has none, its @thin
+// metatype being erased, so it lowers like a static.
+function receiverOf(context: string, ownership: (metadata: Metadata) => SelfOwnership | null, isInit = false): Receiver | null {
   const metadata = /^(static |class )|^[^.]+$/.test(context) ? null : resolveType(context);
   if (metadata === null) {
     return null;
   }
-  if (metadata.kind === MetadataKind.Class || metadata.kind === MetadataKind.ObjCClassWrapper || shouldPassIndirectly(metadata)) {
+  if (metadata.kind === MetadataKind.Class || metadata.kind === MetadataKind.ObjCClassWrapper) {
+    return { metadata, trailing: false };
+  }
+  if (isInit) {
+    return null;
+  }
+  if (shouldPassIndirectly(metadata)) {
     return { metadata, trailing: false };
   }
   const known = ownership(metadata);

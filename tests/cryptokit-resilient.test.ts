@@ -65,4 +65,15 @@ describe("resilience in Apple frameworks", () => {
     );
     expect(deriveKey.address.equals(exported.strip())).toBe(true);
   });
+
+  test("a generic framework initializer resolves by its labels", (ctx) => {
+    requireDarwin(ctx);
+    loadCryptoKit();
+
+    const init = Swift.struct("CryptoKit.SymmetricKey")!.method("init", { labels: ["data"] });
+    const exported = Process.getModuleByName("CryptoKit").getExportByName(
+      "$s9CryptoKit12SymmetricKeyV4dataACx_tc10Foundation15ContiguousBytesRzlufC"
+    );
+    expect(init.address.equals(exported.strip())).toBe(true);
+  });
 });

@@ -155,3 +155,33 @@ describe("members of a generic type named without its type arguments", () => {
     expect(seen).toEqual([["Swift.String", "11"]]);
   });
 });
+
+describe("generic members found through their type", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("method(\"init\") finds a generic initializer by its labels, hookable but not callable", () => {
+    const init = Swift.struct("fixture.Sized")!.method("init", { labels: ["of"] });
+    expect(Swift.symbolicate(init.address)?.demangled.startsWith("fixture.Sized.init<")).toBe(true);
+    expect(() => init.call([1])).toThrow(/fixture\.Sized\.init\(of:\) is generic/);
+  });
+
+  test("method(\"init\") calls a plain initializer", () => {
+    const sized = Swift.struct("fixture.Sized")!.method("init", { labels: ["count"] }).call(3) as { $fields: unknown };
+    expect(sized.$fields).toEqual({ count: int64(3) });
+  });
+
+  test("a hook on a generic initializer sees the call's type arguments", () => {
+    const seen: string[][] = [];
+    const listener = Swift.Interceptor.attach(Swift.struct("fixture.Sized")!.method("init", { labels: ["of"] }).address, {
+      onEnter() {
+        seen.push(this.typeArguments!);
+      },
+    });
+    try {
+      makeSwiftNativeFunction(fixtureExport("fixture.driveSized"), metadataFor("Swift.Int")!, [])();
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual([["Swift.Array<Swift.Int>"]]);
+  });
+});
