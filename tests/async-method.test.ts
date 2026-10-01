@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { ClassType, StructType, ValueInstance, BoundAsyncMethod, GenericBoundAsyncMethod, SwiftError, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
+import { ClassType, StructType, ValueInstance, BoundMethod, SwiftError, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
 
 import { Swift } from "../src/index.js";
 function calc(base: number) {
@@ -17,7 +17,7 @@ describe("async method", () => {
 
   test("$method hands back a narrow bound method, not the concrete binder", async () => {
     const m = calc(100).$method("addAsync");
-    expect(m instanceof BoundAsyncMethod).toBe(false);
+    expect(m instanceof BoundMethod).toBe(false);
     expect(m.address.isNull()).toBe(false);
     expect(await m.call(5)).toEqual(int64(105));
   });
@@ -43,7 +43,7 @@ describe("async method", () => {
   test("$method on an async generic method also hands back a narrow bound method", () => {
     const Int = metadataFor("Swift.Int")!;
     const m = calc(100).$method("echoAsync", { typeArguments: [typeOf(Int)] });
-    expect(m instanceof GenericBoundAsyncMethod).toBe(false);
+    expect(m instanceof BoundMethod).toBe(false);
     expect(typeof m.call).toBe("function");
   });
 

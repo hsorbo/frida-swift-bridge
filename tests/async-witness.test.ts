@@ -2,7 +2,7 @@ import { test, expect, describe } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
 import { requireSwift } from "./swift.js";
 
-import { Metadata, Protocol, projectExistentialValue, BoundAsyncMethod, metadataFor } from "../src/abi.js";
+import { Metadata, Protocol, projectExistentialValue, BoundMethod, metadataFor } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
@@ -30,8 +30,8 @@ describe("async witness-table method invocation", () => {
     const proto = Protocol.find("fixturesyms.AsyncScaler")!;
     const table = proto.conformanceFor(type)!;
     const bound = table.method(value, "scaled");
-    expect(bound instanceof BoundAsyncMethod).toBe(true);
-    expect(await (bound as BoundAsyncMethod).call(7)).toEqual(int64(21));
+    expect(bound.isAsync).toBe(true);
+    expect(await (bound as BoundMethod).call(7)).toEqual(int64(21));
   });
 
   test("awaits a default implementation from a protocol extension (TripleScaler : AsyncScaler)", async () => {
@@ -42,7 +42,7 @@ describe("async witness-table method invocation", () => {
     const { type, value } = projectExistentialValue(AsyncScaler, container);
 
     const table = Protocol.find("fixturesyms.AsyncScaler")!.conformanceFor(type)!;
-    const bound = table.method(value, "scaledTwice") as BoundAsyncMethod;
+    const bound = table.method(value, "scaledTwice") as BoundMethod;
     expect(await bound.call(2)).toEqual(int64(18));
   });
 

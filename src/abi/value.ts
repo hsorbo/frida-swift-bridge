@@ -2,11 +2,7 @@ import { Metadata, MetadataKind } from "./metadata.js";
 import { readValue, writeValue, enumerateInstanceFields, swiftValueEquals, SwiftValue } from "./instance.js";
 import { decodeBridgedContainer } from "./container.js";
 import {
-  BoundValueMethod,
   BoundMethod,
-  BoundAsyncMethod,
-  GenericBoundMethod,
-  GenericBoundAsyncMethod,
   bindValueMethod,
   rootAsyncReceiver,
   bindGenericValueMethod,
@@ -135,7 +131,7 @@ export class ValueInstance implements RawInstance {
     throw new Error(`ValueInstance.field: no field ${name}`);
   }
 
-  method(name: string, options: RawValueMethodResolveOptions = {}): BoundValueMethod | BoundMethod | GenericBoundMethod | GenericBoundAsyncMethod | BoundAsyncMethod {
+  method(name: string, options: RawValueMethodResolveOptions = {}): BoundMethod {
     this.checkLive();
     if (options.typeArguments !== undefined) {
       return rootAsyncReceiver(bindGenericValueMethod(this.metadata, this.handle, name, options), this);

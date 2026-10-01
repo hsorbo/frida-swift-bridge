@@ -1,5 +1,4 @@
 import {
-  BoundAsyncMethod,
   BoundMethod,
   CallArg,
   CallResult,
@@ -25,7 +24,7 @@ export class WitnessTable {
     return this.handle.add(witnessIndex * Process.pointerSize).readPointer().strip();
   }
 
-  method(self: NativePointer, name: string): BoundMethod | BoundAsyncMethod {
+  method(self: NativePointer, name: string): BoundMethod {
     return bindWitnessMethod(this, self, name);
   }
 

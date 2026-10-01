@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, ClassType, StructType, SwiftObject, SwiftClass } from "../src/index.js";
-import { BoundAsyncMethod, GenericBoundAsyncMethod, ClassInstance, metadataFor, typeOf } from "../src/abi.js";
+import { BoundMethod, ClassInstance, metadataFor, typeOf } from "../src/abi.js";
 
 // A Wrapper is non-POD (it embeds a Token class ref), so marshalling it +1s the embedded token. If a
 // later argument fails to marshal, the copied Wrapper temp must be destroyed, releasing that token.
@@ -36,7 +36,7 @@ describe("marshalling-failure cleanup across call paths", () => {
 
   test("plain async: a failed later arg does not leak the non-POD prefix temp", () => {
     const { wrapper, view } = wrapperOverToken("fixture");
-    const combine = boxType().init().$method("combineAsync") as BoundAsyncMethod;
+    const combine = boxType().init().$method("combineAsync") as BoundMethod;
     const before = view.retainCount;
     expect(() => combine.call(wrapper, "bad" as never)).toThrow();
     expect(view.retainCount).toBe(before);
@@ -45,7 +45,7 @@ describe("marshalling-failure cleanup across call paths", () => {
   test("generic async: a failed later arg does not leak the non-POD prefix temp", () => {
     const Int = typeOf(metadataFor("Swift.Int")!);
     const { wrapper, view } = wrapperOverToken("fixture");
-    const mix = boxType().init().$method("mixAsync", { typeArguments: [Int] }) as GenericBoundAsyncMethod;
+    const mix = boxType().init().$method("mixAsync", { typeArguments: [Int] }) as BoundMethod;
     const before = view.retainCount;
     expect(() => mix.call(wrapper, "bad" as never)).toThrow();
     expect(view.retainCount).toBe(before);

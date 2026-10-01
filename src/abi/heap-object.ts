@@ -9,9 +9,7 @@ import { SwiftType, typeOf } from "../runtime/swift-type.js";
 import { typeName } from "../runtime/type-name.js";
 import {
   BoundMethod,
-  BoundAsyncMethod,
-  GenericBoundMethod,
-  GenericBoundAsyncMethod,
+  bindResolved,
   ResolvedMethod,
   findMethod,
   bindConformanceMethod,
@@ -149,7 +147,7 @@ export class ClassInstance implements RawInstance {
     return readObject(this.handle);
   }
 
-  method(name: string, options: RawMethodResolveOptions = {}): BoundMethod | GenericBoundMethod | GenericBoundAsyncMethod | BoundAsyncMethod {
+  method(name: string, options: RawMethodResolveOptions = {}): BoundMethod {
     if (options.typeArguments !== undefined) {
       return rootAsyncReceiver(bindGenericMethod(this.typeName, name, this.handle, { ...options, static: false }), this);
     }
@@ -160,15 +158,12 @@ export class ClassInstance implements RawInstance {
     if (resolved === null) {
       return rootAsyncReceiver(bindConformanceMethod(this.typeName, this.handle, name, options), this);
     }
-    if (resolved.async === true) {
-      let executor = null;
-      if (isActor(this.metadata.description)) {
-        executor = actorSerialExecutor(this.dynamicType, this.handle)
-          ?? (isDefaultActor(this.metadata.description) ? { identity: this.handle, implementation: NULL } : null);
-      }
-      return rootAsyncReceiver(new BoundAsyncMethod(resolved, this.handle, { indirect: true }, executor), this);
+    let executor = null;
+    if (resolved.async === true && isActor(this.metadata.description)) {
+      executor = actorSerialExecutor(this.dynamicType, this.handle)
+        ?? (isDefaultActor(this.metadata.description) ? { identity: this.handle, implementation: NULL } : null);
     }
-    return new BoundMethod(resolved, this.handle);
+    return rootAsyncReceiver(bindResolved(resolved, this.handle, { executor }), this);
   }
 
   get vtable(): VTableEntry[] {
@@ -189,7 +184,7 @@ export class ClassInstance implements RawInstance {
       isStatic: !entry.isInstance,
       selector: `#${metadataOffset}`,
     };
-    return new BoundMethod(resolved, this.handle);
+    return bindResolved(resolved, this.handle);
   }
 
   call(name: string, ...args: CallArg[]): CallResult | Promise<CallResult> {

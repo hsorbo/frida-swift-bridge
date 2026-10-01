@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
-import { Protocol, ProtocolConformance, BoundAsyncMethod, ProtocolRequirementKind, readProtocolRequirements, readAssociatedTypeNames, ValueInstance, metadataFor, typeName } from "../src/abi.js";
+import { Protocol, ProtocolConformance, BoundMethod, ProtocolRequirementKind, readProtocolRequirements, readAssociatedTypeNames, ValueInstance, metadataFor, typeName } from "../src/abi.js";
 
 import { Swift, ClassType, SwiftObject } from "../src/index.js";
 import { typeOf } from "../src/abi.js";
@@ -117,7 +117,7 @@ describe("associated type / associated conformance resolution", () => {
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
     const value = ValueInstance.fromJS(source, { value: 5 });
-    expect(await (table.method(value.handle, "shiftedLater") as BoundAsyncMethod).call(4)).toEqual(int64(9));
+    expect(await (table.method(value.handle, "shiftedLater") as BoundMethod).call(4)).toEqual(int64(9));
   });
 
   test("Self and a class-constrained associated type return directly in a class-constrained protocol", () => {

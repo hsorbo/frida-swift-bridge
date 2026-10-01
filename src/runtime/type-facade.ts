@@ -6,8 +6,7 @@ import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, RAW } f
 import { makeSwiftNativeFunction } from "./calling-convention.js";
 import { resolveType, parseTypeExpr } from "./symbolication.js";
 import {
-  BoundMethod,
-  BoundAsyncMethod,
+  bindResolved,
   SwiftBoundMethod,
   SwiftBoundInitializer,
   narrowBoundMethod,
@@ -306,11 +305,7 @@ export class SwiftClass extends SwiftTypeFacade {
     if (resolved === null) {
       return genericMember(type.name, name, raw) ?? narrowBoundMethod(bindConformanceMethod(type.name, selfMetadata, name, raw));
     }
-    return narrowBoundMethod(
-      resolved.async === true
-        ? new BoundAsyncMethod(resolved, selfMetadata)
-        : new BoundMethod(resolved, selfMetadata)
-    );
+    return narrowBoundMethod(bindResolved(resolved, selfMetadata));
   }
 
   private resolveInitializers(modules: ModuleScope): ClassInitializer[] {

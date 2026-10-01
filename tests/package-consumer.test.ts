@@ -42,7 +42,7 @@ import {
   GenericRequirementDescriptor,
   InvertedProtocolsRequirement,
   SelfRouting,
-  GenericMethodPlan,
+  CallPlan,
   SwiftBoundInitializer,
   MethodQuery,
   makeSwiftNativeFunction,
@@ -62,7 +62,7 @@ type _rootTypesAreImportable = [
 type _abiTypesAreImportable = [
   Metadata, TypeLayout, ValueInstance, ClassInstance, ClosureBody,
   GenericRequirementDescriptor, InvertedProtocolsRequirement, SelfRouting,
-  GenericMethodPlan, SwiftBoundInitializer, MethodQuery,
+  CallPlan, SwiftBoundInitializer, MethodQuery,
 ];
 
 function facadeKindContractsHoldAtCompileTime(

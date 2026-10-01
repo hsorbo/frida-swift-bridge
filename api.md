@@ -323,6 +323,8 @@ The reflection split moved these members outright; there are no aliases.
 | `object.$className` | `object.$type.name` |
 | `object.$instanceMethods`, `$typeMethods` | `object.$type.instanceMethods()`, `.typeMethods()` |
 | `ClassType`, `StructType`, `EnumType` as the result of `Swift.type` | `SwiftClass`, `SwiftStruct`, `SwiftEnum`; the old names are the reflection |
+| `/abi` `BoundAsyncMethod`, `BoundStaticMethod`, `BoundValueMethod`, `BoundValueInitializer`, `GenericBoundMethod`, `GenericBoundAsyncMethod` | one `BoundMethod` over a `CallPlan`; `isAsync` tells the two apart |
+| `/abi` `GenericMethodPlan` | `CallPlan` |
 | `ValueType` | gone: `SwiftValueType` is the facade base of struct and enum |
 
 ## Creating instances
