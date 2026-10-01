@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
-import { requireDarwin } from "./swift.js";
+import { requireDarwin, requireSwift } from "./swift.js";
 
 import { Swift, ClassType, SwiftObject } from "../src/index.js";
 
@@ -76,5 +76,17 @@ describe("generic method invocation", () => {
   test("rejects a mismatched type-argument count", () => {
     const Int = metadataFor("Swift.Int")!;
     expect(() => box().$method("pick", { typeArguments: [typeOf(Int)] })).toThrow();
+  });
+});
+
+describe("generic stdlib method with an associated-type constraint", () => {
+  // append<A where A: Sequence, A.Element == Character>: the same-type clause fixes no parameter, so
+  // A's metadata and its Sequence witness are passed like any simple generic.
+  test("String.append(contentsOf:) binds with a Sequence type argument", () => {
+    requireSwift();
+    const Str = Swift.type("Swift.String")!;
+    const s = Str.$new("ab");
+    s.$method("append(contentsOf:)", { typeArguments: [Str], self: "mutating" }).call("cd");
+    expect(s.$fields).toBe("abcd");
   });
 });

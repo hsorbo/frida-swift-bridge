@@ -65,7 +65,9 @@ export interface SwiftFunctionSignature {
   context: string;
   name: string;
   genericParams: string[];
-  // false for same-type / pack / shape signatures: metadata count != genericParams.length
+  // false when the metadata count differs from genericParams.length: a pack, a shape, or a same-type
+  // constraint on a parameter itself (A == B, A == Int); one on an associated type (A.Element == X)
+  // leaves every parameter's metadata in place.
   simpleGenerics: boolean;
   async: boolean;
   throws: boolean;
@@ -572,10 +574,14 @@ function parseGenericClause(clause: string | null): {
   const paramsText = where === -1 ? inner : inner.slice(0, where);
   const whereClause = where === -1 ? "" : inner.slice(where + 7);
   const params = paramsText.split(",").map((p) => p.trim()).filter((p) => p !== "");
+  const genericParams = params.map((p) => p.split(/\s+/).pop()!);
+  const requirements = splitRequirements(whereClause);
+  const fixesParameter = (req: string): boolean =>
+    req.includes("==") && req.split("==").some((side) => genericParams.includes(side.trim()));
   return {
-    genericParams: params.map((p) => p.split(/\s+/).pop()!),
-    simpleGenerics: params.every((p) => /^[A-Za-z_]\w*$/.test(p)) && !/==/.test(whereClause),
-    conformanceRequirements: splitRequirements(whereClause).flatMap((req) => {
+    genericParams,
+    simpleGenerics: params.every((p) => /^[A-Za-z_]\w*$/.test(p)) && !requirements.some(fixesParameter),
+    conformanceRequirements: requirements.flatMap((req) => {
       const colon = req.indexOf(":");
       if (colon === -1) {
         return []; // same-type (==) or layout requirement: no witness table

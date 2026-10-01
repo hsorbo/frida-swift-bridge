@@ -133,6 +133,14 @@ describe("parseSwiftSignature", () => {
     expect(plain.contextConstraints).toEqual([]);
   });
 
+  test("a same-type constraint on an associated type keeps the signature simple", () => {
+    const onMember = fn("Swift.String.append<A where A: Swift.Sequence, A.Element == Swift.Character>(contentsOf: A) -> ()");
+    expect(onMember.simpleGenerics).toBe(true);
+    expect(onMember.conformanceRequirements).toEqual([{ subject: "A", protocol: "Swift.Sequence" }]);
+    expect(fn("m.f<A, B where A == B>(A, B) -> A").simpleGenerics).toBe(false);
+    expect(fn("m.f<A where A == Swift.Int>(A) -> A").simpleGenerics).toBe(false);
+  });
+
   test("returns null for entity lines that are not a function or accessor", () => {
     expect(parseSwiftSignature("dispatch thunk of fixture.Robot.greet(Swift.String) -> Swift.String")).toBeNull();
     expect(parseSwiftSignature("type metadata accessor for fixture.Robot")).toBeNull();
