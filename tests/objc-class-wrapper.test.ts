@@ -25,8 +25,8 @@ describe("ObjCClassWrapper metadata", () => {
 
     const type = typeOf(metadata);
     expect(type instanceof ObjCClassWrapperType).toBe(true);
-    expect((type as ObjCClassWrapperType).objcClass.toString()).toBe(objcClass.toString());
-    expect(type.name).toContain("NSObject");
+    expect((type as ObjCClassWrapperType).$objcClass.toString()).toBe(objcClass.toString());
+    expect(type.$name).toContain("NSObject");
     expect(type.toJSON().kind).toBe("objc-class");
   });
 });

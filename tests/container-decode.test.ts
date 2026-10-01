@@ -9,7 +9,7 @@ function bag(): StructType {
 }
 
 function decoded(method: string): SwiftValueObject {
-  const result = bag().call(method) as SwiftValueObject;
+  const result = bag().$call(method) as SwiftValueObject;
   expect(result.$kind).toBe("value");
   return result;
 }

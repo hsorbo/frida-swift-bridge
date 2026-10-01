@@ -102,7 +102,7 @@ describe("Swift object intrinsics", () => {
   });
 
   test("$instanceMethods works on a value facade", () => {
-    expect(Swift.struct("Swift.Int")!.new(-1).$instanceMethods).toContain("signum()");
+    expect(Swift.struct("Swift.Int")!.$new(-1).$instanceMethods).toContain("signum()");
   });
 
   test("$className reflects the dynamic type", () => {
@@ -110,15 +110,15 @@ describe("Swift object intrinsics", () => {
     expect(robot("R2").$className).toBe("fixture.Robot");
   });
 
-  test("$type.superClass wraps the parent, null at a root class", () => {
-    const sup = cat().$type.superClass;
+  test("$type.$superClass wraps the parent, null at a root class", () => {
+    const sup = cat().$type.$superClass;
     expect(sup).not.toBeNull();
-    expect(sup!.name).toBe("fixture.Animal");
-    expect(robot("R2").$type.superClass).toBeNull();
+    expect(sup!.$name).toBe("fixture.Animal");
+    expect(robot("R2").$type.$superClass).toBeNull();
   });
 
-  test("$type.moduleName is the logical Swift module", () => {
-    expect(robot("R2").$type.moduleName).toBe("fixture");
+  test("$type.$moduleName is the logical Swift module", () => {
+    expect(robot("R2").$type.$moduleName).toBe("fixture");
   });
 
   test("methods({ inherited: false }) excludes inherited methods that methods() includes", () => {
@@ -131,7 +131,7 @@ describe("Swift object intrinsics", () => {
 
   test("$type / $handle expose the wrapped object", () => {
     const o = robot("R2");
-    expect(o.$type.name).toBe("fixture.Robot");
+    expect(o.$type.$name).toBe("fixture.Robot");
     expect(typeName(metadataOf(o.$type))).toBe("fixture.Robot");
     expect(o.$handle.isNull()).toBe(false);
   });

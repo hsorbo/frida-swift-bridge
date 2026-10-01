@@ -42,14 +42,14 @@ describe("writeValue String support", () => {
 
   test("ValueInstance.fromJS builds a String value", () => {
     const v = typeOf(metadataFor("Swift.String")!);
-    const value = (v as StructType).new("hello from JS");
+    const value = (v as StructType).$new("hello from JS");
     expect(value.$fields).toBe("hello from JS");
     value.$dispose();
   });
 
   test("constructs a struct with a String field", () => {
     const t = typeOf(metadataFor("fixture.PoliteGreeter")!) as StructType;
-    const value = t.new({ name: "Ada" });
+    const value = t.$new({ name: "Ada" });
     expect(value.$fields).toEqual({ name: "Ada" });
     value.$dispose();
   });

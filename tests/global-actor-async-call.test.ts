@@ -27,8 +27,8 @@ describe("generic global-actor async calling", () => {
 
   test("a @globalActor-isolated method on a plain class is neither actor nor default actor", () => {
     const t = typeOf(metadataFor("fixture.GAHolder")!) as ClassType;
-    expect(t.isActor).toBe(false);
-    expect(t.isDefaultActor).toBe(false);
+    expect(t.$isActor).toBe(false);
+    expect(t.$isDefaultActor).toBe(false);
   });
 
   test("drives a @globalActor-isolated method on a plain class: gaMethodAsync(1) ⇒ 11", async () => {

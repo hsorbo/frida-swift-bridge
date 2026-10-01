@@ -9,7 +9,7 @@ function robot(name: string): SwiftObject {
 }
 
 function int(n: number): SwiftObject {
-  return (Swift.type("Swift.Int") as StructType).new(n);
+  return (Swift.type("Swift.Int") as StructType).$new(n);
 }
 
 function box(): SwiftObject {
@@ -32,7 +32,7 @@ describe("__owned parameters", () => {
     const Token = Swift.type("fixture.Token") as ClassType;
     const Wrapper = Swift.type("fixture.Wrapper") as StructType;
     const token = Token.init(5);
-    const wrapper = Wrapper.call("make", token) as SwiftObject;
+    const wrapper = Wrapper.$call("make", token) as SwiftObject;
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
     const consume = Swift.NativeFunction(fixtureExport("fixture.consumeWrapper"), Int, [Wrapper]);
@@ -59,13 +59,13 @@ describe("inout parameters", () => {
   });
 
   test("writes a non-POD value back", () => {
-    const s = (Swift.type("Swift.String") as StructType).new("hi");
+    const s = (Swift.type("Swift.String") as StructType).$new("hi");
     robot("Ada").exclaim(s);
     expect(s.$fields).toBe("hi!");
   });
 
   test("writes into a field view of its parent", () => {
-    const acc = (Swift.type("fixture.Accumulator") as StructType).new({ total: 4 });
+    const acc = (Swift.type("fixture.Accumulator") as StructType).$new({ total: 4 });
     robot("Ada").doubled(acc.$field("total"));
     expect(acc.total).toEqual(int64(8));
   });
@@ -73,9 +73,9 @@ describe("inout parameters", () => {
   test("a value method and a static method take inout arguments", () => {
     const Accumulator = Swift.type("fixture.Accumulator") as StructType;
     const sink = int(1);
-    Accumulator.new({ total: 4 }).drain(sink);
+    Accumulator.$new({ total: 4 }).drain(sink);
     expect(sink.$fields).toEqual(int64(5));
-    Accumulator.call("doubled", sink);
+    Accumulator.$call("doubled", sink);
     expect(sink.$fields).toEqual(int64(10));
   });
 
@@ -98,6 +98,6 @@ describe("inout parameters", () => {
   });
 
   test("a value facade of another type is rejected", () => {
-    expect(() => robot("Ada").doubled((Swift.type("Swift.String") as StructType).new("x"))).toThrow("expected Swift.Int");
+    expect(() => robot("Ada").doubled((Swift.type("Swift.String") as StructType).$new("x"))).toThrow("expected Swift.Int");
   });
 });

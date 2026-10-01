@@ -28,7 +28,7 @@ describe("a bound method's origin", () => {
   });
 
   test("a protocol-extension member names the protocol and the module declaring it", () => {
-    const describer = (Swift.type("fixture.DefaultDescriber") as StructType).new({ displayName: "Ada" });
+    const describer = (Swift.type("fixture.DefaultDescriber") as StructType).$new({ displayName: "Ada" });
     expect(describer.$method("shout").origin).toEqual({
       kind: "protocolExtension",
       protocol: "fixture.Labeled",
@@ -42,11 +42,11 @@ describe("a bound method's origin", () => {
   });
 
   test("a type's own method wins over a same-named protocol extension from another module", () => {
-    const custom = (Swift.type("fixture.CustomDescriber") as StructType).new({ displayName: "Ada" });
+    const custom = (Swift.type("fixture.CustomDescriber") as StructType).$new({ displayName: "Ada" });
     expect(custom.tag()).toBe("own tag");
     expect(custom.$method("tag").origin.kind).toBe("own");
 
-    const plain = (Swift.type("fixture.DefaultDescriber") as StructType).new({ displayName: "Ada" });
+    const plain = (Swift.type("fixture.DefaultDescriber") as StructType).$new({ displayName: "Ada" });
     expect(plain.tag()).toBe("default tag");
     expect(plain.$method("tag").origin.kind).toBe("protocolExtension");
   });

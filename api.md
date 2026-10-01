@@ -172,7 +172,7 @@ They yield descriptor-backed wrappers and don't parse a type you never touch:
 ```js
 const app = Process.getModuleByName("MyApp");
 for (const cls of Swift.enumerateClasses(app))
-    console.log(cls.name);
+    console.log(cls.$name);
 ```
 
 `Swift.enumerateTypes`, `Swift.enumerateClasses`, `Swift.enumerateStructs`, and
@@ -181,23 +181,26 @@ span every loaded Swift image and reflect modules loaded later.
 
 ## Types
 
-Every wrapper extends `SwiftType`:
+Every wrapper extends `SwiftType`. The bridge's own members of a type are
+`$`-prefixed, like an object's controls, so they never collide with a Swift
+member of the same name; `init` is the one bare member, because it names
+Swift's initializer.
 
-- `type.name`: the fully-qualified name, including every enclosing context
+- `type.$name`: the fully-qualified name, including every enclosing context
   (`MyApp.Outer.Inner`).
-- `type.moduleName`: the logical Swift module name.
-- `type.superClass`: the parent as a `SwiftType`, or `null`.
+- `type.$kind`: `"class"`, `"struct"`, `"enum"`, `"tuple"`, `"metatype"`,
+  `"function"`, `"existential"`, `"objc-class"`, `"foreign-class"` or
+  `"foreign-reference"`.
+- `type.$moduleName`: the logical Swift module name.
+- `type.$superClass`: the parent as a `SwiftType`, or `null`.
 - `type.$instanceMethods(query?)` / `type.$typeMethods(query?)`: the selectors
   of its instance methods and of its type methods, e.g. `["greet(_:)", …]`.
   `query` is `{ inherited? }`.
 - `type.$instanceMethod(name, options?)`, `type.$typeMethod(name, options?)`,
   `type.$initializer(options?)`: look up one member of that kind. See
   [Calling methods](#calling-methods).
-- `type.properties`: the properties as `{ name, typeName, isStatic, writable }`.
-- `type.get(name)`: reads a static property.
-
-The lookups and method lists are `$`-prefixed, like an object's controls, so
-they never collide with a Swift member of the same name.
+- `type.$properties`: the properties as `{ name, typeName, isStatic, writable }`.
+- `type.$get(name)`: reads a static property.
 
 The lists span every loaded module: they include members that other modules
 add in extensions, and members a conformed-to protocol provides through a
@@ -207,34 +210,35 @@ and its members shadow the same members of a less constrained extension. An
 extension whose clause the bridge can't check is left out: one with a same-type
 (`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
 requirement on a nested associated type (`Item.Index`).
-- `type.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
+- `type.$protocols()`: a `{ [name]: Protocol }` map of declared conformances.
 - `type.toJSON()`: cheap identity `{ kind, name, module }`.
 
 Reading a name, kind, or module does not realize the type's metadata.
 
 ```js
 const robot = Swift.type("MyApp.Robot");
-robot.name;             // "MyApp.Robot"
-robot.moduleName;       // "MyApp"
+robot.$name;             // "MyApp.Robot"
+robot.$kind;             // "class"
+robot.$moduleName;       // "MyApp"
 robot.$instanceMethods();   // ["greet(_:)", "rename(to:)", ...]
-robot.superClass;       // null, or a SwiftType
+robot.$superClass;       // null, or a SwiftType
 ```
 
 Kind-specific members:
 
-- `StructType.fields`: stored members as `{ name, type, isVar }`.
-- `EnumType.cases`: the cases as `{ name, type, isVar }`.
-- `ClassType.isActor` / `ClassType.isDefaultActor`: actor classification.
+- `StructType.$fields`: stored members as `{ name, type, isVar }`.
+- `EnumType.$cases`: the cases as `{ name, type, isVar }`.
+- `ClassType.$isActor` / `ClassType.$isDefaultActor`: actor classification.
 
 ```js
-Swift.type("MyApp.Rect").fields.map(f => f.name);   // ["width", "height"]
-Swift.type("MyApp.Suit").cases.map(c => c.name);    // ["hearts", "spades", ...]
-Swift.type("MyApp.Session").isActor;                // true for `actor Session`
+Swift.type("MyApp.Rect").$fields.map(f => f.name);   // ["width", "height"]
+Swift.type("MyApp.Suit").$cases.map(c => c.name);    // ["hearts", "spades", ...]
+Swift.type("MyApp.Session").$isActor;                // true for `actor Session`
 ```
 
-Other wrappers you may encounter from reflection: `TupleType` (`elements`, each
-`{ label, type }`), `MetatypeType` (`instanceType`), `FunctionType` (`signature`), and
-the foreign/ObjC bridging wrappers `ObjCClassWrapperType`, `ForeignClassType`,
+Other wrappers you may encounter from reflection: `TupleType` (`$elements`, each
+`{ label, type }`), `MetatypeType` (`$instanceType`), `FunctionType` (`$signature`), and
+the foreign/ObjC bridging wrappers `ObjCClassWrapperType` (`$objcClass`), `ForeignClassType`,
 `ForeignReferenceType`.
 
 ## Creating instances
@@ -270,19 +274,19 @@ differ only in argument type — resolve explicitly with
 `$initializer({ labels, argTypes })`, which returns a bound initializer to
 `.call(...)`.
 
-Structs — `StructType.new(value)` (an alias for `fromJS`) builds a value from a
-plain JS object; `EnumType.case(name, payload?)` builds an enum case:
+Structs — `StructType.$new(value)` (an alias for `$fromJS`) builds a value from a
+plain JS object; `EnumType.$case(name, payload?)` builds an enum case:
 
 ```js
-const rect = Swift.type("MyApp.Rect").new({ width: 3, height: 4 });
+const rect = Swift.type("MyApp.Rect").$new({ width: 3, height: 4 });
 
-const empty = Swift.type("MyApp.Pick").case("empty");
-const some  = Swift.type("MyApp.Pick").case("value", 42);
+const empty = Swift.type("MyApp.Pick").$case("empty");
+const some  = Swift.type("MyApp.Pick").$case("value", 42);
 ```
 
 Value types also offer storage-oriented constructors that mirror the underlying
-Swift operations — `fromJS(value)`, `borrow(address)`, `copy(address)`,
-`adopt(address)` — see [Ownership and lifetime](#ownership-and-lifetime).
+Swift operations — `$fromJS(value)`, `$borrow(address)`, `$copy(address)`,
+`$adopt(address)` — see [Ownership and lifetime](#ownership-and-lifetime).
 
 To wrap a class pointer you already hold (e.g. from an interceptor or another
 call), use `Swift.borrowObject(handle)` for a non-owning view or
@@ -388,11 +392,11 @@ Type methods are called on the type wrapper with `call`, or looked up with
 `$typeMethod(name, options)` for an explicit bound method:
 
 ```js
-const made = Swift.type("MyApp.Robot").call("make", "Zed");
+const made = Swift.type("MyApp.Robot").$call("make", "Zed");
 made.greet("X");    // "Hello X, I am Zed"
 
 const Int = Swift.type("Swift.Int");
-Int.call("*", 6, 7);          // 42: operators are static methods; both operands are arguments
+Int.$call("*", 6, 7);          // 42: operators are static methods; both operands are arguments
 Int.$typeMethod("*").call(6, 7);
 ```
 
@@ -423,7 +427,7 @@ Value methods, sync or async, work the same whether or not they are
 `mutating`; a mutating one writes back into the value:
 
 ```js
-const acc = Swift.type("MyApp.Accumulator").new({ total: 5 });
+const acc = Swift.type("MyApp.Accumulator").$new({ total: 5 });
 acc.peek(10);    // 15
 acc.add(3);      // writes back through self
 acc.total;       // 8
@@ -454,7 +458,7 @@ An `inout` parameter takes a value facade and writes the result back into it. A
 `$field` view works too, and writes into its parent:
 
 ```js
-const n = Swift.type("Swift.Int").new(21);
+const n = Swift.type("Swift.Int").$new(21);
 robot.doubled(n);        // func doubled(_ n: inout Int)
 n.$fields;               // 42
 robot.doubled(acc.$field("total"));
@@ -569,17 +573,17 @@ robot.badge;                // "[D2]"
 Assigning a property without a setter, or a name that is not a property,
 throws.
 
-`type.properties` enumerates the declared members:
+`type.$properties` enumerates the declared members:
 
 ```js
-Swift.type("MyApp.Robot").properties.map(p => p.name);   // ["name", "badge"]
+Swift.type("MyApp.Robot").$properties.map(p => p.name);   // ["name", "badge"]
 ```
 
 Static properties, including those a protocol extension provides, read through
 the type:
 
 ```js
-Swift.type("MyApp.Robot").get("fleetSize");   // 12
+Swift.type("MyApp.Robot").$get("fleetSize");   // 12
 ```
 
 For direct access to a stored field's storage, `$field(name)` returns a live
@@ -618,9 +622,9 @@ Swift.Protocol.find("Greeter");   // throws if two modules declare Greeter
 Relate types and protocols in both directions:
 
 ```js
-Swift.Protocol.find("MyApp.Scalable").conformingTypes().map(t => t.name);   // ["Swift.Int", ...]
+Swift.Protocol.find("MyApp.Scalable").conformingTypes().map(t => t.$name);   // ["Swift.Int", ...]
 
-Swift.type("MyApp.Person").protocols();   // { "MyApp.Greeter": Protocol, "MyApp.Aged": Protocol }
+Swift.type("MyApp.Person").$protocols();   // { "MyApp.Greeter": Protocol, "MyApp.Aged": Protocol }
 ```
 
 `ProtocolComposition` models an `any P & Q` existential, built from a signature:
@@ -864,7 +868,7 @@ A struct decodes to an object keyed by field name; a bridged `Array`, `Set`, or
 call arrives as a value facade; `$container()` projects it:
 
 ```js
-const ints = Swift.type("MyApp.Bag").call("ints");   // a value facade
+const ints = Swift.type("MyApp.Bag").$call("ints");   // a value facade
 ints.$container();    // [int64(10), int64(20), int64(30)]
 ```
 
@@ -912,9 +916,9 @@ The acquisition names encode the reference contract:
 
 - `Swift.borrowObject(handle)` — a view; does not retain or consume.
 - `Swift.adoptObject(handle)` — takes over an existing +1 reference.
-- For value types: `fromJS(value)` initializes owned storage, `borrow(address)`
-  is a non-owning view, `copy(address)` makes an independent owned copy, and
-  `adopt(address)` takes responsibility for already-initialized storage.
+- For value types: `$fromJS(value)` initializes owned storage, `$borrow(address)`
+  is a non-owning view, `$copy(address)` makes an independent owned copy, and
+  `$adopt(address)` takes responsibility for already-initialized storage.
 
 An owned facade releases when it is garbage-collected. To release
 deterministically, call `$dispose()` (idempotent) or use a `using` binding:

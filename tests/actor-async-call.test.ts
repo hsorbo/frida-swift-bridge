@@ -77,8 +77,8 @@ describe("custom-executor actor async calling", () => {
 
   test("a custom-executor actor is an actor but not a default actor", () => {
     const t = typeOf(metadataFor("fixture.CustomExecutorTicker")!) as ClassType;
-    expect(t.isActor).toBe(true);
-    expect(t.isDefaultActor).toBe(false);
+    expect(t.$isActor).toBe(true);
+    expect(t.$isDefaultActor).toBe(false);
   });
 
   test("drives a custom-executor actor's async method: advance() ⇒ 1, 2", async () => {

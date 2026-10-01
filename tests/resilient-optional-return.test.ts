@@ -25,7 +25,7 @@ describe("Optional<resilient struct wrapping a class ref> return", () => {
     const make = fn(mod, "$s9resilient10makeHolderyAA09ResilientC0VSgSiF", optionalHolder(), [Swift.type("Swift.Int")!]);
     const holder = make(7) as any;
     expect(holder).not.toBeNull();
-    expect(holder.$type.name).toBe("resilient.ResilientHolder");
+    expect(holder.$type.$name).toBe("resilient.ResilientHolder");
 
     const tokenId = fn(mod, "$s9resilient13holderTokenIdySiAA15ResilientHolderVF", Swift.type("Swift.Int")!, [Swift.type("resilient.ResilientHolder")!]);
     expect(tokenId(holder)).toEqual(int64(7));

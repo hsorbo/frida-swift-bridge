@@ -130,7 +130,7 @@ describe("consuming methods on value types", () => {
   test("a consuming method on a large struct leaves the caller's self intact", (ctx) => {
     if (loadFixture().findExportByName("$s7fixture7WrapperV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(9);
-    const wrapper = (typeOf(metadataFor("fixture.Wrapper")!) as StructType).call("make", facade) as SwiftObject;
+    const wrapper = (typeOf(metadataFor("fixture.Wrapper")!) as StructType).$call("make", facade) as SwiftObject;
     const before = view.retainCount;
     const take = wrapper.$method("take", { self: "consuming" });
     expect(take.call()).toEqual(int64(9));
@@ -181,7 +181,7 @@ describe("consuming methods on value types", () => {
 
 describe("stdlib methods on small loadable values", () => {
   test("Swift.Int.signum() needs no self option", () => {
-    expect(Swift.struct("Swift.Int")!.new(-5).signum()).toEqual(int64(-1));
+    expect(Swift.struct("Swift.Int")!.$new(-5).signum()).toEqual(int64(-1));
   });
 });
 
@@ -189,7 +189,7 @@ describe("extension methods on Swift.String from another module", () => {
   beforeEach(() => { loadNoMetadata(); });
 
   test("a non-mutating one returns without touching self", () => {
-    const s = Swift.struct("Swift.String")!.new("kake");
+    const s = Swift.struct("Swift.String")!.$new("kake");
     expect(s.shouted()).toBe("KAKE!");
     expect(s.shouted()).toBe("KAKE!");
   });

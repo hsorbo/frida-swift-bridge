@@ -16,18 +16,18 @@ describe("actor identification", () => {
 
   test("a plain actor is an actor and a default actor", () => {
     const t = classType("fixture.Ticker");
-    expect(t.isActor).toBe(true);
-    expect(t.isDefaultActor).toBe(true);
+    expect(t.$isActor).toBe(true);
+    expect(t.$isDefaultActor).toBe(true);
   });
 
   test("a distributed actor is an actor", () => {
-    expect(classType("fixture.Calculator").isActor).toBe(true);
+    expect(classType("fixture.Calculator").$isActor).toBe(true);
   });
 
   test("a regular class is neither", () => {
     const t = classType("fixture.Box");
-    expect(t.isActor).toBe(false);
-    expect(t.isDefaultActor).toBe(false);
+    expect(t.$isActor).toBe(false);
+    expect(t.$isDefaultActor).toBe(false);
   });
 
   test("a default actor's stored fields sit past its hidden actor storage", () => {

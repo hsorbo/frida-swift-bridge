@@ -113,23 +113,23 @@ export class SwiftType {
     );
   }
 
-  get name(): string {
+  get $name(): string {
     return backingDescriptorOf(this)?.fullTypeName ?? typeName(metadataOf(this));
   }
 
-  get superClass(): SwiftType | null {
+  get $superClass(): SwiftType | null {
     return null;
   }
 
-  get moduleName(): string | null {
+  get $moduleName(): string | null {
     return descriptorOf(this).moduleName;
   }
 
   toJSON(): { kind: string; name: string; module: string | null } {
-    return { kind: this.kindName, name: this.name, module: this.jsonModule() };
+    return { kind: this.$kind, name: this.$name, module: this.jsonModule() };
   }
 
-  private get kindName(): string {
+  get $kind(): string {
     switch (backingDescriptorOf(this)?.kind) {
       case ContextDescriptorKind.Class:
         return "class";
@@ -154,7 +154,7 @@ export class SwiftType {
         return null;
       }
     }
-    return this.moduleName;
+    return this.$moduleName;
   }
 
   $typeMethods(options: MethodQuery = {}): string[] {
@@ -167,9 +167,9 @@ export class SwiftType {
 
   // Found by name alone, so it has no receiver: hook its address, or bind an instance to call it.
   $instanceMethod(name: string, options: MemberLookupOptions = {}): SwiftInstanceMethod {
-    const member = findMember(this.name, name, { ...lowerResolveOptions(options), static: false });
+    const member = findMember(this.$name, name, { ...lowerResolveOptions(options), static: false });
     if (member === null) {
-      throw new Error(`no instance method ${name} on ${this.name}`);
+      throw new Error(`no instance method ${name} on ${this.$name}`);
     }
     return {
       address: member.address,
@@ -179,20 +179,20 @@ export class SwiftType {
   }
 
   private selectors(isStatic: boolean, { inherited = true }: MethodQuery): string[] {
-    return enumerateMethods(this.name, "allLoadedModules", inherited ? "withSuperclasses" : "thisType")
+    return enumerateMethods(this.$name, "allLoadedModules", inherited ? "withSuperclasses" : "thisType")
       .filter((m) => m.kind === "method" && m.isStatic === isStatic)
       .map((m) => m.selector);
   }
 
-  protocols(): { [name: string]: Protocol } {
+  $protocols(): { [name: string]: Protocol } {
     return protocolsForType(descriptorOf(this).handle);
   }
 
-  get properties(): PropertyInfo[] {
-    return enumerateProperties(this.name);
+  get $properties(): PropertyInfo[] {
+    return enumerateProperties(this.$name);
   }
 
-  get(name: string): CallResult {
+  $get(name: string): CallResult {
     return getStaticProperty(metadataOf(this), name);
   }
 }
@@ -202,10 +202,10 @@ export class ValueType extends SwiftType {
     const raw = lowerResolveOptions(options);
     const lookup = { ...raw, static: true };
     if (isUnboundGeneric(this)) {
-      return unboundGenericMethod(this.name, name, lookup);
+      return unboundGenericMethod(this.$name, name, lookup);
     }
-    if (findMethod(this.name, name, lookup) === null) {
-      const generic = genericMember(this.name, name, lookup);
+    if (findMethod(this.$name, name, lookup) === null) {
+      const generic = genericMember(this.$name, name, lookup);
       if (generic !== null) {
         return generic;
       }
@@ -213,17 +213,17 @@ export class ValueType extends SwiftType {
     return narrowBoundMethod(bindStaticMethod(metadataOf(this), name, raw));
   }
 
-  call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
+  $call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
     return this.$typeMethod(name).call(...args);
   }
 
   $initializer(options: MemberLookupOptions = {}): SwiftBoundInitializer {
     const raw = lowerResolveOptions(options);
     if (isUnboundGeneric(this)) {
-      return unboundGenericMethod(this.name, "init", raw);
+      return unboundGenericMethod(this.$name, "init", raw);
     }
-    if (findMethod(this.name, "init", raw) === null) {
-      const generic = genericMember(this.name, "init", raw);
+    if (findMethod(this.$name, "init", raw) === null) {
+      const generic = genericMember(this.$name, "init", raw);
       if (generic !== null) {
         return generic;
       }
@@ -241,35 +241,35 @@ export class ValueType extends SwiftType {
 
   private hasInitializer(labels: string[]): boolean {
     const declares = (modules: ModuleScope): boolean =>
-      enumerateMethods(this.name, modules).some(
+      enumerateMethods(this.$name, modules).some(
         (m) => m.name === "init" && sameSequence(m.argLabels, labels)
       );
     return declares("definingModule") || declares("allLoadedModules");
   }
 
-  fromJS(value: SwiftValue): SwiftValueObject {
+  $fromJS(value: SwiftValue): SwiftValueObject {
     return asSwiftObject(ValueInstance.fromJS(metadataOf(this), value));
   }
 
-  borrow(address: NativePointer): SwiftValueObject {
+  $borrow(address: NativePointer): SwiftValueObject {
     return asSwiftObject(ValueInstance.borrow(metadataOf(this), address));
   }
 
-  copy(address: NativePointer): SwiftValueObject {
+  $copy(address: NativePointer): SwiftValueObject {
     return asSwiftObject(ValueInstance.fromCopy(metadataOf(this), address));
   }
 
-  adopt(address: NativePointer): SwiftValueObject {
+  $adopt(address: NativePointer): SwiftValueObject {
     return asSwiftObject(ValueInstance.adopt(metadataOf(this), address));
   }
 }
 
 export class StructType extends ValueType {
-  new(value: SwiftValue): SwiftValueObject {
-    return this.fromJS(value);
+  $new(value: SwiftValue): SwiftValueObject {
+    return this.$fromJS(value);
   }
 
-  get fields(): TypeMember[] {
+  get $fields(): TypeMember[] {
     const metadata = metadataOf(this);
     return [...enumerateFields(metadata.description)].map((f) => {
       const type = fieldTypeIn(metadata, f);
@@ -279,11 +279,11 @@ export class StructType extends ValueType {
 }
 
 export class EnumType extends ValueType {
-  case(name: string, payload?: SwiftValue): SwiftValueObject {
+  $case(name: string, payload?: SwiftValue): SwiftValueObject {
     return asSwiftObject(ValueInstance.fromJS(metadataOf(this), payload === undefined ? name : { [name]: payload }));
   }
 
-  get cases(): TypeMember[] {
+  get $cases(): TypeMember[] {
     const metadata = metadataOf(this);
     return [...enumerateFields(metadata.description)].map((f) => {
       const type = f.mangledTypeName !== null ? fieldTypeIn(metadata, f) : null;
@@ -293,13 +293,13 @@ export class EnumType extends ValueType {
 }
 
 export class ObjCClassWrapperType extends SwiftType {
-  get objcClass(): NativePointer {
+  get $objcClass(): NativePointer {
     return metadataOf(this).handle.add(Process.pointerSize).readPointer().strip();
   }
 }
 
 export class ForeignClassType extends SwiftType {
-  get superClass(): ForeignClassType | null {
+  get $superClass(): ForeignClassType | null {
     const superclass = metadataOf(this).handle.add(2 * Process.pointerSize).readPointer().strip();
     return superclass.isNull() ? null : new ForeignClassType(new Metadata(superclass));
   }
@@ -386,18 +386,18 @@ const ALLOCATING_CONSTRUCTOR = "fC";
 export class ClassType extends SwiftType {
   private initializers = new Map<ModuleScope, ClassInitializer[]>();
 
-  get superClass(): SwiftType | null {
+  get $superClass(): SwiftType | null {
     const superclass = new ClassMetadata(metadataOf(this).handle).superclass;
     return superclass !== null && superclass.isTypeMetadata
       ? typeOf(new Metadata(superclass.handle))
       : null;
   }
 
-  get isActor(): boolean {
+  get $isActor(): boolean {
     return isActor(descriptorOf(this));
   }
 
-  get isDefaultActor(): boolean {
+  get $isDefaultActor(): boolean {
     return isDefaultActor(descriptorOf(this));
   }
 
@@ -458,7 +458,7 @@ export class ClassType extends SwiftType {
     );
   }
 
-  call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
+  $call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
     return this.$typeMethod(name).call(...args);
   }
 
@@ -475,7 +475,7 @@ export class ClassType extends SwiftType {
     if (cached !== undefined) {
       return cached;
     }
-    const candidates = enumerateMethods(this.name, modules, "thisType")
+    const candidates = enumerateMethods(this.$name, modules, "thisType")
       .filter((m) => m.mangled.endsWith(ALLOCATING_CONSTRUCTOR))
       .map((m) => ({
         address: m.address,
@@ -502,7 +502,7 @@ export interface TupleTypeElement {
 }
 
 export class TupleType extends SwiftType {
-  get elements(): TupleTypeElement[] {
+  get $elements(): TupleTypeElement[] {
     const metadata = metadataOf(this);
     // Swift stores the labels as one space-separated string, one token per element (empty = none).
     const labelString = tupleLabels(metadata);
@@ -515,7 +515,7 @@ export class TupleType extends SwiftType {
 }
 
 export class MetatypeType extends SwiftType {
-  get instanceType(): SwiftType {
+  get $instanceType(): SwiftType {
     return typeOf(metatypeInstanceType(metadataOf(this)));
   }
 }
@@ -548,7 +548,7 @@ function parameterConvention(ownership: ParameterOwnership): ParameterConvention
 }
 
 export class FunctionType extends SwiftType {
-  get signature(): FunctionTypeSignature {
+  get $signature(): FunctionTypeSignature {
     const raw = readFunctionType(metadataOf(this));
     return {
       parameters: raw.parameters.map((p) => ({

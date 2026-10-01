@@ -5,7 +5,7 @@ import { StructType } from "../src/index.js";
 import { metadataFor, typeOf } from "../src/abi.js";
 
 function halver(n: number) {
-  return (typeOf(metadataFor("fixture.Halver")!) as StructType).new({ n });
+  return (typeOf(metadataFor("fixture.Halver")!) as StructType).$new({ n });
 }
 
 describe("accessor whose type is generic", () => {

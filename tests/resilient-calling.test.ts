@@ -90,10 +90,10 @@ describe("resilient calling convention (local library-evolution fixture)", () =>
     const Int = Swift.type("Swift.Int")!;
 
     const modeIndex = Swift.NativeFunction(resilientFn(mod, "resilient.modeIndex("), Int, [Mode]);
-    expect(modeIndex(Mode.case("second"))).toEqual(int64(2));
+    expect(modeIndex(Mode.$case("second"))).toEqual(int64(2));
 
     const flipMode = Swift.NativeFunction(resilientFn(mod, "resilient.flipMode("), Mode, [Mode]);
-    expect(flipMode(Mode.case("first"))).toBe("second");
+    expect(flipMode(Mode.$case("first"))).toBe("second");
   });
 });
 
@@ -109,15 +109,15 @@ describe("the stdlib's non-frozen types", () => {
 
   test("a non-frozen stdlib struct crosses a call in both directions", () => {
     const boundary = Swift.enum("fixture.StdlibBoundary")!;
-    const key = boundary.call("makeKey", "k") as SwiftValue;
-    expect(boundary.call("keyName", key)).toBe("k");
+    const key = boundary.$call("makeKey", "k") as SwiftValue;
+    expect(boundary.$call("keyName", key)).toBe("k");
   });
 
   test("a non-frozen stdlib enum crosses a call in both directions", () => {
     const boundary = Swift.enum("fixture.StdlibBoundary")!;
     const rule = Swift.enum("Swift.FloatingPointRoundingRule")!;
-    expect(boundary.call("isRoundingUp", rule.case("up"))).toBe(true);
-    expect(boundary.call("isRoundingUp", rule.case("down"))).toBe(false);
-    expect(boundary.call("roundingDown")).toBe("down");
+    expect(boundary.$call("isRoundingUp", rule.$case("up"))).toBe(true);
+    expect(boundary.$call("isRoundingUp", rule.$case("down"))).toBe(false);
+    expect(boundary.$call("roundingDown")).toBe("down");
   });
 });

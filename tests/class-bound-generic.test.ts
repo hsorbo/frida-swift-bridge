@@ -91,7 +91,7 @@ describe("class-bound generic parameters of Objective-C types", () => {
   test("a method of a generic type passes its class-bound parameter as a bare reference", (ctx) => {
     requireDarwin(ctx);
     const conformer = classType("fixture.ObjCConformer").init();
-    const holder = (Swift.type("fixture.ObjCBoxes") as EnumType).call("conformerRefBox", conformer) as SwiftObject;
+    const holder = (Swift.type("fixture.ObjCBoxes") as EnumType).$call("conformerRefBox", conformer) as SwiftObject;
     expect(holder.holds(conformer)).toBe(true);
     expect((holder.held() as SwiftObject).$handle.equals(conformer.$handle)).toBe(true);
   });
@@ -100,7 +100,7 @@ describe("class-bound generic parameters of Objective-C types", () => {
     requireDarwin(ctx);
     const conformer = classType("fixture.ObjCConformer").init();
     const other = classType("fixture.ObjCConformer").init();
-    const valueBox = (Swift.type("fixture.ObjCBoxes") as EnumType).call("conformerValueBox", conformer) as SwiftObject;
+    const valueBox = (Swift.type("fixture.ObjCBoxes") as EnumType).$call("conformerValueBox", conformer) as SwiftObject;
     expect(valueBox.$method("holds", { self: "borrowing" }).call(conformer)).toBe(true);
     expect(valueBox.$method("holds", { self: "borrowing" }).call(other)).toBe(false);
   });

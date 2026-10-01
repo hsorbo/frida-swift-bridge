@@ -117,7 +117,7 @@ describe("registry", () => {
     loadResilient();
     const names = new Set([...Swift.images()].map((m) => m.name));
     expect(names.has(RESILIENT_MODULE)).toBeTruthy();
-    const types = new Set([...Swift.enumerateTypes()].map((t) => t.name));
+    const types = new Set([...Swift.enumerateTypes()].map((t) => t.$name));
     expect(types.has("resilient.ResilientPoint")).toBeTruthy();
   });
 
@@ -125,7 +125,7 @@ describe("registry", () => {
     requireSwift();
     const lib = Process.getModuleByName(SWIFTCORE_MODULE);
     const find = (name: string) =>
-      [...Swift.enumerateTypes(lib)].find((t) => t.name === name) ?? null;
+      [...Swift.enumerateTypes(lib)].find((t) => t.$name === name) ?? null;
     const first = find("Swift.Int");
     const second = find("Swift.Int");
     expect(first).not.toBeNull();
@@ -145,7 +145,7 @@ describe("registry", () => {
     requireSwift();
     const t = Swift.type("Swift.Int");
     expect(t instanceof StructType).toBeTruthy();
-    expect(t!.name).toBe("Swift.Int");
+    expect(t!.$name).toBe("Swift.Int");
     expect(Swift.type("Swift.NoSuchTypeQX")).toBeNull();
   });
 
@@ -166,7 +166,7 @@ describe("registry", () => {
   test("enumeration names generic types without realizing metadata", () => {
     loadFixture();
     const fixture = Process.getModuleByName(FIXTURE_MODULE);
-    const box = [...Swift.enumerateStructs(fixture)].find((t) => t.name === "fixture.ConstrainedBox")!;
+    const box = [...Swift.enumerateStructs(fixture)].find((t) => t.$name === "fixture.ConstrainedBox")!;
     expect(box.toJSON().kind).toBe("struct");
     expect(() => metadataOf(box)).toThrow();
   });

@@ -116,11 +116,11 @@ describe("async method", () => {
 
   test("static async method on a value type (no self): Accumulator.sumStaticAsync(4, 5) ⇒ 9", async () => {
     const t = typeOf(metadataFor("fixture.Accumulator")!) as ValueType;
-    expect(await t.call("sumStaticAsync", 4, 5)).toEqual(int64(9));
+    expect(await t.$call("sumStaticAsync", 4, 5)).toEqual(int64(9));
   });
 
   test("static async method on a class: AsyncCalc.combineAsync(3, 4) ⇒ 34", async () => {
     const t = typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType;
-    expect(await t.call("combineAsync", 3, 4)).toEqual(int64(34));
+    expect(await t.$call("combineAsync", 3, 4)).toEqual(int64(34));
   });
 });

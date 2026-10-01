@@ -139,7 +139,7 @@ describe("enumerateProperties", () => {
 
   test("is exposed on the type wrapper as .properties", () => {
     const point = typeOf(metadataFor("fixture.Point")!) as StructType;
-    expect(point.properties.map((p) => p.name).sort()).toEqual(["doubled", "tracked", "x"]);
+    expect(point.$properties.map((p) => p.name).sort()).toEqual(["doubled", "tracked", "x"]);
   });
 
   test("lists class properties with their types", () => {
@@ -256,13 +256,13 @@ describe("ClassType static invocation", () => {
   beforeEach(() => { loadFixture(); });
 
   test("calls a static factory and wraps the class return", () => {
-    const made = robotType().call("make", "Forged") as SwiftObject;
+    const made = robotType().$call("make", "Forged") as SwiftObject;
     expect(made.$owned).toBe(true);
     expect(made.$field("name").read()).toBe("Forged");
   });
 
   test("an inherited class func sees the subclass as its dynamic Self", () => {
-    expect((typeOf(metadataFor("fixture.RabbitBurrow")!) as ClassType).call("occupant")).toBe("RabbitBurrow");
+    expect((typeOf(metadataFor("fixture.RabbitBurrow")!) as ClassType).$call("occupant")).toBe("RabbitBurrow");
   });
 });
 
@@ -271,16 +271,16 @@ describe("static properties", () => {
 
   test("a value type reads its computed, stored and let static properties", () => {
     const duckling = Swift.type("fixture.Duckling") as StructType;
-    expect(duckling.get("species")).toBe("duck");
-    expect(duckling.get("flockSize")).toEqual(int64(12));
-    expect(duckling.get("motto")).toBe("quack");
+    expect(duckling.$get("species")).toBe("duck");
+    expect(duckling.$get("flockSize")).toEqual(int64(12));
+    expect(duckling.$get("motto")).toBe("quack");
   });
 
   test("a class reads its static property with the metatype as self", () => {
-    expect((Swift.type("fixture.Owlet") as ClassType).get("species")).toBe("owl");
+    expect((Swift.type("fixture.Owlet") as ClassType).$get("species")).toBe("owl");
   });
 
   test("an instance property is not a static one", () => {
-    expect(() => (Swift.type("fixture.Duckling") as StructType).get("weight")).toThrow(/no static getter for weight/);
+    expect(() => (Swift.type("fixture.Duckling") as StructType).$get("weight")).toThrow(/no static getter for weight/);
   });
 });

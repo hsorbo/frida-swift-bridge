@@ -43,8 +43,8 @@ describe("Swift.modules", () => {
   test("resolves a type in the module by its bare name", () => {
     const robot = Swift.modules.fixture.Robot as ClassType;
     expect(robot instanceof ClassType).toBeTruthy();
-    expect(robot.name).toBe("fixture.Robot");
-    expect((Swift.modules.Swift.Int as StructType).name).toBe("Swift.Int");
+    expect(robot.$name).toBe("fixture.Robot");
+    expect((Swift.modules.Swift.Int as StructType).$name).toBe("Swift.Int");
   });
 
   test("resolves a protocol in the module by its bare name", () => {

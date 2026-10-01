@@ -28,7 +28,7 @@ describe("value return embedding a class ref", () => {
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
 
-    const wrapper = (typeOf(metadataFor("fixture.Wrapper")) as StructType).call("make", token) as SwiftObject;
+    const wrapper = (typeOf(metadataFor("fixture.Wrapper")) as StructType).$call("make", token) as SwiftObject;
     expect(wrapper.$kind).toBe("value");
 
     const owned = wrapper;
@@ -48,7 +48,7 @@ describe("bridge-object container return", () => {
   beforeEach(() => { loadFixture(); });
 
   test("a returned Array is adopted as an owned ValueInstance, not decoded lossily", () => {
-    const arr = (typeOf(metadataFor("fixture.Bag")) as StructType).call("ints") as SwiftObject;
+    const arr = (typeOf(metadataFor("fixture.Bag")) as StructType).$call("ints") as SwiftObject;
     expect(arr.$kind).toBe("value");
 
     const owned = arr;
@@ -70,7 +70,7 @@ describe("opaque existential return", () => {
     const view = new ClassInstance(greeter.$handle);
     const before = view.retainCount;
 
-    const boxed = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).call("wrap", greeter) as SwiftObject;
+    const boxed = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).$call("wrap", greeter) as SwiftObject;
     expect(boxed.$kind).toBe("value");
     expect(boxed.$owned).toBe(true);
     expect(view.retainCount).toBe(before + 1);
@@ -80,7 +80,7 @@ describe("opaque existential return", () => {
   });
 
   test("a value payload still reads out as a plain value", () => {
-    const person = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).call("wrapPerson", "Cy", 9);
+    const person = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).$call("wrapPerson", "Cy", 9);
     expect(person).toEqual({ name: "Cy", age: int64(9) });
   });
 });

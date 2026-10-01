@@ -12,7 +12,7 @@ describe("typed value construction", () => {
   beforeEach(() => { loadFixture(); });
 
   test("fromJS builds an owned value", () => {
-    const v = loadable().fromJS({ a: 1, b: 2, c: 3, d: 4 });
+    const v = loadable().$fromJS({ a: 1, b: 2, c: 3, d: 4 });
     expect(v.$kind).toBe("value");
     expect(v.$owned).toBe(true);
     expect(v.$fields).toEqual({ a: int64(1), b: int64(2), c: int64(3), d: int64(4) });
@@ -21,8 +21,8 @@ describe("typed value construction", () => {
 
   test("borrow wraps existing storage without owning it", () => {
     const t = loadable();
-    const src = t.fromJS({ a: 5, b: 6, c: 7, d: 8 });
-    const view = t.borrow(src.$handle);
+    const src = t.$fromJS({ a: 5, b: 6, c: 7, d: 8 });
+    const view = t.$borrow(src.$handle);
     expect(view.$owned).toBe(false);
     expect(view.$fields).toEqual({ a: int64(5), b: int64(6), c: int64(7), d: int64(8) });
     src.$dispose();
@@ -30,8 +30,8 @@ describe("typed value construction", () => {
 
   test("copy takes an independent +1 that outlives its source", () => {
     const t = loadable();
-    const src = t.fromJS({ a: 1, b: 1, c: 1, d: 1 });
-    const dup = t.copy(src.$handle);
+    const src = t.$fromJS({ a: 1, b: 1, c: 1, d: 1 });
+    const dup = t.$copy(src.$handle);
     expect(dup.$owned).toBe(true);
     src.$dispose();
     expect(dup.$fields).toEqual({ a: int64(1), b: int64(1), c: int64(1), d: int64(1) });
@@ -43,7 +43,7 @@ describe("typed value construction", () => {
     const md = metadataOf(t);
     const storage = Memory.alloc(md.typeLayout.stride);
     writeValue(md, storage, { a: 9, b: 8, c: 7, d: 6 });
-    const owned = t.adopt(storage);
+    const owned = t.$adopt(storage);
     expect(owned.$owned).toBe(true);
     expect(owned.$handle.equals(storage)).toBe(true);
     expect(owned.$fields).toEqual({ a: int64(9), b: int64(8), c: int64(7), d: int64(6) });

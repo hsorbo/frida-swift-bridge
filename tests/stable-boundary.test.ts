@@ -72,7 +72,7 @@ describe("stable object boundary", () => {
 
   test("a $field view type-checks and marshals as a call argument", () => {
     const Int = typeOf(metadataFor("Swift.Int")!);
-    const s = (typeOf(metadataFor("fixture.LoadableStruct")!) as StructType).new({ a: 3, b: 4, c: 0, d: 0 });
+    const s = (typeOf(metadataFor("fixture.LoadableStruct")!) as StructType).$new({ a: 3, b: 4, c: 0, d: 0 });
     const fieldA = s.$field("a");
     const add = Swift.NativeFunction(fixtureExport("fixture.addInts"), Int, [Int, Int]);
     expect(add(fieldA, fieldA)).toEqual(int64(6));

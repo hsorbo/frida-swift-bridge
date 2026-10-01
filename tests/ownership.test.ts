@@ -31,7 +31,7 @@ describe("ownership", () => {
   });
 
   test("a class return is owned; disposing a borrowed wrapper does not release", () => {
-    const made = robotType().call("make", "Forged") as SwiftObject;
+    const made = robotType().$call("make", "Forged") as SwiftObject;
     expect(made.$owned).toBe(true);
     const view = new ClassInstance(made.$handle);
     expect(view.owned).toBe(false);

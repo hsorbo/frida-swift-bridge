@@ -33,13 +33,13 @@ describe("toJSON", () => {
     ] as const) {
       const t = typeOf(metadataFor(name)!);
       expect(json(t)).toEqual({ kind, name, module: "fixture" });
-      expect(t.moduleName).toBe("fixture");
+      expect(t.$moduleName).toBe("fixture");
     }
   });
 
   test("a tuple type has no module and no elements in its JSON", () => {
     const t = typeOf(mangledType("Si_Sit"));
-    expect(json(t)).toEqual({ kind: "tuple", name: t.name, module: null });
+    expect(json(t)).toEqual({ kind: "tuple", name: t.$name, module: null });
   });
 
   test("kind maps across metatype and function types", () => {
@@ -75,7 +75,7 @@ describe("toJSON", () => {
 
   test("the SwiftObject facade delegates JSON.stringify to the wrapped instance", () => {
     const t = typeOf(metadataFor("fixture.LoadableStruct")!) as StructType;
-    const obj = t.new({ a: 1, b: 2, c: 3, d: 4 });
+    const obj = t.$new({ a: 1, b: 2, c: 3, d: 4 });
     expect(json(obj)).toEqual({
       kind: "value",
       type: "fixture.LoadableStruct",

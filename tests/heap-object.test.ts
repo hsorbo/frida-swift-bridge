@@ -54,7 +54,7 @@ describe("ClassInstance", () => {
 
   test("type exposes the instance's SwiftType for symmetric reflection", () => {
     const counter = makeCounter(1);
-    expect(counter.type.name).toBe("fixture.Counter");
+    expect(counter.type.$name).toBe("fixture.Counter");
     expect(typeName(metadataOf(counter.type))).toBe("fixture.Counter");
   });
 

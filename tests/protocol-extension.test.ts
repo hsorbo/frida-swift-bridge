@@ -12,21 +12,21 @@ describe("protocol-extension members on a conforming type", () => {
     expect(type.$instanceMethods()).toContain("describe()");
     expect(type.$instanceMethods()).toContain("shout()");
 
-    const describer = type.new({ displayName: "Ada" });
+    const describer = type.$new({ displayName: "Ada" });
     expect(describer.describe()).toBe("<Ada>");
     expect(describer.shout()).toBe("ADA");
   });
 
   test("a value type reads its protocol's extension property", () => {
     const type = Swift.type("fixture.DefaultDescriber") as StructType;
-    expect(type.properties.map((p) => p.name)).toContain("initial");
-    expect(type.new({ displayName: "Ada" }).initial).toBe("A");
+    expect(type.$properties.map((p) => p.name)).toContain("initial");
+    expect(type.$new({ displayName: "Ada" }).initial).toBe("A");
   });
 
   test("the type's own implementation shadows the protocol's default", () => {
     const type = Swift.type("fixture.CustomDescriber") as StructType;
     expect(type.$instanceMethods().filter((m) => m === "describe()").length).toBe(1);
-    expect(type.new({ displayName: "Ada" }).$method("describe", { self: "borrowing" }).call()).toBe("custom:Ada");
+    expect(type.$new({ displayName: "Ada" }).$method("describe", { self: "borrowing" }).call()).toBe("custom:Ada");
   });
 
   test("a class reaches an extension method of a protocol that is not class-bound", () => {
@@ -40,58 +40,58 @@ describe("protocol-extension members on a conforming type", () => {
   });
 
   test("an overloaded extension method is picked by call arity", () => {
-    const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
+    const n = (Swift.type("fixture.NarrowScalar") as StructType).$new({ n: 11 });
     expect(n.scaledTwice()).toEqual(int64(22));
   });
 
   test("an overloaded extension method is picked by labels", () => {
-    const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
+    const n = (Swift.type("fixture.NarrowScalar") as StructType).$new({ n: 11 });
     expect(n.$method("scaledTwice", { labels: [null] }).call(3)).toEqual(int64(66));
     expect(n.$method("scaledTwice", { labels: ["by"] }).call(3)).toEqual(int64(67));
   });
 
   test("an extension method resolves when the requirement's witness thunk inlines the implementation", () => {
     loadFixtureSyms();
-    const w = (Swift.type("fixturesyms.WideScalar") as StructType).new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
+    const w = (Swift.type("fixturesyms.WideScalar") as StructType).$new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
     expect(w.scaledTwice()).toEqual(int64(30));
   });
 
   test("an async extension method resolves by naming the conformance's async witness thunks", async () => {
     loadFixtureSyms();
-    const ruler = (Swift.type("fixturesyms.Ruler") as StructType).new({ n: 7 });
+    const ruler = (Swift.type("fixturesyms.Ruler") as StructType).$new({ n: 7 });
     expect(await ruler.measureTwice()).toEqual(int64(14));
   });
 
   test("an extension method differing from a requirement only in return type is not called through its witness", () => {
-    const c = (Swift.type("fixture.IntChooser") as StructType).new({ n: 4 });
+    const c = (Swift.type("fixture.IntChooser") as StructType).$new({ n: 4 });
     expect(c.$method("choose", { returnType: "Swift.String", self: "borrowing" }).call()).toBe("ext");
     expect(c.$method("choose", { returnType: "Swift.Int", self: "borrowing" }).call()).toEqual(int64(4));
   });
 
   test("an extension method resolves on a stripped binary by naming the requirement from another conformance's witness", () => {
-    const w = (Swift.type("fixture.WideScalar") as StructType).new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
+    const w = (Swift.type("fixture.WideScalar") as StructType).$new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
     expect(w.scaledTwice()).toEqual(int64(30));
   });
 
   test("a requirement named only by another conformance's default calls the stripped conformance's own witness", () => {
-    const r = (Swift.type("fixture.HiddenRanked") as StructType).new({ n: 7 });
+    const r = (Swift.type("fixture.HiddenRanked") as StructType).$new({ n: 7 });
     expect(r.rank()).toEqual(int64(7));
   });
 
   test("another conformance's optimized thunk calling some other function first does not name the requirement", () => {
     loadOptimized();
-    const t = (Swift.type("optimized.HiddenTagged") as StructType).new({ n: 7 });
+    const t = (Swift.type("optimized.HiddenTagged") as StructType).$new({ n: 7 });
     expect(() => t.tag()).toThrow(/cannot tell whether tag\(\) is a requirement of optimized\.Tagged/);
   });
 
   test("an extension method returns Self and passes an associated type indirectly for a loadable conformer", () => {
-    const source = (Swift.type("fixture.IntSource") as StructType).new({ value: 5 });
+    const source = (Swift.type("fixture.IntSource") as StructType).$new({ value: 5 });
     expect(source.me().value).toEqual(int64(5));
     expect(source.echo(9)).toEqual(int64(9));
   });
 
   test("an extension method still ambiguous after filtering lists its overloads", () => {
-    const n = (Swift.type("fixture.NarrowScalar") as StructType).new({ n: 11 });
+    const n = (Swift.type("fixture.NarrowScalar") as StructType).$new({ n: 11 });
     expect(() => n.scaledTwice(3)).toThrow(
       /ambiguous extension method scaledTwice on fixture\.Scalable: .*scaledTwice\(_:\).*\{ arity \}, \{ labels \}/
     );
@@ -110,37 +110,37 @@ describe("constrained protocol-extension members", () => {
   test("a protocol-constrained extension method passes the extra witness table in canonical order", () => {
     const type = Swift.type("fixture.BandedBird") as StructType;
     expect(type.$instanceMethods()).toContain("bandedChirp()");
-    expect(type.new({ band: 7 }).bandedChirp()).toBe("7:peep");
+    expect(type.$new({ band: 7 }).bandedChirp()).toBe("7:peep");
   });
 
   test("a protocol-constrained extension property is listed and readable", () => {
     const type = Swift.type("fixture.BandedBird") as StructType;
-    expect(type.properties.map((p) => p.name)).toContain("bandLabel");
-    expect(type.new({ band: 7 }).bandLabel).toBe("#7");
+    expect(type.$properties.map((p) => p.name)).toContain("bandLabel");
+    expect(type.$new({ band: 7 }).bandLabel).toBe("#7");
   });
 
   test("a constraint to a refining protocol passes its witness table in place of Self's own", () => {
     const type = Swift.type("fixture.Lark") as StructType;
     expect(type.$instanceMethods()).toContain("song()");
-    expect(type.new({ pitch: 1 }).song()).toBe("lala");
+    expect(type.$new({ pitch: 1 }).song()).toBe("lala");
   });
 
   test("an associated-type-constrained extension method is listed and callable", () => {
     const type = Swift.type("fixture.IntNest") as StructType;
     expect(type.$instanceMethods()).toContain("eggCount()");
-    expect(type.new({ egg: 21 }).eggCount()).toEqual(int64(42));
+    expect(type.$new({ egg: 21 }).eggCount()).toEqual(int64(42));
   });
 
   test("a constraint on an associated type declared by a base protocol is checked", () => {
     const type = Swift.type("fixture.IntClutch") as StructType;
     expect(type.$instanceMethods()).toContain("clutchCount()");
-    expect(type.new({ egg: 5 }).clutchCount()).toEqual(int64(15));
+    expect(type.$new({ egg: 5 }).clutchCount()).toEqual(int64(15));
     expect((Swift.type("fixture.WordClutch") as StructType).$instanceMethods()).not.toContain("clutchCount()");
   });
 
   test("an accessor typed by an associated type declared by a base protocol resolves", () => {
-    expect((Swift.type("fixture.IntClutch") as StructType).new({ egg: 5 }).firstEgg).toEqual(int64(5));
-    expect((Swift.type("fixture.WordClutch") as StructType).new({ egg: "wren" }).firstEgg).toBe("wren");
+    expect((Swift.type("fixture.IntClutch") as StructType).$new({ egg: 5 }).firstEgg).toEqual(int64(5));
+    expect((Swift.type("fixture.WordClutch") as StructType).$new({ egg: "wren" }).firstEgg).toBe("wren");
   });
 
   test("an associated type made class-bound by the where clause passes and returns directly", () => {
@@ -183,14 +183,14 @@ describe("constrained protocol-extension members", () => {
     const type = Swift.type("fixture.Kestrel") as StructType;
     if (type === null) ctx.skip("fixture compiled without nested protocols (Swift < 5.10)");
     expect(type.$instanceMethods()).toContain("totalHeight()");
-    expect(type.new({ perch: 4 }).totalHeight()).toEqual(int64(43));
+    expect(type.$new({ perch: 4 }).totalHeight()).toEqual(int64(43));
   });
 
   test("a member of a constrained extension shadows the same member of a less constrained one", () => {
-    const banded = (Swift.type("fixture.BandedBird") as StructType).new({ band: 7 });
+    const banded = (Swift.type("fixture.BandedBird") as StructType).$new({ band: 7 });
     expect(banded.greeting()).toBe("banded hello peep");
     expect(banded.tag).toBe("banded");
-    const free = (Swift.type("fixture.FreeBird") as StructType).new({ wingspan: 3 });
+    const free = (Swift.type("fixture.FreeBird") as StructType).$new({ wingspan: 3 });
     expect(free.greeting()).toBe("hello caw");
     expect(free.tag).toBe("plain");
   });
@@ -201,8 +201,8 @@ describe("constrained protocol-extension members", () => {
       expect(bird.$instanceMethods()).not.toContain(selector);
     }
     expect((Swift.type("fixture.PerchedBird") as ClassType).$instanceMethods()).not.toContain("rookeryChirp()");
-    expect(bird.properties.map((p) => p.name)).not.toContain("bandLabel");
-    const free = bird.new({ wingspan: 3 });
+    expect(bird.$properties.map((p) => p.name)).not.toContain("bandLabel");
+    const free = bird.$new({ wingspan: 3 });
     expect(free.bandedChirp).toBeUndefined();
     expect(() => free.$call("bandedChirp")).toThrow(/no method bandedChirp/);
 
@@ -210,7 +210,7 @@ describe("constrained protocol-extension members", () => {
     for (const selector of ["eggCount()", "nocturnalEcho(_:)", "objectEcho(_:)", "rookeryEcho(_:)"]) {
       expect(nest.$instanceMethods()).not.toContain(selector);
     }
-    expect(() => nest.new({ egg: "x" }).$call("eggCount")).toThrow(/no method eggCount/);
+    expect(() => nest.$new({ egg: "x" }).$call("eggCount")).toThrow(/no method eggCount/);
   });
 });
 
@@ -221,18 +221,18 @@ describe("static protocol-extension members", () => {
     const type = Swift.type("fixture.Duckling") as StructType;
     expect(type.$typeMethods()).toContain("hatch(count:)");
     expect(type.$instanceMethods()).not.toContain("hatch(count:)");
-    expect(type.call("hatch", 3)).toBe("3 duck (Duckling)");
+    expect(type.$call("hatch", 3)).toBe("3 duck (Duckling)");
   });
 
   test("a class lists and calls a static extension method", () => {
     const type = Swift.type("fixture.Owlet") as ClassType;
     expect(type.$typeMethods()).toContain("hatch(count:)");
-    expect(type.call("hatch", 2)).toBe("2 owl (Owlet)");
+    expect(type.$call("hatch", 2)).toBe("2 owl (Owlet)");
   });
 
   test("a static extension property is listed as static", () => {
     const type = Swift.type("fixture.Duckling") as StructType;
-    expect(type.properties.find((p) => p.name === "nursery")).toEqual({
+    expect(type.$properties.find((p) => p.name === "nursery")).toEqual({
       name: "nursery",
       typeName: "Swift.String",
       isStatic: true,
@@ -241,12 +241,12 @@ describe("static protocol-extension members", () => {
   });
 
   test("a static extension property reads through the type", () => {
-    expect((Swift.type("fixture.Duckling") as StructType).get("nursery")).toBe("duck nursery");
-    expect((Swift.type("fixture.Owlet") as ClassType).get("nursery")).toBe("owl nursery");
+    expect((Swift.type("fixture.Duckling") as StructType).$get("nursery")).toBe("duck nursery");
+    expect((Swift.type("fixture.Owlet") as ClassType).$get("nursery")).toBe("owl nursery");
   });
 
   test("an instance does not reach a static extension method", () => {
-    const duckling = (Swift.type("fixture.Duckling") as StructType).new({ weight: 1 });
+    const duckling = (Swift.type("fixture.Duckling") as StructType).$new({ weight: 1 });
     expect(duckling.hatch).toBeUndefined();
     expect(() => duckling.$call("hatch", 1)).toThrow(/no method hatch/);
   });
