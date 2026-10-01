@@ -38,6 +38,8 @@ public extension String {
 
 public extension Robot {
     func hover() -> String { "hover" }
+
+    static func factoryName() -> String { "factory" }
 }
 
 public extension Sequence {

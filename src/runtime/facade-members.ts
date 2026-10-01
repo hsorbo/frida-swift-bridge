@@ -29,7 +29,8 @@ export interface FacadeMembers {
 }
 
 // The Swift members a facade answers: the defining module's are indexed up front; one another
-// module or a protocol extension adds joins the index when its name is first asked for.
+// module or a protocol extension adds joins the index when its name is first asked for. A miss is
+// remembered only until another module loads.
 export function facadeMembers(typeName: () => string, isStatic: boolean): FacadeMembers {
   let index: MemberIndex | null = null;
   const own = (): MemberIndex => {
@@ -47,10 +48,19 @@ export function facadeMembers(typeName: () => string, isStatic: boolean): Facade
     }
     return index;
   };
-  const searched = new Set<string>();
+  let searched = new Set<string>();
+  let searchedAmongModules = 0;
   const including = (key: string): MemberIndex => {
     const members = own();
-    if (members.methods.has(key) || members.properties.has(key) || searched.has(key)) {
+    if (members.methods.has(key) || members.properties.has(key)) {
+      return members;
+    }
+    const moduleCount = Process.enumerateModules().length;
+    if (moduleCount !== searchedAmongModules) {
+      searched = new Set();
+      searchedAmongModules = moduleCount;
+    }
+    if (searched.has(key)) {
       return members;
     }
     searched.add(key);

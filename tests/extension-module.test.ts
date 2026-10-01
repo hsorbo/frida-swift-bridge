@@ -10,13 +10,29 @@ import { enumerateSwiftModules, enumerateTypes } from "../src/reflection/registr
 describe("a module loaded after the search has already run", () => {
   test("its members are missing until it loads, then resolve without a flush", () => {
     loadFixture();
+    const Robot = Swift.type("fixture.Robot") as ClassType;
+    const robot = Robot.init("R2");
     expect(() => resolveMethod("fixture.Robot", "fly")).toThrow();
     expect(enumerateMethods("fixture.Robot").some((m) => m.name === "fly")).toBeFalsy();
+    expect(robot.fly).toBeUndefined();
+    expect("fly" in robot).toBe(false);
+    expect(Robot.factoryName).toBeUndefined();
+    expect("factoryName" in Robot).toBe(false);
+    expect(() => Robot.$initializer({ labels: ["badge"] })).toThrow();
 
     loadNoMetadata();
 
     expect(resolveMethod("fixture.Robot", "fly").selector).toBe("fly()");
-    expect((Swift.type("fixture.Robot") as ClassType).init("R2").fly()).toBe("fly R2");
+    expect(Robot.init("R2").fly()).toBe("fly R2");
+    expect(robot.fly()).toBe("fly R2");
+    expect("fly" in robot).toBe(true);
+    expect(robot.$call("fly")).toBe("fly R2");
+    expect(Swift.type("fixture.Robot")).toBe(Robot);
+    expect(Robot.factoryName()).toBe("factory");
+    expect("factoryName" in Robot).toBe(true);
+    expect(Robot.$call("factoryName")).toBe("factory");
+    expect(Robot.$initializer({ labels: ["badge"] }).call("7").name).toBe("R-7");
+    expect(Robot.init({ badge: "7" }).name).toBe("R-7");
   });
 
   test("its conformances are missing until it loads, then reported without a flush", () => {

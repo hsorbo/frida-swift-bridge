@@ -134,8 +134,14 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   const callable = callableCache(invoke);
 
   const has = (key: string): boolean => {
-    const m = members.own();
-    return RESERVED.has(key) || m.methods.has(key) || m.properties.has(key);
+    if (RESERVED.has(key)) {
+      return true;
+    }
+    if (key.startsWith("$") || POISON.has(key)) {
+      return false;
+    }
+    const m = members.including(key);
+    return m.methods.has(key) || m.properties.has(key);
   };
 
   const proxy = new Proxy(target, {

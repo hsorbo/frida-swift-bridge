@@ -423,6 +423,7 @@ const ALLOCATING_CONSTRUCTOR = "fC";
 
 export class ClassType extends NominalType {
   private initializers = new Map<ModuleScope, ClassInitializer[]>();
+  private initializersAmongModules = 0;
 
   get $superClass(): SwiftType | null {
     const superclass = new ClassMetadata(metadataOf(this).handle).superclass;
@@ -502,6 +503,13 @@ export class ClassType extends NominalType {
   }
 
   private resolveInitializers(modules: ModuleScope): ClassInitializer[] {
+    if (modules === "allLoadedModules") {
+      const moduleCount = Process.enumerateModules().length;
+      if (moduleCount !== this.initializersAmongModules) {
+        this.initializers.delete(modules);
+        this.initializersAmongModules = moduleCount;
+      }
+    }
     const cached = this.initializers.get(modules);
     if (cached !== undefined) {
       return cached;
