@@ -1818,3 +1818,15 @@ public struct Gauge {
         set { raw = newValue * 2 + newValue % 3 }
     }
 }
+
+// A property wrapper's projected value is Swift's own $-name; the facades keep $ for themselves, so
+// it is read through $get.
+@propertyWrapper public struct Doubled {
+    public var wrappedValue: Int
+    public var projectedValue: Int { wrappedValue * 2 }
+    public init(wrappedValue: Int) { self.wrappedValue = wrappedValue }
+}
+public final class Projecting {
+    @Doubled public var n: Int = 3
+    public init() {}
+}

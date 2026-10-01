@@ -213,3 +213,25 @@ describe("Swift object collision-proofing", () => {
     expect(o.field).toBeUndefined();
   });
 });
+
+describe("Swift object bridge namespace", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("any $-prefixed name is the bridge's: unknown ones read as undefined and reject assignment", () => {
+    const o = robot("R2");
+    expect(o.$noSuchQX).toBeUndefined();
+    expect("$noSuchQX" in o).toBe(false);
+    expect(() => { o.$noSuchQX = 1; }).toThrow("no property $noSuchQX on fixture.Robot");
+  });
+
+  test("constructor is the target's, not a Swift member lookup", () => {
+    expect(typeof robot("R2").constructor).toBe("function");
+  });
+
+  test("a property wrapper's projected value is read through $get", () => {
+    const o = (Swift.type("fixture.Projecting") as ClassType).init();
+    expect(o.n).toEqual(int64(3));
+    expect(o.$n).toBeUndefined();
+    expect(o.$get("$n")).toEqual(int64(6));
+  });
+});

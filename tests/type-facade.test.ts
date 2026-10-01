@@ -82,7 +82,8 @@ describe("Swift type member sugar", () => {
     const duckling = Object.keys(Duckling);
     expect(duckling).toContain("flockSize");
     expect(duckling).toContain("species");
-    expect(duckling).toContain("nursery"); // a protocol extension in the defining module
+    expect(Duckling.nursery).toBe("duck nursery"); // another module's or a protocol extension's joins the listing once read
+    expect(Object.keys(Duckling)).toContain("nursery");
     expect(duckling).not.toContain("$name");
     for (const k of duckling) {
       expect(k in Duckling).toBe(true);

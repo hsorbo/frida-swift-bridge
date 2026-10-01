@@ -31,7 +31,6 @@ import {
   enumerateProperties,
   getStaticProperty,
   setStaticProperty,
-  memberKindsInOtherModules,
   lowerResolveOptions,
   findMethod,
   findMember,
@@ -45,7 +44,7 @@ import { demangle } from "./demangle.js";
 import { typeName } from "./type-name.js";
 import { Protocol, protocolsForType } from "./protocol.js";
 import { findType, swiftTypes } from "../reflection/registry.js";
-import { ClosureSpec } from "./closure.js";
+import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache } from "./facade-members.js";
 
 export interface TypeMember {
   name: string;
@@ -699,27 +698,6 @@ export function swiftFunction(
 
 const RESERVED = new Set(["constructor", "toString", "valueOf", "toJSON", "hasOwnProperty", "init"]);
 
-// A synthesized `then` would make the facade thenable and silently break `await`; never a member.
-const POISON = new Set(["then", "catch", "finally"]);
-
-function isBridgeMember(key: string): boolean {
-  return key.startsWith("$") || RESERVED.has(key);
-}
-
-function invokeOptions(args: CallArg[]): MemberLookupOptions {
-  const options: MemberLookupOptions = { arity: args.length };
-  if (args.some((a) => a instanceof ClosureSpec)) {
-    options.typeArguments = []; // generic path; planGenericMethod infers the closure-result R
-  }
-  return options;
-}
-
-interface TypeMemberIndex {
-  methods: Set<string>;
-  properties: Set<string>;
-  writableProperties: Set<string>;
-}
-
 // A nominal type's facade: its type methods, static properties, enum cases and nested types under
 // their Swift names, the bridge's own members under $. Resolution is per name and lazy, like an
 // object's; the listing stays shallow (the defining module).
@@ -727,41 +705,7 @@ function typeFacade<T extends NominalType>(target: T): T {
   const name = (): string => target.$name;
   const enumType = target instanceof EnumType ? target : null;
 
-  let index: TypeMemberIndex | null = null;
-  const members = (): TypeMemberIndex => {
-    if (index === null) {
-      const properties = enumerateProperties(name(), "definingModule").filter((p) => p.isStatic);
-      index = {
-        methods: new Set(
-          enumerateMethods(name(), "definingModule")
-            .filter((m) => m.kind === "method" && m.isStatic)
-            .map((m) => m.name)
-        ),
-        properties: new Set(properties.map((p) => p.name)),
-        writableProperties: new Set(properties.filter((p) => p.writable).map((p) => p.name)),
-      };
-    }
-    return index;
-  };
-  const searchedInOtherModules = new Set<string>();
-  const membersIncludingOtherModules = (key: string): TypeMemberIndex => {
-    const own = members();
-    if (own.methods.has(key) || own.properties.has(key) || searchedInOtherModules.has(key)) {
-      return own;
-    }
-    searchedInOtherModules.add(key);
-    const found = memberKindsInOtherModules(name(), key, true);
-    if (found.method) {
-      own.methods.add(key);
-    }
-    if (found.property) {
-      own.properties.add(key);
-    }
-    if (found.writable) {
-      own.writableProperties.add(key);
-    }
-    return own;
-  };
+  const members = facadeMembers(name, true);
 
   let payloadByCase: Map<string, boolean> | null = null;
   const cases = (): Map<string, boolean> => {
@@ -793,17 +737,17 @@ function typeFacade<T extends NominalType>(target: T): T {
   };
 
   const has = (key: string): boolean => {
-    if (isBridgeMember(key)) {
+    if (isBridgeMember(key, RESERVED)) {
       return Reflect.has(target, key);
     }
     if (POISON.has(key)) {
       return false;
     }
-    const m = membersIncludingOtherModules(key);
+    const m = members.including(key);
     return m.methods.has(key) || m.properties.has(key) || cases().has(key) || nestedType(key) !== null;
   };
 
-  const callables = new Map<string, (...args: CallArg[]) => CallResult | Promise<CallResult>>();
+  const callable = callableCache((method, args) => target.$typeMethod(method, invokeOptions(args)).call(...args));
 
   const proxy = new Proxy(target, {
     has(t, key) {
@@ -816,24 +760,19 @@ function typeFacade<T extends NominalType>(target: T): T {
       if (key === "hasOwnProperty") {
         return has;
       }
-      if (isBridgeMember(key)) {
+      if (isBridgeMember(key, RESERVED)) {
         const member = Reflect.get(t, key, t);
         return typeof member === "function" && key !== "constructor" ? member.bind(t) : member;
       }
       if (POISON.has(key)) {
         return undefined;
       }
-      const m = membersIncludingOtherModules(key);
+      const m = members.including(key);
       if (m.properties.has(key)) {
         return getStaticProperty(metadataOf(t), key);
       }
       if (m.methods.has(key)) {
-        let fn = callables.get(key);
-        if (fn === undefined) {
-          fn = (...args: CallArg[]) => t.$typeMethod(key, invokeOptions(args)).call(...args);
-          callables.set(key, fn);
-        }
-        return fn;
+        return callable(key);
       }
       const hasPayload = cases().get(key);
       if (hasPayload !== undefined) {
@@ -845,7 +784,7 @@ function typeFacade<T extends NominalType>(target: T): T {
       if (typeof key !== "string") {
         return false;
       }
-      const m = isBridgeMember(key) || POISON.has(key) ? null : membersIncludingOtherModules(key);
+      const m = isBridgeMember(key, RESERVED) || POISON.has(key) ? null : members.including(key);
       if (m === null || !m.properties.has(key)) {
         throw new Error(`no static property ${key} on ${name()}`);
       }
@@ -856,11 +795,11 @@ function typeFacade<T extends NominalType>(target: T): T {
       return true;
     },
     ownKeys() {
-      const m = members();
+      const m = members.own();
       return [...new Set([...m.methods, ...m.properties, ...cases().keys(), ...nestedTypeNames()])];
     },
     getOwnPropertyDescriptor(_t, key) {
-      const writable = typeof key === "string" && members().writableProperties.has(key);
+      const writable = typeof key === "string" && members.own().writableProperties.has(key);
       return { writable, configurable: true, enumerable: true };
     },
   });

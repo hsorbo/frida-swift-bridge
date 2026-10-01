@@ -10,13 +10,10 @@ import {
   MethodResolveOptions,
   ValueMethodResolveOptions,
   lowerResolveOptions,
-  enumerateMethods,
-  enumerateProperties,
-  memberKindsInOtherModules,
 } from "./method.js";
 import { typeName } from "./type-name.js";
 import { SwiftType } from "./swift-type.js";
-import { ClosureSpec } from "./closure.js";
+import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache } from "./facade-members.js";
 
 const RESERVED = new Set([
   "toString",
@@ -24,6 +21,7 @@ const RESERVED = new Set([
   "toJSON",
   "equals",
   "hasOwnProperty",
+  "constructor",
   "$kind",
   "$type",
   "$handle",
@@ -40,9 +38,6 @@ const RESERVED = new Set([
   "$container",
   "$dispose",
 ]);
-
-// A synthesized `then` would make the facade thenable and silently break `await`; never a member.
-const POISON = new Set(["then", "catch", "finally"]);
 
 export const RAW: unique symbol = Symbol("swift.raw");
 
@@ -105,12 +100,6 @@ function handleOf(other: SwiftObject | ClassInstance | ValueInstance | NativePoi
   return raw.handle;
 }
 
-interface MemberIndex {
-  methods: Set<string>;
-  properties: Set<string>;
-  writableProperties: Set<string>;
-}
-
 // One facade for class and value alike; $kind discriminates. The proxy roots its target, so an
 // owned target's +1 releases only when the proxy is GC'd.
 export function asSwiftObject(source: ClassInstance | NativePointer): SwiftClassObject;
@@ -137,61 +126,19 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
     const raw = lowerResolveOptions(options);
     return isValue ? value.method(name, raw) : object.method(name, raw);
   };
-  const invoke = (name: string, args: CallArg[]): CallResult | Promise<CallResult> => {
-    const options: ValueMethodResolveOptions = { arity: args.length };
-    if (args.some((a) => a instanceof ClosureSpec)) {
-      options.typeArguments = []; // generic path; planGenericMethod infers the closure-result R
-    }
-    return method(name, options).call(...args);
-  };
+  const invoke = (name: string, args: CallArg[]): CallResult | Promise<CallResult> =>
+    method(name, invokeOptions(args)).call(...args);
 
-  let index: MemberIndex | null = null;
-  const buildIndex = (): MemberIndex => {
-    const properties = enumerateProperties(fullName(), "definingModule").filter((p) => !p.isStatic);
-    return {
-      methods: new Set(
-        enumerateMethods(fullName(), "definingModule")
-          .filter((m) => m.kind === "method" && !m.isStatic)
-          .map((m) => m.name)
-      ),
-      properties: new Set(properties.map((p) => p.name)),
-      writableProperties: new Set(properties.filter((p) => p.writable).map((p) => p.name)),
-    };
-  };
-  const members = (): MemberIndex => {
-    if (index === null) {
-      index = buildIndex();
-    }
-    return index;
-  };
-  const searchedInOtherModules = new Set<string>();
-  const membersIncludingOtherModules = (key: string): MemberIndex => {
-    const own = members();
-    if (own.methods.has(key) || own.properties.has(key) || searchedInOtherModules.has(key)) {
-      return own;
-    }
-    searchedInOtherModules.add(key);
-    const found = memberKindsInOtherModules(fullName(), key);
-    if (found.method) {
-      own.methods.add(key);
-    }
-    if (found.property) {
-      own.properties.add(key);
-    }
-    if (found.writable) {
-      own.writableProperties.add(key);
-    }
-    return own;
-  };
+  const members = facadeMembers(fullName, false);
 
-  const callables = new Map<string, (...args: CallArg[]) => CallResult | Promise<CallResult>>();
+  const callable = callableCache(invoke);
 
   const proxy = new Proxy(target, {
     has(t, key) {
       if (typeof key !== "string") {
         return Reflect.has(t, key);
       }
-      const m = members();
+      const m = members.own();
       return RESERVED.has(key) || m.methods.has(key) || m.properties.has(key);
     },
     get(t, key) {
@@ -244,27 +191,24 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
             handle().equals(handleOf(other));
         case "hasOwnProperty":
           return (k: string) => {
-            const m = members();
+            const m = members.own();
             return RESERVED.has(k) || m.methods.has(k) || m.properties.has(k);
           };
         case "toString":
         case "valueOf":
           return () => `<${fullName() || "Swift.Object"}: ${handle()}>`;
+        case "constructor":
+          return Reflect.get(t, key);
       }
-      if (POISON.has(key)) {
+      if (key.startsWith("$") || POISON.has(key)) {
         return undefined;
       }
-      const m = membersIncludingOtherModules(key);
+      const m = members.including(key);
       if (m.properties.has(key)) {
         return readProperty(key);
       }
       if (m.methods.has(key)) {
-        let fn = callables.get(key);
-        if (fn === undefined) {
-          fn = (...args: CallArg[]) => invoke(key, args);
-          callables.set(key, fn);
-        }
-        return fn;
+        return callable(key);
       }
       return undefined;
     },
@@ -272,7 +216,7 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
       if (typeof key !== "string") {
         return false;
       }
-      const m = RESERVED.has(key) || POISON.has(key) ? null : membersIncludingOtherModules(key);
+      const m = isBridgeMember(key, RESERVED) || POISON.has(key) ? null : members.including(key);
       if (m === null || !m.properties.has(key)) {
         throw new Error(`no property ${key} on ${fullName()}`);
       }
@@ -283,11 +227,11 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
       return true;
     },
     ownKeys() {
-      const m = members();
+      const m = members.own();
       return ["$handle", ...m.methods, ...m.properties];
     },
     getOwnPropertyDescriptor(_t, key) {
-      const writable = typeof key === "string" && members().writableProperties.has(key);
+      const writable = typeof key === "string" && members.own().writableProperties.has(key);
       return { writable, configurable: true, enumerable: true };
     },
   });

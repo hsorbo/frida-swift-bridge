@@ -201,8 +201,10 @@ Swift.modules.MyApp.Outer.Inner;        // nested type
 A name resolves when it is read, so touching a type scans nothing. A type
 method resolves by arity like an object's; the `$typeMethod` and `$get` forms
 below take the same names with explicit options. `Object.keys(type)` lists the
-defining module's type methods, static properties, cases and nested types;
-members other modules add resolve by name but are not listed. A Swift member
+defining module's type methods, static properties, cases and nested types; a
+member another module or a protocol extension adds resolves by name and joins
+the listing once read, while `$typeMethods()` and `$instanceMethods()` always
+span every loaded module. A Swift member
 named like a reserved JS method (`toString`, `toJSON`, `valueOf`,
 `hasOwnProperty`, `constructor`) stays reachable through `$call` and `$get`.
 
@@ -332,7 +334,10 @@ view.$className;    // "MyApp.Robot"
 ## Objects and values
 
 Both class and value instances are represented by a facade — a JS proxy that
-exposes Swift members directly and reserves its own controls under a `$` prefix.
+exposes Swift members directly and reserves the whole `$` prefix for its own
+controls, so an unknown `$` name reads as `undefined` without a lookup. A
+property wrapper's projected value, Swift's own `$`-name, is read with
+`$get("$x")`.
 `$kind` discriminates the two: `"object"` for classes, `"value"` for
 structs/enums.
 
