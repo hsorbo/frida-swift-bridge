@@ -13,6 +13,7 @@ import { symbolicate } from "./runtime/symbolication.js";
 import { SwiftInterceptor } from "./runtime/interceptor.js";
 import {
   SwiftType,
+  NominalType,
   ClassType,
   StructType,
   EnumType,
@@ -68,6 +69,7 @@ export type {
 } from "./runtime/protocol.js";
 export {
   SwiftType,
+  NominalType,
   ValueType,
   StructType,
   EnumType,
@@ -149,12 +151,12 @@ export const Swift = {
     return moduleRegistry();
   },
 
-  type(name: string): SwiftType | null {
+  type(name: string): NominalType | null {
     const descriptor = findType(name);
     return descriptor === null ? null : typeFromDescriptor(descriptor);
   },
 
-  *enumerateTypes(module?: Module): Generator<SwiftType> {
+  *enumerateTypes(module?: Module): Generator<NominalType> {
     for (const descriptor of nameable(swiftTypes(module))) {
       yield typeFromDescriptor(descriptor);
     }

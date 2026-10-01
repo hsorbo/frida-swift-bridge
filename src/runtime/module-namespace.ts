@@ -1,10 +1,10 @@
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { protocolDescriptors } from "../abi/protocol-conformance.js";
 import { findType, swiftTypes } from "../reflection/registry.js";
-import { SwiftType, typeFromDescriptor } from "./swift-type.js";
+import { NominalType, typeFromDescriptor } from "./swift-type.js";
 import { Protocol, StableProtocol } from "./protocol.js";
 
-export type ModuleMember = SwiftType | StableProtocol;
+export type ModuleMember = NominalType | StableProtocol;
 export type ModuleNamespace = { readonly [name: string]: ModuleMember };
 export type ModuleRegistry = { readonly [module: string]: ModuleNamespace };
 

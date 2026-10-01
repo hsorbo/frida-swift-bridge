@@ -220,6 +220,7 @@ export {
 // Companion types naming the parameters and returns of the raw exports above.
 export {
   SwiftType,
+  NominalType,
   ValueType,
   StructType,
   EnumType,

@@ -170,6 +170,10 @@ export class SwiftType {
     return this.$moduleName;
   }
 
+}
+
+// A class, struct or enum: the wrappers with Swift members, and the ones the type facade wraps.
+export abstract class NominalType extends SwiftType {
   $typeMethods(options: MethodQuery = {}): string[] {
     return this.selectors(true, options);
   }
@@ -208,9 +212,25 @@ export class SwiftType {
   $get(name: string): CallResult {
     return getStaticProperty(metadataOf(this), name);
   }
+
+  abstract $typeMethod(name: string, options?: MemberLookupOptions): SwiftBoundMethod;
+  abstract $initializer(options?: MemberLookupOptions): SwiftBoundInitializer | SwiftClassBoundInitializer;
+  protected abstract hasInitializer(labels: string[]): boolean;
+
+  $call(name: string, ...args: CallArg[]): CallResult | Promise<CallResult> {
+    return this.$typeMethod(name, invokeOptions(args)).call(...args);
+  }
+
+  // A lone { label: value } object selects a labeled initializer when the type declares one.
+  protected initLookup(args: CallArg[]): { options: MemberLookupOptions; args: CallArg[] } {
+    const labeled = asLabeledArgs(args);
+    return labeled !== null && this.hasInitializer(labeled.labels)
+      ? { options: { labels: labeled.labels }, args: labeled.values }
+      : { options: { arity: args.length }, args };
+  }
 }
 
-export class ValueType extends SwiftType {
+export class ValueType extends NominalType {
   $typeMethod(name: string, options: MemberLookupOptions = {}): SwiftBoundMethod {
     const raw = lowerResolveOptions(options);
     const lookup = { ...raw, static: true };
@@ -224,10 +244,6 @@ export class ValueType extends SwiftType {
       }
     }
     return narrowBoundMethod(bindStaticMethod(metadataOf(this), name, raw));
-  }
-
-  $call(name: string, ...args: CallArg[]): CallResult | Promise<CallResult> {
-    return this.$typeMethod(name, invokeOptions(args)).call(...args);
   }
 
   $initializer(options: MemberLookupOptions = {}): SwiftBoundInitializer {
@@ -245,14 +261,11 @@ export class ValueType extends SwiftType {
   }
 
   init(...args: CallArg[]): SwiftValueObject | null {
-    const labeled = asLabeledArgs(args);
-    if (labeled !== null && this.hasInitializer(labeled.labels)) {
-      return this.$initializer({ labels: labeled.labels }).call(...labeled.values);
-    }
-    return this.$initializer({ arity: args.length }).call(...args);
+    const lookup = this.initLookup(args);
+    return this.$initializer(lookup.options).call(...lookup.args);
   }
 
-  private hasInitializer(labels: string[]): boolean {
+  protected hasInitializer(labels: string[]): boolean {
     const declares = (modules: ModuleScope): boolean =>
       enumerateMethods(this.$name, modules).some(
         (m) => m.name === "init" && sameSequence(m.argLabels, labels)
@@ -396,7 +409,7 @@ function selectInitializer(candidates: ClassInitializer[], options: MethodResolv
 
 const ALLOCATING_CONSTRUCTOR = "fC";
 
-export class ClassType extends SwiftType {
+export class ClassType extends NominalType {
   private initializers = new Map<ModuleScope, ClassInitializer[]>();
 
   get $superClass(): SwiftType | null {
@@ -415,14 +428,11 @@ export class ClassType extends SwiftType {
   }
 
   init(...args: CallArg[]): SwiftClassObject {
-    const labeled = asLabeledArgs(args);
-    if (labeled !== null && this.hasInitializer(labeled.labels)) {
-      return this.$initializer({ labels: labeled.labels }).call(...labeled.values);
-    }
-    return this.$initializer({ arity: args.length }).call(...args);
+    const lookup = this.initLookup(args);
+    return this.$initializer(lookup.options).call(...lookup.args);
   }
 
-  private hasInitializer(labels: string[]): boolean {
+  protected hasInitializer(labels: string[]): boolean {
     const declares = (modules: ModuleScope): boolean =>
       this.resolveInitializers(modules).some((c) => sameSequence(c.argLabels, labels));
     return declares("definingModule") || declares("allLoadedModules");
@@ -469,10 +479,6 @@ export class ClassType extends SwiftType {
         ? new BoundAsyncMethod(resolved, selfMetadata)
         : new BoundMethod(resolved, selfMetadata)
     );
-  }
-
-  $call(name: string, ...args: CallArg[]): CallResult | Promise<CallResult> {
-    return this.$typeMethod(name, invokeOptions(args)).call(...args);
   }
 
   private get fullName(): string {
@@ -717,8 +723,9 @@ interface TypeMemberIndex {
 // A nominal type's facade: its type methods, static properties, enum cases and nested types under
 // their Swift names, the bridge's own members under $. Resolution is per name and lazy, like an
 // object's; the listing stays shallow (the defining module).
-function typeFacade<T extends ValueType | ClassType>(target: T): T {
+function typeFacade<T extends NominalType>(target: T): T {
   const name = (): string => target.$name;
+  const enumType = target instanceof EnumType ? target : null;
 
   let index: TypeMemberIndex | null = null;
   const members = (): TypeMemberIndex => {
@@ -760,8 +767,8 @@ function typeFacade<T extends ValueType | ClassType>(target: T): T {
   const cases = (): Map<string, boolean> => {
     if (payloadByCase === null) {
       payloadByCase = new Map();
-      if (target instanceof EnumType) {
-        for (const field of enumerateFields(descriptorOf(target))) {
+      if (enumType !== null) {
+        for (const field of enumerateFields(descriptorOf(enumType))) {
           payloadByCase.set(field.name, field.mangledTypeName !== null);
         }
       }
@@ -830,8 +837,7 @@ function typeFacade<T extends ValueType | ClassType>(target: T): T {
       }
       const hasPayload = cases().get(key);
       if (hasPayload !== undefined) {
-        const enumType = t as EnumType;
-        return hasPayload ? (payload: SwiftValue) => enumType.$case(key, payload) : enumType.$case(key);
+        return hasPayload ? (payload: SwiftValue) => enumType!.$case(key, payload) : enumType!.$case(key);
       }
       return nestedType(key) ?? undefined;
     },
@@ -874,7 +880,7 @@ function cachedWrapper<T extends SwiftType>(key: NativePointer, make: () => T): 
   return wrapper as T;
 }
 
-function wrapperFromDescriptor(descriptor: ContextDescriptor): SwiftType {
+function wrapperFromDescriptor(descriptor: ContextDescriptor): NominalType {
   switch (descriptor.kind) {
     case ContextDescriptorKind.Class:
       return typeFacade(new ClassType(descriptor));
@@ -887,7 +893,7 @@ function wrapperFromDescriptor(descriptor: ContextDescriptor): SwiftType {
   }
 }
 
-export function typeFromDescriptor(descriptor: ContextDescriptor): SwiftType {
+export function typeFromDescriptor(descriptor: ContextDescriptor): NominalType {
   return cachedWrapper(descriptor.handle, () => wrapperFromDescriptor(descriptor));
 }
 

@@ -182,11 +182,12 @@ span every loaded Swift image and reflect modules loaded later.
 
 ## Types
 
-Every wrapper extends `SwiftType`. A class, struct or enum wrapper is a facade
-like an [object](#objects-and-values): its Swift members answer to their bare
-names, and the bridge's own members are `$`-prefixed so they never collide
-with one. `init` is the one bare bridge member, because it names Swift's
-initializer.
+Every wrapper extends `SwiftType`, which carries a type's identity. A class,
+struct or enum wrapper is a `NominalType`, which adds the member API and is a
+facade like an [object](#objects-and-values): its Swift members answer to
+their bare names, and the bridge's own members are `$`-prefixed so they never
+collide with one. `init` is the one bare bridge member, because it names
+Swift's initializer.
 
 ```js
 const Robot = Swift.modules.MyApp.Robot;
@@ -205,6 +206,8 @@ members other modules add resolve by name but are not listed. A Swift member
 named like a reserved JS method (`toString`, `toJSON`, `valueOf`,
 `hasOwnProperty`, `constructor`) stays reachable through `$call` and `$get`.
 
+On every `SwiftType`:
+
 - `type.$name`: the fully-qualified name, including every enclosing context
   (`MyApp.Outer.Inner`).
 - `type.$kind`: `"class"`, `"struct"`, `"enum"`, `"tuple"`, `"metatype"`,
@@ -212,6 +215,10 @@ named like a reserved JS method (`toString`, `toJSON`, `valueOf`,
   `"foreign-reference"`.
 - `type.$moduleName`: the logical Swift module name.
 - `type.$superClass`: the parent as a `SwiftType`, or `null`.
+- `type.toJSON()`: cheap identity `{ kind, name, module }`.
+
+On a `NominalType`:
+
 - `type.$instanceMethods(query?)` / `type.$typeMethods(query?)`: the selectors
   of its instance methods and of its type methods, e.g. `["greet(_:)", …]`.
   `query` is `{ inherited? }`.
@@ -230,7 +237,9 @@ extension whose clause the bridge can't check is left out: one with a same-type
 (`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
 requirement on a nested associated type (`Item.Index`).
 - `type.$protocols()`: a `{ [name]: Protocol }` map of declared conformances.
-- `type.toJSON()`: cheap identity `{ kind, name, module }`.
+- `type.$call(name, ...args)`, `type.init(...args)`: call a type method or an
+  initializer by name. See [Calling methods](#calling-methods) and
+  [Creating instances](#creating-instances).
 
 Reading a name, kind, or module does not realize the type's metadata.
 
