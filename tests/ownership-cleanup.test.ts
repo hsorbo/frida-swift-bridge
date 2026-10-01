@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport } from "./fixtures/load.js";
 
-import { Swift, ClassType, StructType, SwiftObject } from "../src/index.js";
+import { Swift, ClassType, StructType, SwiftObject, SwiftClass } from "../src/index.js";
 import { BoundAsyncMethod, GenericBoundAsyncMethod, ClassInstance, metadataFor, typeOf } from "../src/abi.js";
 
 // A Wrapper is non-POD (it embeds a Token class ref), so marshalling it +1s the embedded token. If a
@@ -18,8 +18,8 @@ function wrapperOverToken(module: string): { wrapper: SwiftObject; view: ClassIn
   return { wrapper, view: new ClassInstance(token.$handle) };
 }
 
-function boxType(): ClassType {
-  return typeOf(metadataFor("fixture.Box")!) as ClassType;
+function boxType(): SwiftClass {
+  return (typeOf(metadataFor("fixture.Box")!) as ClassType).facade;
 }
 
 describe("marshalling-failure cleanup across call paths", () => {
@@ -58,7 +58,7 @@ describe("value-initializer ownership", () => {
 
   test("a failed later arg does not leak the non-POD prefix temp", () => {
     const { wrapper, view } = wrapperOverToken("fixturesyms");
-    const Keeper = typeOf(metadataFor("fixturesyms.Keeper")!) as StructType;
+    const Keeper = (typeOf(metadataFor("fixturesyms.Keeper")!) as StructType).facade;
     const init = Keeper.$initializer({ labels: [null, "tag"] });
     const before = view.retainCount;
     expect(() => init.call(wrapper, "bad" as never)).toThrow();
@@ -72,7 +72,7 @@ describe("value-initializer ownership", () => {
     const token = makeToken(7) as SwiftObject;
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
-    const box = (typeOf(metadataFor("fixturesyms.TokenBox")!) as StructType)
+    const box = (typeOf(metadataFor("fixturesyms.TokenBox")!) as StructType).facade
       .$initializer({ labels: [null, "tag"] })
       .call(token, 5) as SwiftObject;
     // The box owns its own +1 on the token; the caller's reference is untouched.
@@ -87,11 +87,11 @@ describe("value-initializer ownership", () => {
 describe("class-boundary ownership (init and property setter)", () => {
   beforeEach(() => { loadFixture(); });
 
-  function kennelType(): ClassType {
-    return typeOf(metadataFor("fixture.Kennel")!) as ClassType;
+  function kennelType(): SwiftClass {
+    return (typeOf(metadataFor("fixture.Kennel")!) as ClassType).facade;
   }
   function token(id: number): { facade: SwiftObject; view: ClassInstance } {
-    const facade = (typeOf(metadataFor("fixture.Token")!) as ClassType).init(id);
+    const facade = (typeOf(metadataFor("fixture.Token")!) as ClassType).facade.init(id);
     return { facade, view: new ClassInstance(facade.$handle) };
   }
 

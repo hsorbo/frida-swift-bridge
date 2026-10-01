@@ -1,11 +1,11 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift, StructType, EnumType } from "../src/index.js";
+import { Swift, StructType, EnumType, SwiftStruct } from "../src/index.js";
 
 import { metadataFor, typeOf } from "../src/abi.js";
-function structType(name: string): StructType {
-  return typeOf(metadataFor(name)!) as StructType;
+function structType(name: string): SwiftStruct {
+  return (typeOf(metadataFor(name)!) as StructType).facade;
 }
 
 describe("Static value-type method invocation", () => {
@@ -20,7 +20,7 @@ describe("Static value-type method invocation", () => {
   });
 
   test("static method on an enum passes no self", () => {
-    const t = typeOf(metadataFor("fixture.Pick")!) as EnumType;
+    const t = (typeOf(metadataFor("fixture.Pick")!) as EnumType).facade;
     expect(t.$call("tag", 21)).toEqual(int64(42));
   });
 

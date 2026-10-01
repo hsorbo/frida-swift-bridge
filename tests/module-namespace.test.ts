@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift, ClassType, StructType } from "../src/index.js";
+import { Swift, SwiftClass, SwiftStruct } from "../src/index.js";
 import type { StableProtocol } from "../src/runtime/protocol.js";
 
 describe("Swift.modules", () => {
@@ -41,10 +41,10 @@ describe("Swift.modules", () => {
   });
 
   test("resolves a type in the module by its bare name", () => {
-    const robot = Swift.modules.fixture.Robot as ClassType;
-    expect(robot instanceof ClassType).toBeTruthy();
-    expect(robot.$name).toBe("fixture.Robot");
-    expect((Swift.modules.Swift.Int as StructType).$name).toBe("Swift.Int");
+    const robot = Swift.modules.fixture.Robot as SwiftClass;
+    expect(robot instanceof SwiftClass).toBeTruthy();
+    expect(robot.$type.name).toBe("fixture.Robot");
+    expect((Swift.modules.Swift.Int as SwiftStruct).$type.name).toBe("Swift.Int");
   });
 
   test("resolves a protocol in the module by its bare name", () => {

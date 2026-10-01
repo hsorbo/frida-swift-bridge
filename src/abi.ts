@@ -222,7 +222,6 @@ export {
   SwiftType,
   TypeKind,
   NominalType,
-  ValueType,
   StructType,
   EnumType,
   ClassType,
@@ -235,8 +234,8 @@ export {
   TypeMember,
   MethodQuery,
   MemberLookupOptions,
+  SwiftMember,
   SwiftInstanceMethod,
-  SwiftClassBoundInitializer,
   TupleTypeElement,
   ParameterConvention,
   FunctionTypeParameter,
@@ -246,6 +245,14 @@ export {
   metadataOf,
   descriptorOf,
 } from "./runtime/swift-type.js";
+export {
+  SwiftTypeFacade,
+  SwiftClass,
+  SwiftValueType,
+  SwiftStruct,
+  SwiftEnum,
+  SwiftClassBoundInitializer,
+} from "./runtime/type-facade.js";
 export { SwiftValue } from "./abi/instance.js";
 export { typeName, mangledTypeName } from "./runtime/type-name.js";
 export { Protocol, ProtocolComposition } from "./runtime/protocol.js";

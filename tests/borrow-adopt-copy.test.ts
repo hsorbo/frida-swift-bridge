@@ -1,11 +1,11 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { StructType, ClassType, ClassInstance, writeValue, metadataOf } from "../src/abi.js";
+import { ClassInstance, writeValue, metadataOf } from "../src/abi.js";
 
-import { Swift } from "../src/index.js";
-function loadable(): StructType {
-  return Swift.type("fixture.LoadableStruct") as StructType;
+import { Swift, SwiftClass, SwiftStruct } from "../src/index.js";
+function loadable(): SwiftStruct {
+  return Swift.type("fixture.LoadableStruct") as SwiftStruct;
 }
 
 describe("typed value construction", () => {
@@ -56,7 +56,7 @@ describe("class object wrapping", () => {
   beforeEach(() => { loadFixture(); });
 
   test("borrowObject wraps a handle without taking ownership", () => {
-    const token = (Swift.type("fixture.Token") as ClassType).init(7);
+    const token = (Swift.type("fixture.Token") as SwiftClass).init(7);
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
 
@@ -67,7 +67,7 @@ describe("class object wrapping", () => {
   });
 
   test("adoptObject takes a +1 and releases it on dispose", () => {
-    const token = (Swift.type("fixture.Token") as ClassType).init(7);
+    const token = (Swift.type("fixture.Token") as SwiftClass).init(7);
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
 

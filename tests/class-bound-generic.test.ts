@@ -2,17 +2,17 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 import { requireDarwin } from "./swift.js";
 
-import { Swift, ClassType, EnumType, SwiftObject } from "../src/index.js";
+import { Swift, ClassType, SwiftObject, SwiftClass, SwiftEnum } from "../src/index.js";
 import { ClassInstance, metadataFor, typeOf } from "../src/abi.js";
 import { resolveType } from "../src/runtime/symbolication.js";
 import { lookUpObjCClass } from "../src/runtime/objc.js";
 
 function box(): SwiftObject {
-  return (Swift.type("fixture.Box") as ClassType).init();
+  return (Swift.type("fixture.Box") as SwiftClass).init();
 }
 
-function classType(name: string): ClassType {
-  return typeOf(metadataFor(name)!) as ClassType;
+function classType(name: string): SwiftClass {
+  return (typeOf(metadataFor(name)!) as ClassType).facade;
 }
 
 function newObjCObject(className: string): NativePointer {
@@ -91,7 +91,7 @@ describe("class-bound generic parameters of Objective-C types", () => {
   test("a method of a generic type passes its class-bound parameter as a bare reference", (ctx) => {
     requireDarwin(ctx);
     const conformer = classType("fixture.ObjCConformer").init();
-    const holder = (Swift.type("fixture.ObjCBoxes") as EnumType).$call("conformerRefBox", conformer) as SwiftObject;
+    const holder = (Swift.type("fixture.ObjCBoxes") as SwiftEnum).$call("conformerRefBox", conformer) as SwiftObject;
     expect(holder.holds(conformer)).toBe(true);
     expect((holder.held() as SwiftObject).$handle.equals(conformer.$handle)).toBe(true);
   });
@@ -100,7 +100,7 @@ describe("class-bound generic parameters of Objective-C types", () => {
     requireDarwin(ctx);
     const conformer = classType("fixture.ObjCConformer").init();
     const other = classType("fixture.ObjCConformer").init();
-    const valueBox = (Swift.type("fixture.ObjCBoxes") as EnumType).$call("conformerValueBox", conformer) as SwiftObject;
+    const valueBox = (Swift.type("fixture.ObjCBoxes") as SwiftEnum).$call("conformerValueBox", conformer) as SwiftObject;
     expect(valueBox.$method("holds", { self: "borrowing" }).call(conformer)).toBe(true);
     expect(valueBox.$method("holds", { self: "borrowing" }).call(other)).toBe(false);
   });

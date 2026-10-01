@@ -1,19 +1,19 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
-import { Swift, ClassType, StructType, SwiftObject } from "../src/index.js";
+import { Swift, SwiftObject, SwiftClass, SwiftStruct } from "../src/index.js";
 import { ClassInstance } from "../src/abi.js";
 
 function robot(name: string): SwiftObject {
-  return (Swift.type("fixture.Robot") as ClassType).init(name);
+  return (Swift.type("fixture.Robot") as SwiftClass).init(name);
 }
 
 function int(n: number): SwiftObject {
-  return (Swift.type("Swift.Int") as StructType).$new(n);
+  return (Swift.type("Swift.Int") as SwiftStruct).$new(n);
 }
 
 function box(): SwiftObject {
-  return (Swift.type("fixture.Box") as ClassType).init();
+  return (Swift.type("fixture.Box") as SwiftClass).init();
 }
 
 describe("__owned parameters", () => {
@@ -29,8 +29,8 @@ describe("__owned parameters", () => {
 
   test("an owned value argument's temp is left to the callee", () => {
     const Int = Swift.type("Swift.Int");
-    const Token = Swift.type("fixture.Token") as ClassType;
-    const Wrapper = Swift.type("fixture.Wrapper") as StructType;
+    const Token = Swift.type("fixture.Token") as SwiftClass;
+    const Wrapper = Swift.type("fixture.Wrapper") as SwiftStruct;
     const token = Token.init(5);
     const wrapper = Wrapper.$call("make", token) as SwiftObject;
     const view = new ClassInstance(token.$handle);
@@ -59,19 +59,19 @@ describe("inout parameters", () => {
   });
 
   test("writes a non-POD value back", () => {
-    const s = (Swift.type("Swift.String") as StructType).$new("hi");
+    const s = (Swift.type("Swift.String") as SwiftStruct).$new("hi");
     robot("Ada").exclaim(s);
     expect(s.$fields).toBe("hi!");
   });
 
   test("writes into a field view of its parent", () => {
-    const acc = (Swift.type("fixture.Accumulator") as StructType).$new({ total: 4 });
+    const acc = (Swift.type("fixture.Accumulator") as SwiftStruct).$new({ total: 4 });
     robot("Ada").doubled(acc.$field("total"));
     expect(acc.total).toEqual(int64(8));
   });
 
   test("a value method and a static method take inout arguments", () => {
-    const Accumulator = Swift.type("fixture.Accumulator") as StructType;
+    const Accumulator = Swift.type("fixture.Accumulator") as SwiftStruct;
     const sink = int(1);
     Accumulator.$new({ total: 4 }).drain(sink);
     expect(sink.$fields).toEqual(int64(5));
@@ -89,7 +89,7 @@ describe("inout parameters", () => {
 
   test("an async method writes back before it settles", async () => {
     const n = int(5);
-    await (Swift.type("fixture.AsyncCalc") as ClassType).init(100).accumulateAsync(n);
+    await (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100).accumulateAsync(n);
     expect(n.$fields).toEqual(int64(105));
   });
 
@@ -98,6 +98,6 @@ describe("inout parameters", () => {
   });
 
   test("a value facade of another type is rejected", () => {
-    expect(() => robot("Ada").doubled((Swift.type("Swift.String") as StructType).$new("x"))).toThrow("expected Swift.Int");
+    expect(() => robot("Ada").doubled((Swift.type("Swift.String") as SwiftStruct).$new("x"))).toThrow("expected Swift.Int");
   });
 });

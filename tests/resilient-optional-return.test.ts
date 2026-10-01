@@ -1,8 +1,8 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadResilient } from "./fixtures/load.js";
 
-import { Swift } from "../src/index.js";
-import { StructType, metadataFor, typeOf } from "../src/abi.js";
+import { Swift, SwiftStruct } from "../src/index.js";
+import { metadataFor, typeOf } from "../src/abi.js";
 
 // resilient.ResilientHolder wraps a class ref (like Foundation.URL wraps NSURL): resilient ABI
 // (returned @out) yet non-POD. Optional<ResilientHolder> must inherit that address-only ABI and be
@@ -25,7 +25,7 @@ describe("Optional<resilient struct wrapping a class ref> return", () => {
     const make = fn(mod, "$s9resilient10makeHolderyAA09ResilientC0VSgSiF", optionalHolder(), [Swift.type("Swift.Int")!]);
     const holder = make(7) as any;
     expect(holder).not.toBeNull();
-    expect(holder.$type.$name).toBe("resilient.ResilientHolder");
+    expect(holder.$type.name).toBe("resilient.ResilientHolder");
 
     const tokenId = fn(mod, "$s9resilient13holderTokenIdySiAA15ResilientHolderVF", Swift.type("Swift.Int")!, [Swift.type("resilient.ResilientHolder")!]);
     expect(tokenId(holder)).toEqual(int64(7));
@@ -38,7 +38,7 @@ describe("Optional<resilient struct wrapping a class ref> return", () => {
   });
 
   test("a failable initializer returns a facade or null", () => {
-    const holder = Swift.type("resilient.ResilientHolder") as StructType;
+    const holder = Swift.type("resilient.ResilientHolder") as SwiftStruct;
     expect(holder.$initializer({ labels: ["id"] }).call(9)).not.toBeNull();
     expect(holder.$initializer({ labels: ["id"] }).call(-1)).toBeNull();
   });

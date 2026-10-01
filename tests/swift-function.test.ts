@@ -59,7 +59,7 @@ describe("Swift.function", () => {
   });
 
   test("binds a class receiver for a sync instance method: Robot(\"R2\").greet(\"X\")", () => {
-    const robot = (typeOf(metadataFor("fixture.Robot")!) as ClassType).init("R2");
+    const robot = (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init("R2");
     const greet = Swift.function(module, ROBOT_GREET).bind(robot);
     expect(greet("X")).toBe("Hello X, I am R2");
   });

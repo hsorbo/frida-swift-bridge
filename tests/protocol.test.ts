@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
 
-import { MetadataKind, ClassType, Protocol, ProtocolComposition, ProtocolRequirementKind, WitnessTable, readString, readValue, makeSwiftNativeFunction, metadataFor, typeOf } from "../src/abi.js";
+import { MetadataKind, ClassType, NominalType, Protocol, ProtocolComposition, ProtocolRequirementKind, WitnessTable, readString, readValue, makeSwiftNativeFunction, metadataFor, typeOf } from "../src/abi.js";
 
 import { Swift } from "../src/index.js";
 describe("Protocol", () => {
@@ -65,13 +65,13 @@ describe("Protocol.conformingTypes", () => {
 
   test("is the inverse of protocols(): Scalable includes its retroactive Swift.Int conformance", () => {
     const scalable = Protocol.find("fixture.Scalable")!;
-    const names = scalable.conformingTypes().map((t) => t.$name);
+    const names = scalable.conformingTypes().map((t) => t.name);
     expect(names).toContain("Swift.Int");
   });
 
   test("Greeter's conforming types include Person", () => {
     const greeter = Protocol.find("fixture.Greeter")!;
-    const names = greeter.conformingTypes().map((t) => t.$name);
+    const names = greeter.conformingTypes().map((t) => t.name);
     expect(names).toContain("fixture.Person");
   });
 });
@@ -111,21 +111,21 @@ describe("protocols()", () => {
   beforeEach(() => { loadFixture(); });
 
   test("a type reports its declared conformances as a name->Protocol map", () => {
-    const person = typeOf(metadataFor("fixture.Person")!);
-    const protocols = person.$protocols();
+    const person = typeOf(metadataFor("fixture.Person")!) as NominalType;
+    const protocols = person.protocols();
     expect(Object.keys(protocols).sort()).toEqual(["fixture.Aged", "fixture.Greeter"]);
     expect(protocols["fixture.Greeter"] instanceof Protocol).toBe(true);
     expect(protocols["fixture.Greeter"].fullName).toBe("fixture.Greeter");
   });
 
   test("includes a retroactive conformance declared in another module", () => {
-    const int = typeOf(metadataFor("Swift.Int")!);
-    expect(Object.keys(int.$protocols())).toContain("fixture.Scalable");
+    const int = typeOf(metadataFor("Swift.Int")!) as NominalType;
+    expect(Object.keys(int.protocols())).toContain("fixture.Scalable");
   });
 
   test("is reachable through the object facade's $type", () => {
-    const widget = (typeOf(metadataFor("fixture.Widget")!) as ClassType).init("w");
-    expect(Object.keys(widget.$type.$protocols())).toContain("fixture.Named");
+    const widget = (typeOf(metadataFor("fixture.Widget")!) as ClassType).facade.init("w");
+    expect(Object.keys(widget.$type.protocols())).toContain("fixture.Named");
   });
 });
 

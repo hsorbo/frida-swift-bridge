@@ -1,6 +1,5 @@
 import { ClassInstance } from "../abi/heap-object.js";
 import { ValueInstance } from "../abi/value.js";
-import { Metadata } from "../abi/metadata.js";
 import { SwiftValue } from "../abi/instance.js";
 import {
   SwiftBoundMethod,
@@ -11,8 +10,7 @@ import {
   ValueMethodResolveOptions,
   lowerResolveOptions,
 } from "./method.js";
-import { typeName } from "./type-name.js";
-import { SwiftType } from "./swift-type.js";
+import { SwiftType, NominalType, ClassType, StructType, EnumType } from "./swift-type.js";
 import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache } from "./facade-members.js";
 
 const RESERVED = new Set([
@@ -25,10 +23,7 @@ const RESERVED = new Set([
   "$kind",
   "$type",
   "$handle",
-  "$className",
   "$fields",
-  "$instanceMethods",
-  "$typeMethods",
   "$owned",
   "$call",
   "$method",
@@ -54,12 +49,11 @@ export interface SwiftField {
 }
 
 export interface SwiftObjectBase {
-  readonly $type: SwiftType;
+  // Reflection on the dynamic type. A pure Objective-C object or a tuple value, both reached only
+  // through /abi, report their own reflection kind at runtime.
+  readonly $type: NominalType;
   readonly $handle: NativePointer;
-  readonly $className: string;
   readonly $fields: { [name: string]: SwiftValue } | SwiftValue;
-  readonly $instanceMethods: string[];
-  readonly $typeMethods: string[];
   readonly $owned: boolean;
   $call(method: string, ...args: CallArg[]): CallResult | Promise<CallResult>;
   $get(name: string): CallResult;
@@ -81,12 +75,14 @@ export interface SwiftObjectBase {
 
 export interface SwiftClassObject extends SwiftObjectBase {
   readonly $kind: "object";
+  readonly $type: ClassType;
   $method(name: string, options?: MethodResolveOptions): SwiftClassBoundMethod;
   $container?: never;
 }
 
 export interface SwiftValueObject extends SwiftObjectBase {
   readonly $kind: "value";
+  readonly $type: StructType | EnumType;
   $method(name: string, options?: ValueMethodResolveOptions): SwiftValueBoundMethod;
   $container(): SwiftValue;
 }
@@ -115,7 +111,6 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   const object = target as ClassInstance;
 
   const handle = (): NativePointer => target.handle;
-  const dynamicType = (): Metadata => (isValue ? value.metadata : object.dynamicType);
   const fullName = (): string =>
     (isValue ? value.metadata : object.metadata).description.fullTypeName ?? "";
 
@@ -163,14 +158,8 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
           return target.kind;
         case "$type":
           return target.type;
-        case "$className":
-          return typeName(dynamicType());
         case "$fields":
           return isValue ? value.read() : object.read();
-        case "$instanceMethods":
-          return target.type.$instanceMethods();
-        case "$typeMethods":
-          return target.type.$typeMethods();
         case "$owned":
           return target.owned;
         case "$call":

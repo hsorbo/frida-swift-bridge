@@ -5,7 +5,7 @@ import { Swift, ClassType, StructType, SwiftClassObject } from "../src/index.js"
 import { ValueInstance, metadataFor, typeOf } from "../src/abi.js";
 
 function robot(name: string) {
-  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).init(name);
+  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init(name);
 }
 
 describe("stable object boundary", () => {
@@ -45,7 +45,7 @@ describe("stable object boundary", () => {
 
   test("initializer() returns a narrow view without resolution internals", () => {
     loadFixtureSyms();
-    const init = (typeOf(metadataFor("fixturesyms.Point")!) as StructType).$initializer() as any;
+    const init = (typeOf(metadataFor("fixturesyms.Point")!) as StructType).facade.$initializer() as any;
     expect(typeof init.call).toBe("function");
     expect(init.address.isNull()).toBe(false);
     expect(init.resolved).toBeUndefined();
@@ -72,7 +72,7 @@ describe("stable object boundary", () => {
 
   test("a $field view type-checks and marshals as a call argument", () => {
     const Int = typeOf(metadataFor("Swift.Int")!);
-    const s = (typeOf(metadataFor("fixture.LoadableStruct")!) as StructType).$new({ a: 3, b: 4, c: 0, d: 0 });
+    const s = (typeOf(metadataFor("fixture.LoadableStruct")!) as StructType).facade.$new({ a: 3, b: 4, c: 0, d: 0 });
     const fieldA = s.$field("a");
     const add = Swift.NativeFunction(fixtureExport("fixture.addInts"), Int, [Int, Int]);
     expect(add(fieldA, fieldA)).toEqual(int64(6));

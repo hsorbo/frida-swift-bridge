@@ -1,13 +1,13 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift, ClassType, EnumType, StructType } from "../src/index.js";
+import { Swift, SwiftClass, SwiftStruct, SwiftEnum } from "../src/index.js";
 
 describe("Swift type member sugar", () => {
   beforeEach(() => { loadFixture(); });
 
   test("calls a type method by its bare name", () => {
-    const Robot = Swift.type("fixture.Robot") as ClassType;
+    const Robot = Swift.type("fixture.Robot") as SwiftClass;
     expect(Robot.make("Zed").greet("Ann")).toBe("Hello Ann, I am Zed");
     expect(Swift.type("fixture.Accumulator")!.summing(4, 5)).toEqual(int64(9));
     expect(Swift.type("fixture.Pick")!.tag(21)).toEqual(int64(42));
@@ -54,22 +54,22 @@ describe("Swift type member sugar", () => {
   });
 
   test("builds enum cases by bare name, a payload case as a call", () => {
-    const Pick = Swift.type("fixture.Pick") as EnumType;
+    const Pick = Swift.type("fixture.Pick") as SwiftEnum;
     expect(Pick.empty.$fields).toBe("empty");
     expect(Pick.value(7).$fields).toEqual({ value: int64(7) });
-    expect(Pick.empty.$type).toBe(Pick);
+    expect(Pick.empty.$type).toBe(Pick.$type);
   });
 
   test("reaches a nested type, from Swift.modules too", () => {
-    const Outer = Swift.modules.fixture.Outer as StructType;
+    const Outer = Swift.modules.fixture.Outer as SwiftStruct;
     expect(Outer.Inner).toBe(Swift.type("fixture.Outer.Inner"));
-    expect(Outer.FromExt.$name).toBe("fixture.Outer.FromExt");
+    expect(Outer.FromExt.$type.name).toBe("fixture.Outer.FromExt");
     expect(Outer.Inner.$new({ value: 21 }).doubled()).toEqual(int64(42));
   });
 
   test("dispatches a type method through an instance's $type", () => {
-    const robot = (Swift.type("fixture.Robot") as ClassType).init("R2");
-    expect(robot.$type.make("Q").greet("A")).toBe("Hello A, I am Q");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    expect(robot.$type.facade.make("Q").greet("A")).toBe("Hello A, I am Q");
   });
 
   test("an unknown member reads as undefined and is not in", () => {
@@ -77,7 +77,7 @@ describe("Swift type member sugar", () => {
     expect(Robot.noSuchMemberQX).toBeUndefined();
     expect("noSuchMemberQX" in Robot).toBe(false);
     expect("make" in Robot).toBe(true);
-    expect("$name" in Robot).toBe(true);
+    expect("$type" in Robot).toBe(true);
     expect("$noSuchQX" in Robot).toBe(false);
   });
 
@@ -106,7 +106,7 @@ describe("Swift type member sugar", () => {
     expect(duckling).toContain("species");
     expect(Duckling.nursery).toBe("duck nursery"); // another module's or a protocol extension's joins the listing once read
     expect(Object.keys(Duckling)).toContain("nursery");
-    expect(duckling).not.toContain("$name");
+    expect(duckling).not.toContain("$type");
     for (const k of duckling) {
       expect(k in Duckling).toBe(true);
     }
@@ -139,7 +139,7 @@ describe("Swift type collision-proofing", () => {
 
   test("$-prefixed members stay available alongside the clashing ones", () => {
     const Clashing = Swift.type("fixture.ClashingType")!;
-    expect(Clashing.$name).toBe("fixture.ClashingType");
+    expect(Clashing.$type.name).toBe("fixture.ClashingType");
     expect(Clashing.$get("name")).toBe("clash");
     expect(Clashing.$call("get")).toBe("got");
   });

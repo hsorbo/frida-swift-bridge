@@ -9,7 +9,7 @@ describe("private nested type names", () => {
 
   test("keep the enclosing type across the anonymous context", () => {
     expect(findType("fixture.CodableCard.CodingKeys")!.fullTypeName).toBe("fixture.CodableCard.CodingKeys");
-    expect(Swift.type("fixture.CodableCard.Hidden")!.$name).toBe("fixture.CodableCard.Hidden");
+    expect(Swift.type("fixture.CodableCard.Hidden")!.$type.name).toBe("fixture.CodableCard.Hidden");
   });
 
   test("are not reachable as top-level module members", () => {

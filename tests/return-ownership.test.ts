@@ -24,11 +24,11 @@ describe("value return embedding a class ref", () => {
   });
 
   test("a returned aggregate owns its embedded class ref and releases it on dispose", () => {
-    const token = (typeOf(metadataFor("fixture.Token")) as ClassType).init(7);
+    const token = (typeOf(metadataFor("fixture.Token")) as ClassType).facade.init(7);
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
 
-    const wrapper = (typeOf(metadataFor("fixture.Wrapper")) as StructType).$call("make", token) as SwiftObject;
+    const wrapper = (typeOf(metadataFor("fixture.Wrapper")) as StructType).facade.$call("make", token) as SwiftObject;
     expect(wrapper.$kind).toBe("value");
 
     const owned = wrapper;
@@ -48,14 +48,14 @@ describe("bridge-object container return", () => {
   beforeEach(() => { loadFixture(); });
 
   test("a returned Array is adopted as an owned ValueInstance, not decoded lossily", () => {
-    const arr = (typeOf(metadataFor("fixture.Bag")) as StructType).$call("ints") as SwiftObject;
+    const arr = (typeOf(metadataFor("fixture.Bag")) as StructType).facade.$call("ints") as SwiftObject;
     expect(arr.$kind).toBe("value");
 
     const owned = arr;
     expect(owned.$owned).toBe(true);
 
     // +1 buffer survived a premature destroy: it sums back through a [Int] param.
-    const box = typeOf(metadataFor("fixture.Box")) as ClassType;
+    const box = (typeOf(metadataFor("fixture.Box")) as ClassType).facade;
     expect(box.init().$method("sumInts").call(owned)).toEqual(int64(60));
 
     owned.$dispose();
@@ -66,11 +66,11 @@ describe("opaque existential return", () => {
   beforeEach(() => { loadFixture(); });
 
   test("a class payload stays boxed and alive until the facade is disposed", () => {
-    const greeter = (typeOf(metadataFor("fixture.LoudGreeter")) as ClassType).init("Ada");
+    const greeter = (typeOf(metadataFor("fixture.LoudGreeter")) as ClassType).facade.init("Ada");
     const view = new ClassInstance(greeter.$handle);
     const before = view.retainCount;
 
-    const boxed = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).$call("wrap", greeter) as SwiftObject;
+    const boxed = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).facade.$call("wrap", greeter) as SwiftObject;
     expect(boxed.$kind).toBe("value");
     expect(boxed.$owned).toBe(true);
     expect(view.retainCount).toBe(before + 1);
@@ -80,7 +80,7 @@ describe("opaque existential return", () => {
   });
 
   test("a value payload still reads out as a plain value", () => {
-    const person = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).$call("wrapPerson", "Cy", 9);
+    const person = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).facade.$call("wrapPerson", "Cy", 9);
     expect(person).toEqual({ name: "Cy", age: int64(9) });
   });
 });

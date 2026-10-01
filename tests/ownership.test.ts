@@ -1,11 +1,11 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
-import { Swift } from "../src/index.js";
+import { Swift, SwiftClass } from "../src/index.js";
 import { ClassType, ClassInstance, SwiftObject, metadataFor, typeOf } from "../src/abi.js";
 
-function robotType(): ClassType {
-  return typeOf(metadataFor("fixture.Robot")!) as ClassType;
+function robotType(): SwiftClass {
+  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade;
 }
 
 // Large (heap) String: __StringStorage pointer at +8, low 60 bits.

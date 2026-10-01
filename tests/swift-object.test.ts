@@ -2,15 +2,15 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 import { requireDarwin } from "./swift.js";
 
-import { Swift, ClassType } from "../src/index.js";
+import { Swift, ClassType, SwiftClass } from "../src/index.js";
 
 import { metadataFor, typeOf, typeName, metadataOf, ValueInstance, asSwiftObject } from "../src/abi.js";
 function robot(name: string) {
-  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).init(name);
+  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init(name);
 }
 
 function cat() {
-  return (typeOf(metadataFor("fixture.Cat")!) as ClassType).init();
+  return (typeOf(metadataFor("fixture.Cat")!) as ClassType).facade.init();
 }
 
 describe("Swift object method sugar", () => {
@@ -84,61 +84,61 @@ describe("Swift object intrinsics", () => {
     expect(() => { robot("R2").greet = 1; }).toThrow("no property greet on fixture.Robot");
   });
 
-  test("$type.$instanceMethods() lists callable selectors", () => {
-    const selectors = robot("R2").$type.$instanceMethods();
+  test("$type.instanceMethods() lists callable selectors", () => {
+    const selectors = robot("R2").$type.instanceMethods();
     for (const s of ["greet(_:)", "rename(to:)", "merged(with:)", "at(_:)", "at(_:_:)"]) {
       expect(selectors).toContain(s);
     }
   });
 
-  test("$instanceMethods and $typeMethods list plain Swift selectors", () => {
+  test("$type lists instance and type selectors", () => {
     const o = robot("R2");
-    expect(o.$instanceMethods).toContain("greet(_:)");
-    expect(o.$instanceMethods).toContain("rename(to:)");
-    expect(o.$instanceMethods).not.toContain("make(name:)");
-    expect(o.$typeMethods).toContain("make(name:)");
-    expect(o.$typeMethods).not.toContain("greet(_:)");
+    expect(o.$type.instanceMethods()).toContain("greet(_:)");
+    expect(o.$type.instanceMethods()).toContain("rename(to:)");
+    expect(o.$type.instanceMethods()).not.toContain("make(name:)");
+    expect(o.$type.typeMethods()).toContain("make(name:)");
+    expect(o.$type.typeMethods()).not.toContain("greet(_:)");
     expect(o.$methods).toBeUndefined();
   });
 
-  test("$instanceMethods works on a value facade", () => {
-    expect(Swift.struct("Swift.Int")!.$new(-1).$instanceMethods).toContain("signum()");
+  test("$type.instanceMethods() works on a value facade", () => {
+    expect(Swift.struct("Swift.Int")!.$new(-1).$type.instanceMethods()).toContain("signum()");
   });
 
-  test("$className reflects the dynamic type", () => {
-    expect(cat().$className).toBe("fixture.Cat");
-    expect(robot("R2").$className).toBe("fixture.Robot");
+  test("$type.name reflects the dynamic type", () => {
+    expect(cat().$type.name).toBe("fixture.Cat");
+    expect(robot("R2").$type.name).toBe("fixture.Robot");
   });
 
-  test("$type.$superClass wraps the parent, null at a root class", () => {
-    const sup = cat().$type.$superClass;
+  test("$type.superClass wraps the parent, null at a root class", () => {
+    const sup = cat().$type.superClass;
     expect(sup).not.toBeNull();
-    expect(sup!.$name).toBe("fixture.Animal");
-    expect(robot("R2").$type.$superClass).toBeNull();
+    expect(sup!.name).toBe("fixture.Animal");
+    expect(robot("R2").$type.superClass).toBeNull();
   });
 
-  test("$type.$moduleName is the logical Swift module", () => {
-    expect(robot("R2").$type.$moduleName).toBe("fixture");
+  test("$type.moduleName is the logical Swift module", () => {
+    expect(robot("R2").$type.moduleName).toBe("fixture");
   });
 
-  test("methods({ inherited: false }) excludes inherited methods that methods() includes", () => {
+  test("instanceMethods({ inherited: false }) excludes inherited methods that instanceMethods() includes", () => {
     const t = cat().$type;
-    expect(t.$instanceMethods()).toContain("speak()");
-    expect(t.$instanceMethods()).toContain("legs()");
-    expect(t.$instanceMethods({ inherited: false })).toContain("speak()");
-    expect(t.$instanceMethods({ inherited: false })).not.toContain("legs()");
+    expect(t.instanceMethods()).toContain("speak()");
+    expect(t.instanceMethods()).toContain("legs()");
+    expect(t.instanceMethods({ inherited: false })).toContain("speak()");
+    expect(t.instanceMethods({ inherited: false })).not.toContain("legs()");
   });
 
   test("$type / $handle expose the wrapped object", () => {
     const o = robot("R2");
-    expect(o.$type.$name).toBe("fixture.Robot");
+    expect(o.$type.name).toBe("fixture.Robot");
     expect(typeName(metadataOf(o.$type))).toBe("fixture.Robot");
     expect(o.$handle.isNull()).toBe(false);
   });
 
   test("calls a method and reads a field of a Swift subclass of an ObjC class", (ctx) => {
     requireDarwin(ctx);
-    const starling = (Swift.type("fixture.Starling") as ClassType).init();
+    const starling = (Swift.type("fixture.Starling") as SwiftClass).init();
     expect(starling.chirp()).toBe("whistle");
     expect(starling.pitch).toEqual(int64(5));
   });
@@ -192,7 +192,7 @@ describe("Swift object intrinsics", () => {
 });
 
 function clash(handle: number) {
-  return (typeOf(metadataFor("fixture.Clash")!) as ClassType).init(handle);
+  return (typeOf(metadataFor("fixture.Clash")!) as ClassType).facade.init(handle);
 }
 
 describe("Swift object collision-proofing", () => {
@@ -238,7 +238,7 @@ describe("Swift object bridge namespace", () => {
   });
 
   test("a property wrapper's projected value is read through $get", () => {
-    const o = (Swift.type("fixture.Projecting") as ClassType).init();
+    const o = (Swift.type("fixture.Projecting") as SwiftClass).init();
     expect(o.n).toEqual(int64(3));
     expect(o.$n).toBeUndefined();
     expect(o.$get("$n")).toEqual(int64(6));

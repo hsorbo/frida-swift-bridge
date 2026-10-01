@@ -262,7 +262,7 @@ describe("async interceptor", () => {
   test("this.typeArguments is set in onEnter and captured for onComplete", async () => {
     requireSwift();
     const module = loadFixture();
-    const calc = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).init(100);
+    const calc = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).facade.init(100);
     const echo = calc.$method("echoAsync", { typeArguments: [typeOf(metadataFor("Swift.String")!)] });
     const seen: { onEnter?: string[]; onComplete?: string[] } = {};
     const completed = signal();

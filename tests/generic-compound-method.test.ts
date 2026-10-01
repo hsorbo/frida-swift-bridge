@@ -6,7 +6,7 @@ import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
 function box() {
-  return (typeOf(metadataFor("fixture.Box")!) as ClassType).init();
+  return (typeOf(metadataFor("fixture.Box")!) as ClassType).facade.init();
 }
 
 describe("compound generic-using exprs in generic methods", () => {

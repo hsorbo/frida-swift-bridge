@@ -122,8 +122,8 @@ describe("associated type / associated conformance resolution", () => {
 
   test("Self and a class-constrained associated type return directly in a class-constrained protocol", () => {
     loadFixtureSyms();
-    const token = (typeOf(metadataFor("fixturesyms.Token")!) as ClassType).init(3) as SwiftObject;
-    const pack = (typeOf(metadataFor("fixturesyms.TokenPack")!) as ClassType).init(token) as SwiftObject;
+    const token = (typeOf(metadataFor("fixturesyms.Token")!) as ClassType).facade.init(3) as SwiftObject;
+    const pack = (typeOf(metadataFor("fixturesyms.TokenPack")!) as ClassType).facade.init(token) as SwiftObject;
     const table = Protocol.find("fixturesyms.Pack")!.conformanceFor(metadataFor("fixturesyms.TokenPack")!)!;
     expect((table.get(pack.$handle, "leader") as SwiftObject).$handle.equals(pack.$handle)).toBe(true);
     expect((table.get(pack.$handle, "pet") as SwiftObject).$handle.equals(token.$handle)).toBe(true);

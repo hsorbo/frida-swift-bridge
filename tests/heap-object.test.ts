@@ -4,7 +4,7 @@ import { loadFixture, fixtureExport } from "./fixtures/load.js";
 import { ClassInstance, metadataFor, typeName, metadataOf } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
-import { Swift, ClassType } from "../src/index.js";
+import { Swift, SwiftClass } from "../src/index.js";
 import { requireDarwin } from "./swift.js";
 function intArg(n: number): NativePointer {
   const cell = Memory.alloc(Process.pointerSize);
@@ -54,7 +54,7 @@ describe("ClassInstance", () => {
 
   test("type exposes the instance's SwiftType for symmetric reflection", () => {
     const counter = makeCounter(1);
-    expect(counter.type.$name).toBe("fixture.Counter");
+    expect(counter.type.name).toBe("fixture.Counter");
     expect(typeName(metadataOf(counter.type))).toBe("fixture.Counter");
   });
 
@@ -66,7 +66,7 @@ describe("ClassInstance", () => {
   test("reads a stored property of a Swift subclass of an ObjC class and retains it through ObjC", (ctx) => {
     requireDarwin(ctx);
     loadFixture();
-    const starling = (Swift.type("fixture.Starling") as ClassType).init();
+    const starling = (Swift.type("fixture.Starling") as SwiftClass).init();
     const object = new ClassInstance(starling.$handle);
     expect(object.metadata.isTypeMetadata).toBe(true);
     expect(object.field("pitch").read()).toEqual(int64(5));
@@ -81,7 +81,7 @@ describe("ClassInstance", () => {
   test("counts retains of a Swift subclass of an ObjC class through ObjC", (ctx) => {
     requireDarwin(ctx);
     loadFixture();
-    const starling = (Swift.type("fixture.Starling") as ClassType).init();
+    const starling = (Swift.type("fixture.Starling") as SwiftClass).init();
     const object = new ClassInstance(starling.$handle);
     const before = object.retainCount;
     object.retain();

@@ -81,6 +81,7 @@ import {
 import { WitnessTable } from "../abi/witness-table.js";
 import { genericRequirements, hasFixedLayoutInGenericContext, keyGenericArguments } from "../abi/generic-instantiation.js";
 import type { SwiftType } from "./swift-type.js";
+import type { SwiftTypeFacade } from "./type-facade.js";
 import { metadataOf } from "./swift-type.js";
 
 export type MethodKind = "method" | "init";
@@ -185,7 +186,7 @@ interface BaseResolveOptions {
 }
 
 export interface MethodResolveOptions extends BaseResolveOptions {
-  typeArguments?: SwiftType[]; // one entry per generic parameter
+  typeArguments?: (SwiftType | SwiftTypeFacade)[]; // one entry per generic parameter
 }
 
 export type SelfOwnership = "borrowing" | "mutating" | "consuming";

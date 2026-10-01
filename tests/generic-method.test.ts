@@ -6,11 +6,11 @@ import { Swift, ClassType, SwiftObject } from "../src/index.js";
 
 import { metadataFor, typeOf } from "../src/abi.js";
 function box(): SwiftObject {
-  return (typeOf(metadataFor("fixture.Box")!) as ClassType).init();
+  return (typeOf(metadataFor("fixture.Box")!) as ClassType).facade.init();
 }
 
 function robot(name: string): SwiftObject {
-  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).init(name);
+  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init(name);
 }
 
 describe("generic method invocation", () => {
@@ -38,7 +38,7 @@ describe("generic method invocation", () => {
   });
 
   test("passes a class-bound generic argument directly", () => {
-    const Widget = typeOf(metadataFor("fixture.Widget")!) as ClassType;
+    const Widget = (typeOf(metadataFor("fixture.Widget")!) as ClassType).facade;
     const widget = Widget.init("Bee");
     expect(box().$method("labelOf", { typeArguments: [Widget] }).call(widget)).toBe("Bee");
     widget.$dispose();
@@ -46,7 +46,7 @@ describe("generic method invocation", () => {
 
   test("an Objective-C protocol requirement takes no witness table", (ctx) => {
     requireDarwin(ctx);
-    const Conformer = typeOf(metadataFor("fixture.ObjCConformer")!) as ClassType;
+    const Conformer = (typeOf(metadataFor("fixture.ObjCConformer")!) as ClassType).facade;
     const Int = metadataFor("Swift.Int")!;
     const conformer = Conformer.init();
     const method = box().$method("scaledIfObject", { typeArguments: [Conformer, typeOf(Int)] });

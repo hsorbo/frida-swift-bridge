@@ -1,14 +1,14 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { ClassType, ClassInstance, ClassMetadata, Metadata, MethodDescriptorKind, VTableEntry, readVTableChain, metadataFor, typeOf, metadataOf } from "../src/abi.js";
+import { ClassType, ClassInstance, ClassMetadata, Metadata, MethodDescriptorKind, VTableEntry, readVTableChain, metadataFor, typeOf, metadataOf, SwiftClass } from "../src/abi.js";
 import { resolveMethod, enumerateMethods } from "../src/runtime/method.js";
-function animalType(): ClassType {
-  return typeOf(metadataFor("fixture.Animal")!) as ClassType;
+function animalType(): SwiftClass {
+  return (typeOf(metadataFor("fixture.Animal")!) as ClassType).facade;
 }
 
-function catType(): ClassType {
-  return typeOf(metadataFor("fixture.Cat")!) as ClassType;
+function catType(): SwiftClass {
+  return (typeOf(metadataFor("fixture.Cat")!) as ClassType).facade;
 }
 
 function Int(): Metadata {
@@ -37,7 +37,7 @@ describe("inherited methods (symbol route)", () => {
 
   test("the facade exposes inherited methods", () => {
     const cat = catType().init();
-    expect(cat.$type.$instanceMethods()).toContain("legs()");
+    expect(cat.$type.instanceMethods()).toContain("legs()");
     expect(cat.legs()).toEqual(int64(4));
   });
 });

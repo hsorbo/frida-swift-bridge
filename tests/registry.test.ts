@@ -8,7 +8,7 @@ import {
   loadFixtureSyms,
 } from "./fixtures/load.js";
 
-import { Swift, SwiftType, ClassType, StructType, EnumType } from "../src/index.js";
+import { Swift, SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum } from "../src/index.js";
 import { metadataOf, descriptorOf } from "../src/abi.js";
 import {
   enumerateSwiftModules,
@@ -104,7 +104,7 @@ describe("registry", () => {
     const lib = Process.getModuleByName(SWIFTCORE_MODULE);
     let count = 0;
     for (const type of Swift.enumerateTypes(lib)) {
-      expect(type instanceof SwiftType).toBeTruthy();
+      expect(type instanceof SwiftTypeFacade).toBeTruthy();
       expect(descriptorOf(type).isType).toBeTruthy();
       count++;
     }
@@ -117,7 +117,7 @@ describe("registry", () => {
     loadResilient();
     const names = new Set([...Swift.images()].map((m) => m.name));
     expect(names.has(RESILIENT_MODULE)).toBeTruthy();
-    const types = new Set([...Swift.enumerateTypes()].map((t) => t.$name));
+    const types = new Set([...Swift.enumerateTypes()].map((t) => t.$type.name));
     expect(types.has("resilient.ResilientPoint")).toBeTruthy();
   });
 
@@ -125,7 +125,7 @@ describe("registry", () => {
     requireSwift();
     const lib = Process.getModuleByName(SWIFTCORE_MODULE);
     const find = (name: string) =>
-      [...Swift.enumerateTypes(lib)].find((t) => t.$name === name) ?? null;
+      [...Swift.enumerateTypes(lib)].find((t) => t.$type.name === name) ?? null;
     const first = find("Swift.Int");
     const second = find("Swift.Int");
     expect(first).not.toBeNull();
@@ -144,8 +144,8 @@ describe("registry", () => {
   test("Swift.type finds a wrapper by name", () => {
     requireSwift();
     const t = Swift.type("Swift.Int");
-    expect(t instanceof StructType).toBeTruthy();
-    expect(t!.$name).toBe("Swift.Int");
+    expect(t instanceof SwiftStruct).toBeTruthy();
+    expect(t!.$type.name).toBe("Swift.Int");
     expect(Swift.type("Swift.NoSuchTypeQX")).toBeNull();
   });
 
@@ -158,15 +158,15 @@ describe("registry", () => {
     expect(classes.length).toBeGreaterThan(0);
     expect(structs.length).toBeGreaterThan(0);
     expect(enums.length).toBeGreaterThan(0);
-    expect(classes.every((t) => t instanceof ClassType)).toBeTruthy();
-    expect(structs.every((t) => t instanceof StructType)).toBeTruthy();
-    expect(enums.every((t) => t instanceof EnumType)).toBeTruthy();
+    expect(classes.every((t) => t instanceof SwiftClass)).toBeTruthy();
+    expect(structs.every((t) => t instanceof SwiftStruct)).toBeTruthy();
+    expect(enums.every((t) => t instanceof SwiftEnum)).toBeTruthy();
   });
 
   test("enumeration names generic types without realizing metadata", () => {
     loadFixture();
     const fixture = Process.getModuleByName(FIXTURE_MODULE);
-    const box = [...Swift.enumerateStructs(fixture)].find((t) => t.$name === "fixture.ConstrainedBox")!;
+    const box = [...Swift.enumerateStructs(fixture)].find((t) => t.$type.name === "fixture.ConstrainedBox")!;
     expect(box.toJSON().kind).toBe("struct");
     expect(() => metadataOf(box)).toThrow();
   });

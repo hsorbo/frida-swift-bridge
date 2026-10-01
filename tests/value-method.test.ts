@@ -110,14 +110,14 @@ describe("consuming methods on value types", () => {
   beforeEach(() => { loadFixture(); });
 
   function token(id: number): { facade: SwiftObject; view: ClassInstance } {
-    const facade = (typeOf(metadataFor("fixture.Token")!) as ClassType).init(id);
+    const facade = (typeOf(metadataFor("fixture.Token")!) as ClassType).facade.init(id);
     return { facade, view: new ClassInstance(facade.$handle) };
   }
 
   test("a consuming method on a small loadable struct leaves the caller's self intact", (ctx) => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(7);
-    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
+    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType).facade
       .$initializer({ labels: [null, "tag"] })
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
@@ -130,7 +130,7 @@ describe("consuming methods on value types", () => {
   test("a consuming method on a large struct leaves the caller's self intact", (ctx) => {
     if (loadFixture().findExportByName("$s7fixture7WrapperV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(9);
-    const wrapper = (typeOf(metadataFor("fixture.Wrapper")!) as StructType).$call("make", facade) as SwiftObject;
+    const wrapper = (typeOf(metadataFor("fixture.Wrapper")!) as StructType).facade.$call("make", facade) as SwiftObject;
     const before = view.retainCount;
     const take = wrapper.$method("take", { self: "consuming" });
     expect(take.call()).toEqual(int64(9));
@@ -141,7 +141,7 @@ describe("consuming methods on value types", () => {
   test("a consuming generic method on a small loadable struct leaves the caller's self intact", (ctx) => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV10takeTaggedySixlF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(11);
-    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
+    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType).facade
       .$initializer({ labels: [null, "tag"] })
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
@@ -154,7 +154,7 @@ describe("consuming methods on value types", () => {
   test("a consuming async method on a small loadable struct leaves the caller's self intact", async (ctx) => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV9takeAsyncSiyYaF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(13);
-    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
+    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType).facade
       .$initializer({ labels: [null, "tag"] })
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;

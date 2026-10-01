@@ -19,7 +19,7 @@ import {
 import { NamedRequirement, namedProtocolRequirements } from "./method.js";
 import { GenericRequirementDescriptor } from "../abi/generic-requirement-descriptor.js";
 import { WitnessTable } from "../abi/witness-table.js";
-import { SwiftType, typeFromDescriptor } from "./swift-type.js";
+import { NominalType, typeFromDescriptor } from "./swift-type.js";
 
 const OFFSETOF_NUM_REQUIREMENTS = 0x10;
 
@@ -30,7 +30,7 @@ export interface StableProtocol {
   readonly moduleName: string | null;
   readonly fullName: string;
   readonly isClassOnly: boolean;
-  conformingTypes(): SwiftType[];
+  conformingTypes(): NominalType[];
   toJSON(): { kind: "protocol"; name: string; isClassOnly: boolean; numRequirements: number };
 }
 
@@ -102,7 +102,7 @@ export class Protocol implements StableProtocol {
     return table === null ? null : new WitnessTable(table, type);
   }
 
-  conformingTypes(): SwiftType[] {
+  conformingTypes(): NominalType[] {
     return conformingTypes(this.descriptor).map((d) => typeFromDescriptor(d));
   }
 }

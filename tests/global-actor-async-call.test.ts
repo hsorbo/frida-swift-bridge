@@ -6,11 +6,11 @@ import { ClassType, AsyncFunctionPointer, driveAsyncCall, metadataFor, typeOf } 
 const GA_FREE_ASYNC_AFP = "$s7fixture11gaFreeAsyncyS2iYaFTu";
 
 function gaHolder(v: number) {
-  return (typeOf(metadataFor("fixture.GAHolder")!) as ClassType).init(v);
+  return (typeOf(metadataFor("fixture.GAHolder")!) as ClassType).facade.init(v);
 }
 
 function wholeGAHolder(v: number) {
-  return (typeOf(metadataFor("fixture.WholeGAHolder")!) as ClassType).init(v);
+  return (typeOf(metadataFor("fixture.WholeGAHolder")!) as ClassType).facade.init(v);
 }
 
 // A generic global actor's executor is its default-actor singleton, drained by the cooperative pool;
@@ -27,8 +27,8 @@ describe("generic global-actor async calling", () => {
 
   test("a @globalActor-isolated method on a plain class is neither actor nor default actor", () => {
     const t = typeOf(metadataFor("fixture.GAHolder")!) as ClassType;
-    expect(t.$isActor).toBe(false);
-    expect(t.$isDefaultActor).toBe(false);
+    expect(t.isActor).toBe(false);
+    expect(t.isDefaultActor).toBe(false);
   });
 
   test("drives a @globalActor-isolated method on a plain class: gaMethodAsync(1) ⇒ 11", async () => {
@@ -62,7 +62,7 @@ describe("@MainActor async calling (needs a pumping main runloop)", () => {
   });
 
   test.skip("resolves a @MainActor method via the facade: mainMethodAsync(1) ⇒ 11", async () => {
-    const h = (typeOf(metadataFor("fixture.MainHolder")!) as ClassType).init(10);
+    const h = (typeOf(metadataFor("fixture.MainHolder")!) as ClassType).facade.init(10);
     expect(await h.mainMethodAsync(1)).toEqual(int64(11));
   });
 });

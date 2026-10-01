@@ -58,9 +58,9 @@ describe("Swift.NativeFunction (marshalled)", () => {
     const Int = typeOf(metadataFor("Swift.Int")!);
     const Animal = typeOf(metadataFor("fixture.Animal")!) as ClassType;
     const describe = Swift.NativeFunction(fixtureExport("fixture.describeAnimal"), Int, [Animal]);
-    const cat = (typeOf(metadataFor("fixture.Cat")!) as ClassType).init();
+    const cat = (typeOf(metadataFor("fixture.Cat")!) as ClassType).facade.init();
     expect(describe(cat)).toEqual(int64(4));
-    const robot = (typeOf(metadataFor("fixture.Robot")!) as ClassType).init("R2");
+    const robot = (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init("R2");
     expect(() => describe(robot)).toThrow(/expected fixture\.Animal/);
     expect(() => describe(cat.$handle)).toThrow(/raw pointer is only accepted via \/abi/);
   });

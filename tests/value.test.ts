@@ -105,7 +105,7 @@ describe("ValueInstance", () => {
       c: 3,
       d: 4,
     });
-    expect(v.type.$name).toBe("fixture.LoadableStruct");
+    expect(v.type.name).toBe("fixture.LoadableStruct");
     expect(typeName(metadataOf(v.type))).toBe("fixture.LoadableStruct");
     v.dispose();
   });

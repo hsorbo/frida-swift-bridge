@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift, ClassType, StructType, SwiftObject } from "../src/index.js";
+import { Swift, ClassType, StructType, SwiftObject, SwiftClass, SwiftStruct } from "../src/index.js";
 import {
   resolveMethod,
   enumerateMethods,
@@ -10,8 +10,8 @@ import {
 import { parseSwiftSignature, type SwiftFunctionSignature } from "../src/runtime/symbolication.js";
 
 import { ClassInstance, metadataFor, typeOf, typeName } from "../src/abi.js";
-function robotType(): ClassType {
-  return typeOf(metadataFor("fixture.Robot")!) as ClassType;
+function robotType(): SwiftClass {
+  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade;
 }
 
 describe("parser labels", () => {
@@ -139,7 +139,7 @@ describe("enumerateProperties", () => {
 
   test("is exposed on the type wrapper as .properties", () => {
     const point = typeOf(metadataFor("fixture.Point")!) as StructType;
-    expect(point.$properties.map((p) => p.name).sort()).toEqual(["doubled", "tracked", "x"]);
+    expect(point.properties.map((p) => p.name).sort()).toEqual(["doubled", "tracked", "x"]);
   });
 
   test("lists class properties with their types", () => {
@@ -173,7 +173,7 @@ describe("ClassInstance method invocation", () => {
 
   test("rejects a class argument whose type is not the declared class", () => {
     const a = robotType().init("Ada");
-    const token = (typeOf(metadataFor("fixture.Token")!) as ClassType).init(1);
+    const token = (typeOf(metadataFor("fixture.Token")!) as ClassType).facade.init(1);
     expect(() => a.$call("merged", token)).toThrow(/expected fixture\.Robot/);
   });
 
@@ -245,7 +245,7 @@ describe("ClassInstance computed property", () => {
   });
 
   test("gets and sets a property inherited from a superclass", () => {
-    const pup = (typeOf(metadataFor("fixture.Pup")!) as ClassType).init("Rex", 4);
+    const pup = (typeOf(metadataFor("fixture.Pup")!) as ClassType).facade.init("Rex", 4);
     expect(pup.$get("legs")).toEqual(int64(4));
     pup.$set("legs", 3);
     expect(pup.$get("legs")).toEqual(int64(3));
@@ -262,7 +262,7 @@ describe("ClassType static invocation", () => {
   });
 
   test("an inherited class func sees the subclass as its dynamic Self", () => {
-    expect((typeOf(metadataFor("fixture.RabbitBurrow")!) as ClassType).$call("occupant")).toBe("RabbitBurrow");
+    expect((typeOf(metadataFor("fixture.RabbitBurrow")!) as ClassType).facade.$call("occupant")).toBe("RabbitBurrow");
   });
 });
 
@@ -270,17 +270,17 @@ describe("static properties", () => {
   beforeEach(() => { loadFixture(); });
 
   test("a value type reads its computed, stored and let static properties", () => {
-    const duckling = Swift.type("fixture.Duckling") as StructType;
+    const duckling = Swift.type("fixture.Duckling") as SwiftStruct;
     expect(duckling.$get("species")).toBe("duck");
     expect(duckling.$get("flockSize")).toEqual(int64(12));
     expect(duckling.$get("motto")).toBe("quack");
   });
 
   test("a class reads its static property with the metatype as self", () => {
-    expect((Swift.type("fixture.Owlet") as ClassType).$get("species")).toBe("owl");
+    expect((Swift.type("fixture.Owlet") as SwiftClass).$get("species")).toBe("owl");
   });
 
   test("an instance property is not a static one", () => {
-    expect(() => (Swift.type("fixture.Duckling") as StructType).$get("weight")).toThrow(/no static getter for weight/);
+    expect(() => (Swift.type("fixture.Duckling") as SwiftStruct).$get("weight")).toThrow(/no static getter for weight/);
   });
 });

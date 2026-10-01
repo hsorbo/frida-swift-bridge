@@ -570,7 +570,7 @@ describe("SwiftInterceptor.attach", () => {
     makeSwiftNativeFunction(addr, Counter, [Int])(intValue(7));
     listener.detach();
     const counter = seen as unknown as SwiftObject;
-    expect(counter.$className).toBe("fixture.Counter");
+    expect(counter.$type.name).toBe("fixture.Counter");
     expect(counter.$get("count")).toEqual(int64(7));
   });
 

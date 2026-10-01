@@ -65,7 +65,7 @@ The default export is the whole facade. Its members:
 - `Swift.symbolicate(address)`: resolve a code address to a Swift symbol.
 - `Swift.images()`: a generator of the native `Module`s that carry Swift
   metadata.
-- `Swift.type(name)`: look a type up by name; returns a [type wrapper](#types)
+- `Swift.type(name)`: look a type up by name; returns a [type facade](#types)
   or `null`. See [Finding types](#finding-types).
 - `Swift.class(name)`, `Swift.struct(name)`, `Swift.enum(name)`: like
   `Swift.type`, but checked to the named kind. See
@@ -112,12 +112,12 @@ const Date = Swift.type("Foundation.Date");
 
 ## Finding types
 
-`Swift.type(name)` resolves a **qualified** name (`Module.Type`) to a wrapper of
-the matching kind — a `ClassType`, `StructType`, or `EnumType`. It returns
-`null` when nothing matches.
+`Swift.type(name)` resolves a **qualified** name (`Module.Type`) to a
+[type facade](#types) of the matching kind — a `SwiftClass`, `SwiftStruct` or
+`SwiftEnum`. It returns `null` when nothing matches.
 
 ```js
-const url = Swift.type("Foundation.URLComponents"); // StructType
+const url = Swift.type("Foundation.URLComponents"); // SwiftStruct
 const task = Swift.type("_Concurrency.Task");        // null if not loaded
 ```
 
@@ -132,13 +132,13 @@ Swift.type("Geometry.Point");   // resolves
 ```
 
 When you know the kind, the singular forms return it precisely typed:
-`Swift.class(name)` yields a `ClassType`, `Swift.struct(name)` a `StructType`,
-and `Swift.enum(name)` an `EnumType`. Name resolution is identical to
+`Swift.class(name)` yields a `SwiftClass`, `Swift.struct(name)` a `SwiftStruct`,
+and `Swift.enum(name)` a `SwiftEnum`. Name resolution is identical to
 `Swift.type`, and `null` still means "not found" — but a name that resolves to
 a different kind throws rather than silently mis-typing:
 
 ```js
-const url = Swift.struct("Foundation.URL");  // StructType
+const url = Swift.struct("Foundation.URL");  // SwiftStruct
 Swift.class("Foundation.URL");               // throws: "'Foundation.URL' is struct, not class"
 ```
 
@@ -150,9 +150,9 @@ tab-complete. `Swift.modules.MyApp` is the namespace of the Swift module
 `MyApp`, and its members are that module's top-level types and protocols:
 
 ```js
-Swift.modules.MyApp.Robot;          // ClassType, same as Swift.type("MyApp.Robot")
+Swift.modules.MyApp.Robot;          // SwiftClass, same as Swift.type("MyApp.Robot")
 Swift.modules.MyApp.Greeter;        // Protocol
-Swift.modules.Swift.Int;            // StructType
+Swift.modules.Swift.Int;            // SwiftStruct
 Swift.modules.MyApp.NoSuchThing;    // undefined
 "MyApp" in Swift.modules;           // true
 Object.keys(Swift.modules.MyApp);   // ["Robot", "Greeter", ...]
@@ -168,12 +168,13 @@ A nested type hangs off its parent, so `Swift.modules.MyApp.Outer.Inner` is
 `Swift.type("MyApp.Outer.Inner")`.
 
 To walk a module's types without knowing their names, use the lazy generators.
-They yield descriptor-backed wrappers and don't parse a type you never touch:
+They yield facades over descriptor-backed reflection and don't parse a type you
+never touch:
 
 ```js
 const app = Process.getModuleByName("MyApp");
 for (const cls of Swift.enumerateClasses(app))
-    console.log(cls.$name);
+    console.log(cls.$type.name);
 ```
 
 `Swift.enumerateTypes`, `Swift.enumerateClasses`, `Swift.enumerateStructs`, and
@@ -182,12 +183,19 @@ span every loaded Swift image and reflect modules loaded later.
 
 ## Types
 
-Every wrapper extends `SwiftType`, which carries a type's identity. A class,
-struct or enum wrapper is a `NominalType`, which adds the member API and is a
-facade like an [object](#objects-and-values): its Swift members answer to
-their bare names, and the bridge's own members are `$`-prefixed so they never
-collide with one. `init` is the one bare bridge member, because it names
-Swift's initializer.
+A type has two faces. Its **facade** is the receiver for everything you do
+*with* the type: construct instances, call type methods, read static
+properties, build enum cases, reach nested types. Its **reflection** describes
+the type: name, kind, module, superclass, members, conformances. `Swift.type`,
+`Swift.modules` and the enumerators hand out facades; a facade's `$type`, an
+object's `$type` and every type link inside reflection are reflection objects.
+
+A facade is a `SwiftClass`, `SwiftStruct` or `SwiftEnum`; all extend
+`SwiftTypeFacade`, and the value kinds share `SwiftValueType`. Like an
+[object](#objects-and-values), it is a proxy: its Swift members answer to their
+bare names, and the bridge's own members are `$`-prefixed so they never collide
+with one. `init` is the one bare bridge member, because it names Swift's
+initializer.
 
 ```js
 const Robot = Swift.modules.MyApp.Robot;
@@ -196,6 +204,7 @@ Robot.fleetSize;              // static property; assignment writes a static var
 Swift.modules.MyApp.Suit.hearts;        // enum case
 Swift.modules.MyApp.Pick.value(42);     // enum case with a payload
 Swift.modules.MyApp.Outer.Inner;        // nested type
+Robot.$type.name;             // "MyApp.Robot", from the reflection
 ```
 
 A name resolves when it is read, so touching a type scans nothing. A type
@@ -203,33 +212,59 @@ method resolves by arity like an object's; the `$typeMethod` and `$get` forms
 below take the same names with explicit options. `Object.keys(type)` lists the
 defining module's type methods, static properties, cases and nested types; a
 member another module or a protocol extension adds resolves by name and joins
-the listing once read, while `$typeMethods()` and `$instanceMethods()` always
-span every loaded module. A Swift member
+the listing once read, while `$type.typeMethods()` and
+`$type.instanceMethods()` always span every loaded module. A Swift member
 named like a reserved JS method (`toString`, `toJSON`, `valueOf`,
 `hasOwnProperty`, `constructor`) stays reachable through `$call` and `$get`.
 
-On every `SwiftType`:
+The facade's own members:
 
-- `type.$name`: the fully-qualified name, including every enclosing context
-  (`MyApp.Outer.Inner`).
-- `type.$kind`: `"class"`, `"struct"`, `"enum"`, `"tuple"`, `"metatype"`,
-  `"function"`, `"existential"`, `"objc-class"`, `"foreign-class"` or
-  `"foreign-reference"`.
-- `type.$moduleName`: the logical Swift module name.
-- `type.$superClass`: the parent as a `SwiftType`, or `null`.
-- `type.toJSON()`: cheap identity `{ kind, name, module }`.
-
-On a `NominalType`:
-
-- `type.$instanceMethods(query?)` / `type.$typeMethods(query?)`: the selectors
-  of its instance methods and of its type methods, e.g. `["greet(_:)", …]`.
-  `query` is `{ inherited? }`.
-- `type.$instanceMethod(name, options?)`, `type.$typeMethod(name, options?)`,
-  `type.$initializer(options?)`: look up one member of that kind. See
-  [Calling methods](#calling-methods).
-- `type.$properties`: the properties as `{ name, typeName, isStatic, writable }`.
+- `type.$type`: the type's reflection, a `ClassType`, `StructType` or
+  `EnumType`.
 - `type.$get(name)` / `type.$set(name, value)`: read a static property, write a
   static `var`.
+- `type.$call(name, ...args)`, `type.init(...args)`: call a type method or an
+  initializer by name. See [Calling methods](#calling-methods) and
+  [Creating instances](#creating-instances).
+- `type.$typeMethod(name, options?)`, `type.$initializer(options?)`: bind one
+  member of that kind to call. See [Calling methods](#calling-methods).
+- `type.toString()`, `type.toJSON()`: the name, and the cheap identity
+  `{ kind, name, module }`.
+- On a `SwiftStruct` or `SwiftEnum`: `$new(value)`, `$borrow(address)`,
+  `$copy(address)` and `$adopt(address)`. See
+  [Creating instances](#creating-instances).
+- On a `SwiftEnum`: `$case(name, payload?)`.
+
+### Reflection
+
+Reflection is strict: it has no index signature, so a misspelled member is a
+TypeScript error, and no member realizes metadata it doesn't need. Reading a
+name, kind or module does not realize the type's metadata; neither does listing
+or finding members, which works for a generic type named without its arguments.
+
+Every reflection object extends `SwiftType`:
+
+- `info.name`: the fully-qualified name, including every enclosing context
+  (`MyApp.Outer.Inner`).
+- `info.kind`: `"class"`, `"struct"`, `"enum"`, `"tuple"`, `"metatype"`,
+  `"function"`, `"existential"`, `"objc-class"`, `"foreign-class"` or
+  `"foreign-reference"`.
+- `info.moduleName`: the logical Swift module name.
+- `info.superClass`: the parent's reflection, or `null`.
+- `info.toJSON()`: cheap identity `{ kind, name, module }`.
+
+A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
+`EnumType`), which adds the members and the way back to the facade:
+
+- `info.facade`: the type facade.
+- `info.instanceMethods(query?)` / `info.typeMethods(query?)`: the selectors
+  of its instance methods and of its type methods, e.g. `["greet(_:)", …]`.
+  `query` is `{ inherited? }`.
+- `info.instanceMethod(name, options?)`, `info.typeMethod(name, options?)`,
+  `info.initializer(options?)`: find one member of that kind by name, without
+  an instance or type arguments. See [Calling methods](#calling-methods).
+- `info.properties`: the properties as `{ name, typeName, isStatic, writable }`.
+- `info.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
 
 The lists span every loaded module: they include members that other modules
 add in extensions, and members a conformed-to protocol provides through a
@@ -239,44 +274,62 @@ and its members shadow the same members of a less constrained extension. An
 extension whose clause the bridge can't check is left out: one with a same-type
 (`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
 requirement on a nested associated type (`Item.Index`).
-- `type.$protocols()`: a `{ [name]: Protocol }` map of declared conformances.
-- `type.$call(name, ...args)`, `type.init(...args)`: call a type method or an
-  initializer by name. See [Calling methods](#calling-methods) and
-  [Creating instances](#creating-instances).
-
-Reading a name, kind, or module does not realize the type's metadata.
-
-```js
-const robot = Swift.type("MyApp.Robot");
-robot.$name;             // "MyApp.Robot"
-robot.$kind;             // "class"
-robot.$moduleName;       // "MyApp"
-robot.$instanceMethods();   // ["greet(_:)", "rename(to:)", ...]
-robot.$superClass;       // null, or a SwiftType
-```
 
 Kind-specific members:
 
-- `StructType.$fields`: stored members as `{ name, type, isVar }`.
-- `EnumType.$cases`: the cases as `{ name, type, isVar }`.
-- `ClassType.$isActor` / `ClassType.$isDefaultActor`: actor classification.
+- `StructType.fields`: stored members as `{ name, type, isVar }`, `type` being
+  the field type's reflection.
+- `EnumType.cases`: the cases as `{ name, type, isVar }`.
+- `ClassType.isActor` / `ClassType.isDefaultActor`: actor classification.
 
 ```js
-Swift.type("MyApp.Rect").$fields.map(f => f.name);   // ["width", "height"]
-Swift.type("MyApp.Suit").$cases.map(c => c.name);    // ["hearts", "spades", ...]
-Swift.type("MyApp.Session").$isActor;                // true for `actor Session`
+const Robot = Swift.type("MyApp.Robot");
+Robot.$type.name;                 // "MyApp.Robot"
+Robot.$type.kind;                 // "class"
+Robot.$type.moduleName;           // "MyApp"
+Robot.$type.instanceMethods();    // ["greet(_:)", "rename(to:)", ...]
+Robot.$type.superClass;           // null, or a SwiftType
+Robot.$type.facade === Robot;     // true
+
+Swift.type("MyApp.Rect").$type.fields.map(f => f.name);   // ["width", "height"]
+Swift.type("MyApp.Suit").$type.cases.map(c => c.name);    // ["hearts", "spades", ...]
+Swift.type("MyApp.Session").$type.isActor;                // true for `actor Session`
 ```
 
-Other wrappers you may encounter from reflection: `TupleType` (`$elements`, each
-`{ label, type }`), `MetatypeType` (`$instanceType`), `FunctionType` (`$signature`), and
-the foreign/ObjC bridging wrappers `ObjCClassWrapperType` (`$objcClass`), `ForeignClassType`,
-`ForeignReferenceType`.
+Other reflection you may encounter: `TupleType` (`elements`, each
+`{ label, type }`), `MetatypeType` (`instanceType`), `FunctionType`
+(`signature`), and the foreign/ObjC bridging wrappers `ObjCClassWrapperType`
+(`objcClass`), `ForeignClassType`, `ForeignReferenceType`. These describe types
+with no Swift members of their own, so they have no facade.
+
+One type is one reflection object and one facade: `Swift.type`, `Swift.modules`,
+an instance's `$type` and `typeOf` under `/abi` all meet at the same objects,
+and each specialization of a generic type is its own. Wherever the bridge takes
+a type as input (`Swift.NativeFunction`, `typeArguments`, `metadataOf` and
+`descriptorOf` under `/abi`), a facade and its reflection are interchangeable.
+
+### Moved members
+
+The reflection split moved these members outright; there are no aliases.
+
+| Before | Now |
+| --- | --- |
+| `type.$name`, `$kind`, `$moduleName`, `$superClass` | `type.$type.name`, `.kind`, `.moduleName`, `.superClass` |
+| `type.$protocols()`, `$properties`, `$fields`, `$cases` | `type.$type.protocols()`, `.properties`, `.fields`, `.cases` |
+| `type.$isActor`, `$isDefaultActor` | `type.$type.isActor`, `.isDefaultActor` |
+| `type.$instanceMethods()`, `$typeMethods()` | `type.$type.instanceMethods()`, `.typeMethods()` |
+| `type.$instanceMethod(name, options?)` | `type.$type.instanceMethod(name, options?)` |
+| `tuple.$elements`, `metatype.$instanceType`, `fn.$signature`, `objc.$objcClass` | `.elements`, `.instanceType`, `.signature`, `.objcClass` |
+| `object.$className` | `object.$type.name` |
+| `object.$instanceMethods`, `$typeMethods` | `object.$type.instanceMethods()`, `.typeMethods()` |
+| `ClassType`, `StructType`, `EnumType` as the result of `Swift.type` | `SwiftClass`, `SwiftStruct`, `SwiftEnum`; the old names are the reflection |
+| `ValueType` | gone: `SwiftValueType` is the facade base of struct and enum |
 
 ## Creating instances
 
 Construct instances from a type wrapper.
 
-Classes — `ClassType.init(...args)` runs a Swift initializer and hands back a
+Classes — `SwiftClass.init(...args)` runs a Swift initializer and hands back a
 live [object facade](#objects-and-values):
 
 ```js
@@ -305,10 +358,10 @@ differ only in argument type — resolve explicitly with
 `$initializer({ labels, argTypes })`, which returns a bound initializer to
 `.call(...)`.
 
-Value types — `ValueType.$new(value)` builds a value from a plain JS object.
-Enum cases are members of the enum: a case without a payload is a value, a
-case with one is called with it. `EnumType.$case(name, payload?)`
-is the string-keyed form:
+Value types — `$new(value)` on a `SwiftStruct` or `SwiftEnum` builds a value
+from a plain JS object. Enum cases are members of the enum: a case without a
+payload is a value, a case with one is called with it.
+`SwiftEnum.$case(name, payload?)` is the string-keyed form:
 
 ```js
 const rect = Swift.type("MyApp.Rect").$new({ width: 3, height: 4 });
@@ -329,7 +382,7 @@ call), use `Swift.borrowObject(handle)` for a non-owning view or
 
 ```js
 const view = Swift.borrowObject(handle);
-view.$className;    // "MyApp.Robot"
+view.$type.name;    // "MyApp.Robot"
 ```
 
 ## Objects and values
@@ -352,14 +405,13 @@ robot.name;             // read a property
 
 The control surface (never shadowed by Swift members of the same spelling):
 
-- `$type`: the `SwiftType`.
+- `$type`: [reflection](#reflection) on the dynamic type: a `ClassType` for an
+  object, a `StructType` or `EnumType` for a value. Its `name` is the dynamic
+  type name, its `instanceMethods()` and `typeMethods()` the selectors, and its
+  `facade` the type facade.
 - `$handle`: the underlying `NativePointer`.
-- `$className`: the dynamic type name.
 - `$kind`: `"object"` or `"value"`.
 - `$owned`: whether the facade owns its reference/storage.
-- `$instanceMethods` / `$typeMethods`: the selectors of the type's instance
-  methods (`"greet(_:)"`) and type methods (`"make(name:)"`), as
-  `$type.$instanceMethods()` and `$type.$typeMethods()` list them.
 - `$call(name, ...args)`: invoke a method by name.
 - `$method(name, options?)`: resolve a bound method for overload/generic/mutating
   control (see [Calling methods](#calling-methods)).
@@ -371,7 +423,7 @@ The control surface (never shadowed by Swift members of the same spelling):
 - `equals(other)`, `toString()`.
 
 ```js
-robot.$className;                       // "MyApp.Robot"
+robot.$type.name;                       // "MyApp.Robot"
 robot.$call("greet", "Alice");          // same as robot.greet("Alice")
 robot.$get("badge");                    // "[R2]"
 robot.$set("badge", "D2");
@@ -388,7 +440,7 @@ conforms to. The facade looks in the defining module first and searches the
 other modules only for a name it did not find there, filtering symbols by name
 before demangling anything. Listing a facade (`Object.keys(robot)`, `in`)
 shows the defining module's members plus names already looked up; use
-`robot.$type.$instanceMethods()` for the full list.
+`robot.$type.instanceMethods()` for the full list.
 
 ## Calling methods
 
@@ -441,17 +493,24 @@ Int.$call("*", 6, 7);          // 42: operators are static methods; both operand
 Int.$typeMethod("*").call(6, 7);
 ```
 
-`$instanceMethod(name, options)` finds an instance method through its type,
-without an instance. It has an `address` to hook, and `bind(instance)` returns
-the bound method to call:
+`$type.instanceMethod(name, options)` finds an instance method through its
+type's reflection, without an instance. It has an `address` to hook, and
+`bind(instance)` returns the bound method to call:
 
 ```js
-const greet = Swift.type("MyApp.Robot").$instanceMethod("greet");
+const greet = Swift.type("MyApp.Robot").$type.instanceMethod("greet");
 Swift.Interceptor.attach(greet.address, { /* ... */ });
 greet.bind(robot).call("X");    // "Hello X, I am R2"
 ```
 
-Generic methods take their type arguments explicitly as `SwiftType`s:
+`$type.typeMethod(name, options)` and `$type.initializer(options)` find a type
+method or an initializer the same way. They describe the member they find:
+`address`, `selector`, `isGeneric` and `origin`, with no receiver and no
+`call`. The facade's `$typeMethod` and `$initializer` find the same member and
+bind it to call, so a hook target never depends on being able to call it.
+
+Generic methods take their type arguments explicitly as types, facades or
+their reflection:
 
 ```js
 const box = Swift.type("MyApp.Box").init();
@@ -614,10 +673,10 @@ robot.badge;                // "[D2]"
 Assigning a property without a setter, or a name that is not a property,
 throws.
 
-`type.$properties` enumerates the declared members:
+`type.$type.properties` enumerates the declared members:
 
 ```js
-Swift.type("MyApp.Robot").$properties.map(p => p.name);   // ["name", "badge"]
+Swift.type("MyApp.Robot").$type.properties.map(p => p.name);   // ["name", "badge"]
 ```
 
 Static properties, including those a protocol extension provides, read through
@@ -668,9 +727,9 @@ Swift.Protocol.find("Greeter");   // throws if two modules declare Greeter
 Relate types and protocols in both directions:
 
 ```js
-Swift.Protocol.find("MyApp.Scalable").conformingTypes().map(t => t.$name);   // ["Swift.Int", ...]
+Swift.Protocol.find("MyApp.Scalable").conformingTypes().map(t => t.name);   // ["Swift.Int", ...]: reflection
 
-Swift.type("MyApp.Person").$protocols();   // { "MyApp.Greeter": Protocol, "MyApp.Aged": Protocol }
+Swift.type("MyApp.Person").$type.protocols();   // { "MyApp.Greeter": Protocol, "MyApp.Aged": Protocol }
 ```
 
 `ProtocolComposition` models an `any P & Q` existential, built from a signature:
@@ -693,8 +752,8 @@ for you inside [interceptors](#intercepting).
 ## Free functions
 
 `Swift.NativeFunction(address, returnType, argTypes, options?)` wraps a free
-Swift function. `returnType` and each of `argTypes` is a `SwiftType` (use `null`
-as the return type for `Void`). The returned callable marshals JS values in and
+Swift function. `returnType` and each of `argTypes` is a type, as a facade or
+its reflection (use `null` as the return type for `Void`). The returned callable marshals JS values in and
 decodes the Swift return out:
 
 ```js
@@ -869,9 +928,9 @@ Swift.Interceptor.attach(deriveKey.address, { /* ... */ });
 deriveKey.call(key, 32);   // throws: "... needs CryptoKit.HKDF's type arguments"
 ```
 
-A generic member is found the same way, by `$typeMethod`, `$instanceMethod` or
-`$initializer`. Calling it through its type throws, so hook it or call it
-another way:
+A generic member is found the same way, by `$typeMethod`, `$initializer` or
+`$type.instanceMethod`. Calling it through its type throws, so hook it or call
+it another way:
 
 ```js
 // init<D: ContiguousBytes>(data: D)

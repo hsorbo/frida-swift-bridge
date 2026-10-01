@@ -6,7 +6,7 @@ import { ClassType, SwiftError, metadataFor, typeOf } from "../src/abi.js";
 declare function gc(): void;
 
 function ticker() {
-  return (typeOf(metadataFor("fixture.Ticker")!) as ClassType).init();
+  return (typeOf(metadataFor("fixture.Ticker")!) as ClassType).facade.init();
 }
 
 describe("actor-isolated async calling", () => {
@@ -67,7 +67,7 @@ describe("actor-isolated async calling", () => {
 });
 
 function customTicker() {
-  return (typeOf(metadataFor("fixture.CustomExecutorTicker")!) as ClassType).init();
+  return (typeOf(metadataFor("fixture.CustomExecutorTicker")!) as ClassType).facade.init();
 }
 
 describe("custom-executor actor async calling", () => {
@@ -77,8 +77,8 @@ describe("custom-executor actor async calling", () => {
 
   test("a custom-executor actor is an actor but not a default actor", () => {
     const t = typeOf(metadataFor("fixture.CustomExecutorTicker")!) as ClassType;
-    expect(t.$isActor).toBe(true);
-    expect(t.$isDefaultActor).toBe(false);
+    expect(t.isActor).toBe(true);
+    expect(t.isDefaultActor).toBe(false);
   });
 
   test("drives a custom-executor actor's async method: advance() ⇒ 1, 2", async () => {

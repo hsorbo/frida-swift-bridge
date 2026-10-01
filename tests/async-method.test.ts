@@ -1,11 +1,11 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { ClassType, ValueType, ValueInstance, BoundAsyncMethod, GenericBoundAsyncMethod, SwiftError, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
+import { ClassType, StructType, ValueInstance, BoundAsyncMethod, GenericBoundAsyncMethod, SwiftError, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
 
 import { Swift } from "../src/index.js";
 function calc(base: number) {
-  return (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).init(base);
+  return (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).facade.init(base);
 }
 
 describe("async method", () => {
@@ -115,12 +115,12 @@ describe("async method", () => {
   });
 
   test("static async method on a value type (no self): Accumulator.sumStaticAsync(4, 5) ⇒ 9", async () => {
-    const t = typeOf(metadataFor("fixture.Accumulator")!) as ValueType;
+    const t = (typeOf(metadataFor("fixture.Accumulator")!) as StructType).facade;
     expect(await t.$call("sumStaticAsync", 4, 5)).toEqual(int64(9));
   });
 
   test("static async method on a class: AsyncCalc.combineAsync(3, 4) ⇒ 34", async () => {
-    const t = typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType;
+    const t = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).facade;
     expect(await t.$call("combineAsync", 3, 4)).toEqual(int64(34));
   });
 });

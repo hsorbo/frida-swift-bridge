@@ -14,7 +14,7 @@ describe("ForeignClass metadata", () => {
 
     const type = typeOf(metadata);
     expect(type instanceof ForeignClassType).toBe(true);
-    expect(type.$name).toContain("CGColor");
+    expect(type.name).toContain("CGColor");
     expect(descriptorOf(type as ForeignClassType).handle.isNull()).toBe(false);
     expect(type.toJSON().kind).toBe("foreign-class");
   });

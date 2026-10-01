@@ -1,15 +1,15 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { ClassType, ClassInstance, ClassMetadata, Metadata, MethodDescriptorKind, readVTableChain, metadataFor, typeOf, metadataOf } from "../src/abi.js";
+import { ClassType, ClassInstance, ClassMetadata, Metadata, MethodDescriptorKind, readVTableChain, metadataFor, typeOf, metadataOf, SwiftClass } from "../src/abi.js";
 // resilient.dylib is stripped, so ResilientBase.greeting has only a dispatch-thunk symbol;
 // resolveMethod's symbol route can't find it, unlike the vtable route used below.
-function concreteSubType(): ClassType {
-  return typeOf(metadataFor("fixture.ConcreteSub")!) as ClassType;
+function concreteSubType(): SwiftClass {
+  return (typeOf(metadataFor("fixture.ConcreteSub")!) as ClassType).facade;
 }
 
-function resilientBaseType(): ClassType {
-  return typeOf(metadataFor("resilient.ResilientBase")!) as ClassType;
+function resilientBaseType(): SwiftClass {
+  return (typeOf(metadataFor("resilient.ResilientBase")!) as ClassType).facade;
 }
 
 function String_(): Metadata {

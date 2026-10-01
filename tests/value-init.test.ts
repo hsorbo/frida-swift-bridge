@@ -2,11 +2,11 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 import { requireLinux } from "./swift.js";
 
-import { Swift, StructType } from "../src/index.js";
+import { Swift, StructType, SwiftStruct } from "../src/index.js";
 
 import { metadataFor, typeOf } from "../src/abi.js";
-function structType(name: string): StructType {
-  return typeOf(metadataFor(name)!) as StructType;
+function structType(name: string): SwiftStruct {
+  return (typeOf(metadataFor(name)!) as StructType).facade;
 }
 
 // Value-type init resolution depends on the symbol table (method.ts:282): a

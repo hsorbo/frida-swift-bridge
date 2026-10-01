@@ -12,7 +12,6 @@ import {
 import { symbolicate } from "./runtime/symbolication.js";
 import { SwiftInterceptor } from "./runtime/interceptor.js";
 import {
-  SwiftType,
   NominalType,
   ClassType,
   StructType,
@@ -20,6 +19,7 @@ import {
   typeFromDescriptor,
   swiftFunction,
 } from "./runtime/swift-type.js";
+import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum } from "./runtime/type-facade.js";
 import { asSwiftObject, SwiftClassObject } from "./runtime/object-facade.js";
 import { ClassInstance } from "./abi/heap-object.js";
 import {
@@ -44,20 +44,20 @@ function* nameable(
   }
 }
 
-function typeOfKind<T extends SwiftType>(
+function typeOfKind<T extends NominalType>(
   name: string,
   ctor: new (descriptor: ContextDescriptor) => T,
   kind: string
-): T | null {
+): T["facade"] | null {
   const descriptor = findType(name);
   if (descriptor === null) {
     return null;
   }
   const type = typeFromDescriptor(descriptor);
   if (!(type instanceof ctor)) {
-    throw new Error(`'${name}' is ${type.toJSON().kind}, not ${kind}`);
+    throw new Error(`'${name}' is ${type.kind}, not ${kind}`);
   }
-  return type;
+  return type.facade as T["facade"];
 }
 
 // The stable root; version-sensitive ABI and reversing machinery lives behind the `/abi` subpath.
@@ -71,7 +71,6 @@ export {
   SwiftType,
   TypeKind,
   NominalType,
-  ValueType,
   StructType,
   EnumType,
   ClassType,
@@ -84,15 +83,23 @@ export {
   TypeMember,
   MethodQuery,
   MemberLookupOptions,
+  SwiftMember,
   SwiftInstanceMethod,
   NativeFunctionType,
   MarshalledFunctionOptions,
-  SwiftClassBoundInitializer,
   TupleTypeElement,
   ParameterConvention,
   FunctionTypeParameter,
   FunctionTypeSignature,
 } from "./runtime/swift-type.js";
+export {
+  SwiftTypeFacade,
+  SwiftClass,
+  SwiftValueType,
+  SwiftStruct,
+  SwiftEnum,
+  SwiftClassBoundInitializer,
+} from "./runtime/type-facade.js";
 export { SwiftValue } from "./abi/instance.js";
 export { SwiftError } from "./runtime/thrown-error.js";
 export {
@@ -152,44 +159,44 @@ export const Swift = {
     return moduleRegistry();
   },
 
-  type(name: string): NominalType | null {
+  type(name: string): SwiftTypeFacade | null {
     const descriptor = findType(name);
-    return descriptor === null ? null : typeFromDescriptor(descriptor);
+    return descriptor === null ? null : typeFromDescriptor(descriptor).facade;
   },
 
-  *enumerateTypes(module?: Module): Generator<NominalType> {
+  *enumerateTypes(module?: Module): Generator<SwiftTypeFacade> {
     for (const descriptor of nameable(swiftTypes(module))) {
-      yield typeFromDescriptor(descriptor);
+      yield typeFromDescriptor(descriptor).facade;
     }
   },
 
-  class(name: string): ClassType | null {
+  class(name: string): SwiftClass | null {
     return typeOfKind(name, ClassType, "class");
   },
 
-  *enumerateClasses(module?: Module): Generator<ClassType> {
+  *enumerateClasses(module?: Module): Generator<SwiftClass> {
     for (const descriptor of nameable(swiftClasses(module))) {
-      yield typeFromDescriptor(descriptor) as ClassType;
+      yield (typeFromDescriptor(descriptor) as ClassType).facade;
     }
   },
 
-  struct(name: string): StructType | null {
+  struct(name: string): SwiftStruct | null {
     return typeOfKind(name, StructType, "struct");
   },
 
-  *enumerateStructs(module?: Module): Generator<StructType> {
+  *enumerateStructs(module?: Module): Generator<SwiftStruct> {
     for (const descriptor of nameable(swiftStructs(module))) {
-      yield typeFromDescriptor(descriptor) as StructType;
+      yield (typeFromDescriptor(descriptor) as StructType).facade;
     }
   },
 
-  enum(name: string): EnumType | null {
+  enum(name: string): SwiftEnum | null {
     return typeOfKind(name, EnumType, "enum");
   },
 
-  *enumerateEnums(module?: Module): Generator<EnumType> {
+  *enumerateEnums(module?: Module): Generator<SwiftEnum> {
     for (const descriptor of nameable(swiftEnums(module))) {
-      yield typeFromDescriptor(descriptor) as EnumType;
+      yield (typeFromDescriptor(descriptor) as EnumType).facade;
     }
   },
 

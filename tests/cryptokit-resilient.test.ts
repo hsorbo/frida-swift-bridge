@@ -81,7 +81,7 @@ describe("resilience in Apple frameworks", () => {
     requireDarwin(ctx);
     loadCryptoKit();
 
-    const withUnsafeBytes = Swift.struct("CryptoKit.SymmetricKey")!.$instanceMethod("withUnsafeBytes");
+    const withUnsafeBytes = Swift.struct("CryptoKit.SymmetricKey")!.$type.instanceMethod("withUnsafeBytes");
     const exported = Process.getModuleByName("CryptoKit").getExportByName(
       "$s9CryptoKit12SymmetricKeyV15withUnsafeBytesyxxSWKXEKlF"
     );

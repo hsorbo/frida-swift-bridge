@@ -1,10 +1,11 @@
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { protocolDescriptors } from "../abi/protocol-conformance.js";
 import { findType, swiftTypes } from "../reflection/registry.js";
-import { NominalType, typeFromDescriptor } from "./swift-type.js";
+import { typeFromDescriptor } from "./swift-type.js";
+import { SwiftTypeFacade } from "./type-facade.js";
 import { Protocol, StableProtocol } from "./protocol.js";
 
-export type ModuleMember = NominalType | StableProtocol;
+export type ModuleMember = SwiftTypeFacade | StableProtocol;
 export type ModuleNamespace = { readonly [name: string]: ModuleMember };
 export type ModuleRegistry = { readonly [module: string]: ModuleNamespace };
 
@@ -46,7 +47,7 @@ function moduleExists(name: string): boolean {
 function findMember(moduleName: string, name: string): ModuleMember | null {
   const qualified = `${moduleName}.${name}`;
   const type = findType(qualified);
-  return type !== null ? typeFromDescriptor(type) : Protocol.find(qualified);
+  return type !== null ? typeFromDescriptor(type).facade : Protocol.find(qualified);
 }
 
 function lazyNamespace<T>(

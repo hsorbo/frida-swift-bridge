@@ -1,14 +1,14 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadOptimized, fixtureExport } from "./fixtures/load.js";
 
-import { Swift, ClassType, StructType, SwiftObject, type CallResult } from "../src/index.js";
+import { Swift, SwiftObject, type CallResult, SwiftClass, SwiftStruct } from "../src/index.js";
 
 function robot(name: string): SwiftObject {
-  return (Swift.type("fixture.Robot") as ClassType).init(name);
+  return (Swift.type("fixture.Robot") as SwiftClass).init(name);
 }
 
 function accumulator(total: number): SwiftObject {
-  return (Swift.type("fixture.Accumulator") as StructType).$new({ total });
+  return (Swift.type("fixture.Accumulator") as SwiftStruct).$new({ total });
 }
 
 describe("Interceptor self", () => {
@@ -58,7 +58,7 @@ describe("Interceptor self", () => {
   });
 
   test("a setter's self is mutating and a getter's borrowing", () => {
-    const gauge = (Swift.type("fixture.Gauge") as StructType).$new({ raw: 0 });
+    const gauge = (Swift.type("fixture.Gauge") as SwiftStruct).$new({ raw: 0 });
     const seen: CallResult[] = [];
     const setter = Swift.Interceptor.attach(fixtureExport("fixture.Gauge.level.setter"), {
       onLeave() {
@@ -78,7 +78,7 @@ describe("Interceptor self", () => {
   });
 
   test("a large value's self is read through swiftself", () => {
-    const big = (Swift.type("fixture.BigStruct") as StructType).$new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
+    const big = (Swift.type("fixture.BigStruct") as SwiftStruct).$new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
     let seen: CallResult = null;
     const listener = Swift.Interceptor.attach(big.$method("total").address, {
       onEnter() {
@@ -92,7 +92,7 @@ describe("Interceptor self", () => {
 
   test("a generic method's arguments decode past a trailing self", () => {
     const Int = Swift.type("Swift.Int")!;
-    const box = (Swift.type("fixture.SmallGenericBox") as StructType).$new({ base: 10 });
+    const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 10 });
     const method = box.$method("scaledBy", { typeArguments: [Int] });
     let seen: { self: CallResult; args: unknown[] } | null = null;
     const listener = Swift.Interceptor.attach(method.address, {
@@ -108,14 +108,14 @@ describe("Interceptor self", () => {
   test("a generic method whose code doesn't reveal self's convention needs { self }", () => {
     loadOptimized();
     const Int = Swift.type("Swift.Int")!;
-    const counter = (Swift.type("optimized.Counter") as StructType).$new({ total: 3 });
+    const counter = (Swift.type("optimized.Counter") as SwiftStruct).$new({ total: 3 });
     const method = counter.$method("ignore", { typeArguments: [Int], self: "borrowing" });
     expect(() => Swift.Interceptor.attach(method.address, { onEnter() {} })).toThrow("pass { self");
   });
 
   test("a hook that decodes nothing needs no self convention", () => {
     const Int = Swift.type("Swift.Int")!;
-    const box = (Swift.type("fixture.SmallGenericBox") as StructType).$new({ base: 1 });
+    const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 1 });
     const method = box.$method("scaledByAsync", { typeArguments: [Int], self: "borrowing" });
     Swift.Interceptor.attachAsync(method.address, { onFirstSuspend() {} }).detach();
   });
@@ -135,7 +135,7 @@ describe("Interceptor self", () => {
 
   test("a stated self convention is used as given", () => {
     const Int = Swift.type("Swift.Int")!;
-    const box = (Swift.type("fixture.SmallGenericBox") as StructType).$new({ base: 10 });
+    const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 10 });
     const method = box.$method("echo", { typeArguments: [Int], self: "borrowing" });
     let seen: { self: CallResult; args: unknown[] } | null = null;
     const listener = Swift.Interceptor.attach(
@@ -165,7 +165,7 @@ describe("Interceptor self", () => {
   });
 
   test("an async class method's self is set on enter", async () => {
-    const calc = (Swift.type("fixture.AsyncCalc") as ClassType).init(100);
+    const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100);
     let seen: SwiftObject | null = null;
     const listener = Swift.Interceptor.attachAsync(calc.$method("addAsync").address, {
       onEnter() {

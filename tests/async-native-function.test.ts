@@ -99,7 +99,7 @@ describe("Swift.asyncFunction", () => {
   });
 
   test("binds a class receiver for an instance method: calc(100).addAsync(5) ⇒ 105", async () => {
-    const calc = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).init(100);
+    const calc = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).facade.init(100);
     const addAsync = Swift.asyncFunction(module, ADD_ASYNC).bind(calc);
     expect(await addAsync(5)).toEqual(int64(105));
   });

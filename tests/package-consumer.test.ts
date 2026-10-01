@@ -4,10 +4,18 @@ import type { Protocol, ProtocolComposition } from "frida-swift-bridge2";
 import Swift, {
   SwiftCoreApi,
   SwiftType,
-  ValueType,
+  NominalType,
   StructType,
   EnumType,
   ClassType,
+  TupleType,
+  SwiftTypeFacade,
+  SwiftClass,
+  SwiftValueType,
+  SwiftStruct,
+  SwiftEnum,
+  SwiftMember,
+  SwiftInstanceMethod,
   SwiftValue,
   SwiftObject,
   SwiftClassObject,
@@ -43,7 +51,8 @@ import {
 } from "frida-swift-bridge2/abi";
 
 type _rootTypesAreImportable = [
-  SwiftCoreApi, SwiftType, ValueType, StructType, EnumType, ClassType,
+  SwiftCoreApi, SwiftType, NominalType, StructType, EnumType, ClassType, TupleType,
+  SwiftTypeFacade, SwiftClass, SwiftValueType, SwiftStruct, SwiftEnum, SwiftMember, SwiftInstanceMethod,
   Protocol, ProtocolComposition, SwiftValue, SwiftObject, SwiftClassObject,
   SwiftValueObject, SwiftField, SwiftBoundMethod, MethodResolveOptions,
   ValueMethodResolveOptions, CallArg, CallResult, ClosureSpec,
@@ -92,12 +101,63 @@ function facadeKindContractsHoldAtCompileTime(
   Swift.NativeFunction(field.handle, type, [type], { hasSelf: true });
 }
 
-function acquisitionPreservesFacadeKindAtCompileTime(cls: ClassType, st: StructType) {
+function acquisitionPreservesFacadeKindAtCompileTime(cls: SwiftClass, st: SwiftStruct, en: SwiftEnum) {
   const borrowed: SwiftClassObject = Swift.borrowObject(NULL);
   const adopted: SwiftClassObject = Swift.adoptObject(NULL);
   const constructed: SwiftClassObject = cls.init();
   const value: SwiftValueObject = st.$new(0);
-  void [borrowed, adopted, constructed, value];
+  const made: SwiftValueObject | null = en.init();
+  const kase: SwiftValueObject = en.$case("none");
+  void [borrowed, adopted, constructed, value, made, kase];
+}
+
+// A facade answers any Swift member name, so only its $type is checked: a misspelled reflection
+// member is a compile-time error, a misspelled facade member is not.
+function reflectionIsStrictAtCompileTime(cls: SwiftClass, st: SwiftStruct, o: SwiftClassObject, v: SwiftValueObject, t: SwiftType) {
+  const classInfo: ClassType = cls.$type;
+  const structInfo: StructType = st.$type;
+  const dynamicInfo: ClassType = o.$type;
+  const valueInfo: StructType | EnumType = v.$type;
+  const name: string = t.name;
+  const selectors: string[] = classInfo.instanceMethods();
+  const found: SwiftInstanceMethod = classInfo.instanceMethod("greet");
+  const typeMethod: SwiftMember = structInfo.typeMethod("make");
+  const initializer: SwiftMember = classInfo.initializer({ labels: ["name"] });
+  const back: SwiftClass = classInfo.facade;
+  const superInfo: SwiftType | null = classInfo.superClass;
+  void [dynamicInfo, valueInfo, name, selectors, found, typeMethod, initializer, back, superInfo];
+  // @ts-expect-error reflection has no index signature
+  classInfo.instanceMehtods();
+  // @ts-expect-error reflection has no index signature
+  o.$type.noSuchMember;
+  // @ts-expect-error a receiver operation is not a reflection member
+  classInfo.init();
+  // @ts-expect-error a receiver operation is not a reflection member
+  structInfo.$new(0);
+  // @ts-expect-error a reflection member keeps its bare name
+  cls.$type.$name;
+}
+
+function structuralReflectionHasNoDynamicMembersAtCompileTime(tuple: TupleType, any: SwiftType) {
+  const elementType: SwiftType = tuple.elements[0].type;
+  void elementType;
+  // @ts-expect-error a structural type has no facade
+  tuple.facade;
+  // @ts-expect-error a structural type answers no Swift member names
+  tuple.first;
+  // @ts-expect-error a structural type has no Swift members to list
+  tuple.instanceMethods();
+  // @ts-expect-error the common base has no index signature
+  any.anything;
+}
+
+function typesAreAcceptedAsReflectionOrFacadeAtCompileTime(cls: SwiftClass, info: ClassType, o: SwiftClassObject) {
+  Swift.NativeFunction(NULL, cls, [info]);
+  Swift.NativeFunction(NULL, info, [cls, o.$type]);
+  o.$method("m", { typeArguments: [cls, info] });
+  const metadata: Metadata = metadataOf(cls);
+  const descriptor: ContextDescriptor = descriptorOf(info);
+  void [metadata, descriptor];
 }
 
 function rawMetadataStaysUnderAbi(type: SwiftType) {
@@ -112,7 +172,7 @@ function rawMetadataStaysUnderAbi(type: SwiftType) {
 }
 
 function protocolRawInspectionStaysUnderAbi(p: Protocol, comp: ProtocolComposition) {
-  const conformers: SwiftType[] = p.conformingTypes();
+  const conformers: NominalType[] = p.conformingTypes();
   void [p.name, p.fullName, p.isClassOnly, conformers];
   // @ts-expect-error raw protocol descriptor stays under /abi
   p.descriptor;
@@ -141,6 +201,9 @@ function rawOpsStayOffTheFacadeAtCompileTime(o: SwiftObject) {
 
 void facadeKindContractsHoldAtCompileTime;
 void acquisitionPreservesFacadeKindAtCompileTime;
+void reflectionIsStrictAtCompileTime;
+void structuralReflectionHasNoDynamicMembersAtCompileTime;
+void typesAreAcceptedAsReflectionOrFacadeAtCompileTime;
 void rawMetadataStaysUnderAbi;
 void protocolRawInspectionStaysUnderAbi;
 void rawOpsStayOffTheFacadeAtCompileTime;
