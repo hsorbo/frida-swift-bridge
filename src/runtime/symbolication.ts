@@ -51,14 +51,9 @@ export interface ResolvedFunctionSignature {
 }
 
 const exportsByModule = new Map<string, Map<string, string>>();
+const symbolsByModule = new Map<string, Map<string, string>>();
 
-export function symbolicate(address: NativePointer): SwiftSymbol | null {
-  address = address.strip();
-  const module = Process.findModuleByAddress(address);
-  if (module === null) {
-    return null;
-  }
-
+function exportedFunctionNames(module: Module): Map<string, string> {
   let names = exportsByModule.get(module.path);
   if (names === undefined) {
     names = new Map<string, string>();
@@ -69,8 +64,32 @@ export function symbolicate(address: NativePointer): SwiftSymbol | null {
     }
     exportsByModule.set(module.path, names);
   }
+  return names;
+}
 
-  const name = names.get(address.toString());
+function symbolNames(module: Module): Map<string, string> {
+  let names = symbolsByModule.get(module.path);
+  if (names === undefined) {
+    names = new Map<string, string>();
+    for (const s of module.enumerateSymbols()) {
+      names.set(s.address.strip().toString(), s.name);
+    }
+    symbolsByModule.set(module.path, names);
+  }
+  return names;
+}
+
+// Exports first; the symbol table only when they miss, for code a main executable or a private
+// linkage (witness thunks) keeps out of the export trie.
+export function symbolicate(address: NativePointer): SwiftSymbol | null {
+  address = address.strip();
+  const module = Process.findModuleByAddress(address);
+  if (module === null) {
+    return null;
+  }
+
+  const key = address.toString();
+  const name = exportedFunctionNames(module).get(key) ?? symbolNames(module).get(key);
   if (name === undefined) {
     return null;
   }

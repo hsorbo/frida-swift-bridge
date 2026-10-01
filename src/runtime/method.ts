@@ -27,6 +27,7 @@ import {
   splitTopLevel,
   splitParamConvention,
   ParamConvention,
+  symbolicate,
 } from "./symbolication.js";
 import {
   makeSwiftNativeFunction,
@@ -2919,27 +2920,6 @@ function stripWitnessWrapper(demangled: string): string | null {
   return at === -1 ? rest : rest.slice(0, at);
 }
 
-const symbolsByModule = new Map<string, Map<string, string>>();
-
-// Witness thunks are usually private linkage, invisible to symbolicate()'s exports-only lookup.
-function symbolicateLocal(address: NativePointer): string | null {
-  address = address.strip();
-  const module = Process.findModuleByAddress(address.strip());
-  if (module === null) {
-    return null;
-  }
-  let names = symbolsByModule.get(module.path);
-  if (names === undefined) {
-    names = new Map<string, string>();
-    for (const s of module.enumerateSymbols()) {
-      names.set(s.address.strip().toString(), s.name);
-    }
-    symbolsByModule.set(module.path, names);
-  }
-  const name = names.get(address.toString());
-  return name === undefined ? null : demangle(name);
-}
-
 const CALLABLE_REQUIREMENT_KINDS = new Set<ProtocolRequirementKind>([
   ProtocolRequirementKind.Method,
   ProtocolRequirementKind.Init,
@@ -2998,7 +2978,7 @@ export function namedProtocolRequirements(protocol: ContextDescriptor): NamedReq
         continue;
       }
       const slot = table.requirement(requirement.witnessIndex);
-      const demangled = symbolicateLocal(requirement.isAsync ? new AsyncFunctionPointer(slot).code : slot);
+      const demangled = symbolicate(requirement.isAsync ? new AsyncFunctionPointer(slot).code : slot)?.demangled ?? null;
       if (demangled === null) {
         continue;
       }
@@ -3201,13 +3181,13 @@ function isWitnessOf(
 
 function witnessTargetSignature(table: WitnessTable, requirement: ProtocolRequirement): ParsedSwiftSignature | null {
   const target = witnessTarget(table, requirement);
-  const demangled = target === null ? null : symbolicateLocal(target.address);
+  const demangled = target === null ? null : symbolicate(target.address)?.demangled ?? null;
   return demangled === null ? null : parseSwiftSignature(demangled);
 }
 
 function witnessThunkSignature(table: WitnessTable, requirement: ProtocolRequirement): ParsedSwiftSignature | null {
   const slot = table.requirement(requirement.witnessIndex);
-  const demangled = symbolicateLocal(requirement.isAsync ? new AsyncFunctionPointer(slot).code : slot);
+  const demangled = symbolicate(requirement.isAsync ? new AsyncFunctionPointer(slot).code : slot)?.demangled ?? null;
   const stripped = demangled === null ? null : stripWitnessWrapper(demangled);
   return stripped === null ? null : parseSwiftSignature(stripped);
 }
@@ -3613,7 +3593,7 @@ export function classifyWitnessOrigin(table: WitnessTable, requirement: Protocol
   if (target === null) {
     return { kind: "unknown" };
   }
-  const demangled = symbolicateLocal(target.address);
+  const demangled = symbolicate(target.address)?.demangled ?? null;
   if (demangled === null) {
     return { kind: "unknown" };
   }

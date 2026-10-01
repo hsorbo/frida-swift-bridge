@@ -1,12 +1,12 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { fixtureExport, existentialMetadata, loadFixture } from "./fixtures/load.js";
+import { fixtureExport, existentialMetadata, loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
 import { Swift, type SwiftValue, type SwiftObject, type CallResult } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { SwiftInterceptor, type SwiftInvocationContext } from "../src/runtime/interceptor.js";
 import { requireFpRegisterHooks } from "./swift.js";
 
-import { metadataFor, ClassInstance, asSwiftObject } from "../src/abi.js";
+import { metadataFor, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject } from "../src/abi.js";
 
 const MAKE_LINK = "$s7fixture8makeLinkyAA0C0VSSF";
 const LINK_ADDRESS = "$s7fixture11linkAddressySSAA4LinkVF";
@@ -41,6 +41,32 @@ describe("SwiftInterceptor.attach", () => {
     listener.detach();
     expect(seenArgs).toEqual([int64(20), int64(22)]);
     expect(seenRet).toEqual(int64(42));
+  });
+
+  test("attaches to a function only the symbol table names", () => {
+    const hidden = loadFixtureSyms()
+      .enumerateSymbols()
+      .find((s) => Swift.demangle(s.name)?.startsWith("fixturesyms.Dispatcher.hidden(") ?? false)!;
+    const Int = metadataFor("Swift.Int")!;
+    const Dispatcher = metadataFor("fixturesyms.Dispatcher")!;
+    const slot = readVTableChain(new ClassMetadata(Dispatcher.handle)).find((e) => e.declaredImpl.equals(hidden.address))!;
+    const obj = Swift.type("fixturesyms.Dispatcher")!.init() as SwiftObject;
+    const dispatcher = new ClassInstance(obj.$handle);
+    let seenArgs: SwiftValue[] | null = null;
+    let seenRet: CallResult = null;
+    const listener = SwiftInterceptor.attach(hidden.address, {
+      onEnter(args) {
+        seenArgs = args;
+      },
+      onLeave(ret) {
+        seenRet = ret;
+      },
+    });
+    const result = dispatcher.vtableMethod(slot.metadataOffset, { returnType: Int, argTypes: [Int] }).call(10);
+    listener.detach();
+    expect(result).toEqual(int64(30));
+    expect(seenArgs).toEqual([int64(10)]);
+    expect(seenRet).toEqual(int64(30));
   });
 
   test("decodes a direct (register-exploded) struct argument", () => {

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { loadFixture } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 import { requireDarwin } from "./swift.js";
 
 import { Swift } from "../src/index.js";
@@ -170,6 +170,15 @@ describe("symbolicate", () => {
     const sym = symbolicate(address)!;
     expect(sym.name.includes("addInts")).toBe(true);
     expect(sym.demangled.startsWith("fixture.addInts(")).toBe(true);
+  });
+
+  test("falls back to the symbol table for a function the module does not export", () => {
+    const mod = loadFixtureSyms();
+    const hidden = mod.enumerateSymbols().find((s) => Swift.demangle(s.name)?.startsWith("fixturesyms.Dispatcher.hidden(") ?? false)!;
+    expect(mod.enumerateExports().some((e) => e.name === hidden.name)).toBe(false);
+    const sym = symbolicate(hidden.address)!;
+    expect(sym.name).toBe(hidden.name);
+    expect(sym.demangled).toBe("fixturesyms.Dispatcher.hidden(Swift.Int) -> Swift.Int");
   });
 
   test("returns null for an address with no owning module", () => {
