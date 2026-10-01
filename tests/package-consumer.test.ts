@@ -96,7 +96,7 @@ function acquisitionPreservesFacadeKindAtCompileTime(cls: ClassType, st: StructT
   const borrowed: SwiftClassObject = Swift.borrowObject(NULL);
   const adopted: SwiftClassObject = Swift.adoptObject(NULL);
   const constructed: SwiftClassObject = cls.init();
-  const value: SwiftValueObject = st.$fromJS(0);
+  const value: SwiftValueObject = st.$new(0);
   void [borrowed, adopted, constructed, value];
 }
 

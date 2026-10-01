@@ -304,9 +304,9 @@ differ only in argument type — resolve explicitly with
 `$initializer({ labels, argTypes })`, which returns a bound initializer to
 `.call(...)`.
 
-Structs — `StructType.$new(value)` (an alias for `$fromJS`) builds a value from a
-plain JS object. Enum cases are members of the enum: a case without a payload
-is a value, a case with one is called with it. `EnumType.$case(name, payload?)`
+Value types — `ValueType.$new(value)` builds a value from a plain JS object.
+Enum cases are members of the enum: a case without a payload is a value, a
+case with one is called with it. `EnumType.$case(name, payload?)`
 is the string-keyed form:
 
 ```js
@@ -319,8 +319,8 @@ Pick.$case("value", 42);         // the same, by name
 ```
 
 Value types also offer storage-oriented constructors that mirror the underlying
-Swift operations — `$fromJS(value)`, `$borrow(address)`, `$copy(address)`,
-`$adopt(address)` — see [Ownership and lifetime](#ownership-and-lifetime).
+Swift operations — `$borrow(address)`, `$copy(address)`, `$adopt(address)` —
+see [Ownership and lifetime](#ownership-and-lifetime).
 
 To wrap a class pointer you already hold (e.g. from an interceptor or another
 call), use `Swift.borrowObject(handle)` for a non-owning view or
@@ -960,7 +960,7 @@ The acquisition names encode the reference contract:
 
 - `Swift.borrowObject(handle)` — a view; does not retain or consume.
 - `Swift.adoptObject(handle)` — takes over an existing +1 reference.
-- For value types: `$fromJS(value)` initializes owned storage, `$borrow(address)`
+- For value types: `$new(value)` initializes owned storage, `$borrow(address)`
   is a non-owning view, `$copy(address)` makes an independent owned copy, and
   `$adopt(address)` takes responsibility for already-initialized storage.
 

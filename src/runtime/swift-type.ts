@@ -285,7 +285,7 @@ export class ValueType extends NominalType {
     return declares("definingModule") || declares("allLoadedModules");
   }
 
-  $fromJS(value: SwiftValue): SwiftValueObject {
+  $new(value: SwiftValue): SwiftValueObject {
     return asSwiftObject(ValueInstance.fromJS(metadataOf(this), value));
   }
 
@@ -303,10 +303,6 @@ export class ValueType extends NominalType {
 }
 
 export class StructType extends ValueType {
-  $new(value: SwiftValue): SwiftValueObject {
-    return this.$fromJS(value);
-  }
-
   get $fields(): TypeMember[] {
     const metadata = metadataOf(this);
     return [...enumerateFields(metadata.description)].map((f) => {
