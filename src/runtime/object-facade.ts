@@ -133,13 +133,14 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
 
   const callable = callableCache(invoke);
 
+  const has = (key: string): boolean => {
+    const m = members.own();
+    return RESERVED.has(key) || m.methods.has(key) || m.properties.has(key);
+  };
+
   const proxy = new Proxy(target, {
     has(t, key) {
-      if (typeof key !== "string") {
-        return Reflect.has(t, key);
-      }
-      const m = members.own();
-      return RESERVED.has(key) || m.methods.has(key) || m.properties.has(key);
+      return typeof key === "string" ? has(key) : Reflect.has(t, key);
     },
     get(t, key) {
       if (typeof key === "symbol") {
@@ -190,10 +191,7 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
           return (other: SwiftObject | ClassInstance | ValueInstance | NativePointer) =>
             handle().equals(handleOf(other));
         case "hasOwnProperty":
-          return (k: string) => {
-            const m = members.own();
-            return RESERVED.has(k) || m.methods.has(k) || m.properties.has(k);
-          };
+          return has;
         case "toString":
         case "valueOf":
           return () => `<${fullName() || "Swift.Object"}: ${handle()}>`;
@@ -231,8 +229,10 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
       return ["$handle", ...m.methods, ...m.properties];
     },
     getOwnPropertyDescriptor(_t, key) {
-      const writable = typeof key === "string" && members.own().writableProperties.has(key);
-      return { writable, configurable: true, enumerable: true };
+      if (typeof key !== "string" || !has(key)) {
+        return undefined;
+      }
+      return { writable: members.own().writableProperties.has(key), configurable: true, enumerable: true };
     },
   });
   return proxy as unknown as SwiftObject;

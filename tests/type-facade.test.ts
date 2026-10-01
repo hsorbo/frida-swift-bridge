@@ -81,6 +81,17 @@ describe("Swift type member sugar", () => {
     expect("$noSuchQX" in Robot).toBe(false);
   });
 
+  test("an unknown member is not an own property", () => {
+    const Robot = Swift.type("fixture.Robot")!;
+    expect(Object.getOwnPropertyDescriptor(Robot, "noSuchMemberQX")).toBeUndefined();
+    expect(Object.hasOwn(Robot, "noSuchMemberQX")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(Robot, "noSuchMemberQX")).toBe(false);
+    expect(Object.hasOwn(Robot, "then")).toBe(false);
+    expect(Object.hasOwn(Robot, "make")).toBe(true);
+    expect(Object.hasOwn(Swift.type("fixture.Pick")!, "empty")).toBe(true);
+    expect(Object.hasOwn(Swift.type("fixture.Outer")!, "Inner")).toBe(true);
+  });
+
   test("lists own type methods, static properties, cases and nested types, consistently with has", () => {
     const pick = Object.keys(Swift.type("fixture.Pick")!);
     expect(pick).toContain("tag");

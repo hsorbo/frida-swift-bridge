@@ -812,8 +812,10 @@ function typeFacade<T extends NominalType>(target: T): T {
       return [...new Set([...m.methods, ...m.properties, ...cases().keys(), ...nestedTypeNames()])];
     },
     getOwnPropertyDescriptor(_t, key) {
-      const writable = typeof key === "string" && members.own().writableProperties.has(key);
-      return { writable, configurable: true, enumerable: true };
+      if (typeof key !== "string" || !has(key)) {
+        return undefined;
+      }
+      return { writable: members.own().writableProperties.has(key), configurable: true, enumerable: true };
     },
   });
   rawState.set(proxy, rawState.get(target)!);

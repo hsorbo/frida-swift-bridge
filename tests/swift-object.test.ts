@@ -156,6 +156,15 @@ describe("Swift object intrinsics", () => {
     expect("nope" in o).toBe(false);
   });
 
+  test("an unknown member is not an own property", () => {
+    const o = robot("R2");
+    expect(Object.getOwnPropertyDescriptor(o, "nope")).toBeUndefined();
+    expect(Object.hasOwn(o, "nope")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(o, "nope")).toBe(false);
+    expect(Object.hasOwn(o, "then")).toBe(false);
+    expect(Object.hasOwn(o, "greet")).toBe(true);
+  });
+
   test("ownKeys enumerates methods and properties consistently with has", () => {
     const keys = Object.keys(robot("R2"));
     expect(keys).toContain("greet"); // method
