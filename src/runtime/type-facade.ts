@@ -328,7 +328,7 @@ export class SwiftClass extends SwiftTypeFacade {
     const candidates = enumerateMethods(this.$type.name, modules, "thisType")
       .filter((m) => m.mangled.endsWith(ALLOCATING_CONSTRUCTOR))
       .map((m) => ({
-        address: m.address,
+        address: m.address.strip(),
         argLabels: m.argLabels,
         argTypeNames: m.argTypeNames,
         throws: m.throws,
