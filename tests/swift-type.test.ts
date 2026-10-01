@@ -68,7 +68,7 @@ describe("type wrappers", () => {
     expect(() => t.init(-1)).toThrow(/returned nil/);
   });
 
-  test("ClassType.initializer selects a same-arity overload by labels", () => {
+  test("ClassType.$initializer selects a same-arity overload by labels", () => {
     const t = typeOf(metadataFor("fixture.Vec2")!) as ClassType;
     expect(() => t.init(1, 2)).toThrow(/ambiguous/);
     expect(t.$initializer({ labels: ["x", "y"] }).call(1, 2).$fields).toEqual({ a: int64(1), b: int64(2) });
@@ -136,7 +136,7 @@ describe("type wrappers", () => {
     expect(sig.result instanceof StructType).toBe(true);
   });
 
-  test("methods() static option splits instance from static keys", () => {
+  test("$typeMethods and $instanceMethods split static from instance keys", () => {
     const t = typeOf(metadataFor("fixture.Accumulator")!) as StructType;
     expect(t.$instanceMethods().sort()).toEqual(["add(_:)", "addEight(_:_:_:_:_:_:_:_:)", "depositAsync(_:)", "describe(_:)", "drain(into:)", "peek(_:)", "peekAsync(_:)"]);
     expect(t.$typeMethods().sort()).toEqual(["doubled(_:)", "sumStaticAsync(_:_:)", "summing(_:_:)", "zero()"]);
