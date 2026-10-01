@@ -36,7 +36,7 @@ describe("value-type initializers (with symtab)", () => {
   });
 
   test("a bound initializer is reusable across calls", () => {
-    const make = structType("fixturesyms.Point").initializer();
+    const make = structType("fixturesyms.Point").$initializer();
     expect(make.call(1)!.$fields).toEqual({ x: int64(1) });
     expect(make.call(2)!.$fields).toEqual({ x: int64(2) });
   });
@@ -68,7 +68,7 @@ describe("value-type initializers (without symtab)", () => {
   test("a stripped binary cannot resolve a struct's memberwise init", (ctx) => {
     requireLinux(ctx);
     for (const name of ["fixture.Point", "fixture.Person", "fixture.BigStruct"]) {
-      expect(() => structType(name).initializer()).toThrow(/no method init/);
+      expect(() => structType(name).$initializer()).toThrow(/no method init/);
     }
   });
 });

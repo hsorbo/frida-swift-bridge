@@ -129,20 +129,20 @@ describe("members of a generic type named without its type arguments", () => {
   }
 
   test("a static of a generic struct resolves to its shared code, hookable but not callable", () => {
-    const label = Swift.struct("fixture.Keyed")!.method("label");
+    const label = Swift.struct("fixture.Keyed")!.$typeMethod("label");
     expect(label.address.equals(implementation("static fixture.Keyed.label("))).toBe(true);
     expect(() => label.call(1)).toThrow(/fixture\.Keyed\.label\(_:\) needs fixture\.Keyed's type arguments/);
   });
 
   test("a class func of a generic class resolves the same way", () => {
-    const label = Swift.class("fixture.KeyedHolder")!.method("label");
+    const label = Swift.class("fixture.KeyedHolder")!.$typeMethod("label");
     expect(label.address.equals(implementation("static fixture.KeyedHolder.label("))).toBe(true);
     expect(() => label.call(1)).toThrow(/fixture\.KeyedHolder\.label\(_:\) needs fixture\.KeyedHolder's type arguments/);
   });
 
   test("a hook on that address sees each call's type arguments", () => {
     const seen: string[][] = [];
-    const listener = Swift.Interceptor.attach(Swift.struct("fixture.Keyed")!.method("label").address, {
+    const listener = Swift.Interceptor.attach(Swift.struct("fixture.Keyed")!.$typeMethod("label").address, {
       onEnter(args) {
         seen.push([...this.typeArguments!, String(args[0])]);
       },
@@ -159,20 +159,20 @@ describe("members of a generic type named without its type arguments", () => {
 describe("generic members found through their type", () => {
   beforeEach(() => { loadFixture(); });
 
-  test("method(\"init\") finds a generic initializer by its labels, hookable but not callable", () => {
-    const init = Swift.struct("fixture.Sized")!.method("init", { labels: ["of"] });
+  test("$initializer finds a generic initializer by its labels, hookable but not callable", () => {
+    const init = Swift.struct("fixture.Sized")!.$initializer({ labels: ["of"] });
     expect(Swift.symbolicate(init.address)?.demangled.startsWith("fixture.Sized.init<")).toBe(true);
     expect(() => init.call([1])).toThrow(/fixture\.Sized\.init\(of:\) is generic/);
   });
 
-  test("method(\"init\") calls a plain initializer", () => {
-    const sized = Swift.struct("fixture.Sized")!.method("init", { labels: ["count"] }).call(3) as { $fields: unknown };
+  test("$initializer still binds and calls a plain initializer", () => {
+    const sized = Swift.struct("fixture.Sized")!.$initializer({ labels: ["count"] }).call(3) as { $fields: unknown };
     expect(sized.$fields).toEqual({ count: int64(3) });
   });
 
   test("a hook on a generic initializer sees the call's type arguments", () => {
     const seen: string[][] = [];
-    const listener = Swift.Interceptor.attach(Swift.struct("fixture.Sized")!.method("init", { labels: ["of"] }).address, {
+    const listener = Swift.Interceptor.attach(Swift.struct("fixture.Sized")!.$initializer({ labels: ["of"] }).address, {
       onEnter() {
         seen.push(this.typeArguments!);
       },

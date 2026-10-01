@@ -71,8 +71,8 @@ describe("type wrappers", () => {
   test("ClassType.initializer selects a same-arity overload by labels", () => {
     const t = typeOf(metadataFor("fixture.Vec2")!) as ClassType;
     expect(() => t.init(1, 2)).toThrow(/ambiguous/);
-    expect(t.initializer({ labels: ["x", "y"] }).call(1, 2).$fields).toEqual({ a: int64(1), b: int64(2) });
-    expect(t.initializer({ labels: ["angle", "radius"] }).call(1, 2).$fields).toEqual({ a: int64(2), b: int64(6) });
+    expect(t.$initializer({ labels: ["x", "y"] }).call(1, 2).$fields).toEqual({ a: int64(1), b: int64(2) });
+    expect(t.$initializer({ labels: ["angle", "radius"] }).call(1, 2).$fields).toEqual({ a: int64(2), b: int64(6) });
   });
 
   test("ClassType.init selects a labeled overload from a { label: value } object", () => {
@@ -131,15 +131,15 @@ describe("type wrappers", () => {
 
   test("methods() static option splits instance from static keys", () => {
     const t = typeOf(metadataFor("fixture.Accumulator")!) as StructType;
-    expect(t.methods().sort()).toEqual(["add(_:)", "addEight(_:_:_:_:_:_:_:_:)", "depositAsync(_:)", "describe(_:)", "drain(into:)", "peek(_:)", "peekAsync(_:)"]);
-    expect(t.methods({ static: true }).sort()).toEqual(["doubled(_:)", "sumStaticAsync(_:_:)", "summing(_:_:)", "zero()"]);
+    expect(t.$instanceMethods().sort()).toEqual(["add(_:)", "addEight(_:_:_:_:_:_:_:_:)", "depositAsync(_:)", "describe(_:)", "drain(into:)", "peek(_:)", "peekAsync(_:)"]);
+    expect(t.$typeMethods().sort()).toEqual(["doubled(_:)", "sumStaticAsync(_:_:)", "summing(_:_:)", "zero()"]);
     expect(t.fields).toEqual([{ name: "total", type: t.fields[0].type, isVar: true }]);
   });
 
   test("type methods mirror the keys an instance's type exposes", () => {
     const t = typeOf(metadataFor("fixture.Cat")!) as ClassType;
-    expect(t.methods().sort()).toEqual(t.init().$type.methods().sort());
-    expect(t.methods({ static: true })).toEqual([]);
+    expect(t.$instanceMethods().sort()).toEqual(t.init().$type.$instanceMethods().sort());
+    expect(t.$typeMethods()).toEqual([]);
   });
 
   test("Swift.class/struct/enum resolve their kind, throw on mismatch, null when absent", () => {
@@ -195,5 +195,31 @@ describe("type wrappers", () => {
     expect(fromExt.moduleName).toBe("fixture");
     const v = fromExt.new({ mark: 7 });
     expect(v.$method("tripled", { self: "borrowing" }).call()).toEqual(int64(21));
+  });
+});
+
+describe("type-level member lookups by kind", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("$instanceMethod finds an instance method without an instance, and binds one to call it", () => {
+    const Accumulator = Swift.struct("fixture.Accumulator")!;
+    const acc = Accumulator.new({ total: 5 });
+    const peek = Accumulator.$instanceMethod("peek");
+    expect(peek.address.equals(acc.$method("peek").address)).toBe(true);
+    expect(peek.bind(acc).call(10)).toEqual(int64(15));
+  });
+
+  test("$typeMethod and $instanceMethod each find only their own kind", () => {
+    const Accumulator = Swift.struct("fixture.Accumulator")!;
+    expect(() => Accumulator.$typeMethod("peek")).toThrow(/peek/);
+    expect(() => Accumulator.$instanceMethod("doubled")).toThrow(/no instance method doubled on fixture\.Accumulator/);
+  });
+
+  test("$typeMethods and $instanceMethods list each kind", () => {
+    const Accumulator = Swift.struct("fixture.Accumulator")!;
+    expect(Accumulator.$instanceMethods()).toContain("peek(_:)");
+    expect(Accumulator.$instanceMethods()).not.toContain("doubled(_:)");
+    expect(Accumulator.$typeMethods()).toContain("doubled(_:)");
+    expect(Accumulator.$typeMethods()).not.toContain("peek(_:)");
   });
 });

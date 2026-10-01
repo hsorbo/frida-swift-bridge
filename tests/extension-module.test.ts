@@ -39,7 +39,7 @@ describe("a type extended from another module", () => {
   test("member discovery reaches them", () => {
     expect(enumerateMethods("fixture.Robot").some((m) => m.name === "fly")).toBeTruthy();
     expect(enumerateProperties("fixture.Robot").some((p) => p.name === "wingspan")).toBeTruthy();
-    expect((Swift.type("fixture.Robot") as ClassType).methods()).toContain("fly()");
+    expect((Swift.type("fixture.Robot") as ClassType).$instanceMethods()).toContain("fly()");
   });
 
   test("a generic type's extension members are found and callable", () => {
@@ -94,7 +94,7 @@ describe("a protocol extended from another module", () => {
 
   test("its extension methods are listed and callable on the conforming type", () => {
     const type = Swift.type("fixture.DefaultDescriber") as StructType;
-    expect(type.methods()).toContain("whisper()");
+    expect(type.$instanceMethods()).toContain("whisper()");
     expect(type.new({ displayName: "Ada" }).whisper()).toBe("ada");
   });
 
@@ -136,8 +136,8 @@ describe("a stdlib protocol extended from another module", () => {
 
   test("they are listed on the conforming type", () => {
     const type = Swift.type("fixture.Trio") as StructType;
-    expect(type.methods()).toContain("tally()");
-    expect(type.methods()).toContain("quoted()");
+    expect(type.$instanceMethods()).toContain("tally()");
+    expect(type.$instanceMethods()).toContain("quoted()");
     expect(type.properties.some((p) => p.name === "middleOffset")).toBeTruthy();
   });
 });

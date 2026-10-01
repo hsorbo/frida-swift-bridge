@@ -187,12 +187,19 @@ Every wrapper extends `SwiftType`:
   (`MyApp.Outer.Inner`).
 - `type.moduleName`: the logical Swift module name.
 - `type.superClass`: the parent as a `SwiftType`, or `null`.
-- `type.methods(query?)`: the callable selectors, e.g. `["greet(_:)", …]`.
-  `query` is `{ static?, inherited? }`.
+- `type.$instanceMethods(query?)` / `type.$typeMethods(query?)`: the selectors
+  of its instance methods and of its type methods, e.g. `["greet(_:)", …]`.
+  `query` is `{ inherited? }`.
+- `type.$instanceMethod(name, options?)`, `type.$typeMethod(name, options?)`,
+  `type.$initializer(options?)`: look up one member of that kind. See
+  [Calling methods](#calling-methods).
 - `type.properties`: the properties as `{ name, typeName, isStatic, writable }`.
 - `type.get(name)`: reads a static property.
 
-Both lists span every loaded module: they include members that other modules
+The lookups and method lists are `$`-prefixed, like an object's controls, so
+they never collide with a Swift member of the same name.
+
+The lists span every loaded module: they include members that other modules
 add in extensions, and members a conformed-to protocol provides through a
 protocol extension, stdlib protocols such as `Sequence` included. A constrained extension (`extension P where Self: Base`,
 `where Item: Numeric`) contributes only to types that meet its `where` clause,
@@ -209,7 +216,7 @@ Reading a name, kind, or module does not realize the type's metadata.
 const robot = Swift.type("MyApp.Robot");
 robot.name;             // "MyApp.Robot"
 robot.moduleName;       // "MyApp"
-robot.methods();        // ["greet(_:)", "rename(to:)", ...]
+robot.$instanceMethods();   // ["greet(_:)", "rename(to:)", ...]
 robot.superClass;       // null, or a SwiftType
 ```
 
@@ -260,7 +267,7 @@ initializer falls back to being a single positional argument, so
 dictionary-like arguments still pass through unchanged. For what an object
 cannot express — mixed labeled and unlabeled arguments, or overloads that
 differ only in argument type — resolve explicitly with
-`initializer({ labels, argTypes })`, which returns a bound initializer to
+`$initializer({ labels, argTypes })`, which returns a bound initializer to
 `.call(...)`.
 
 Structs — `StructType.new(value)` (an alias for `fromJS`) builds a value from a
@@ -310,7 +317,7 @@ The control surface (never shadowed by Swift members of the same spelling):
 - `$owned`: whether the facade owns its reference/storage.
 - `$instanceMethods` / `$typeMethods`: the selectors of the type's instance
   methods (`"greet(_:)"`) and type methods (`"make(name:)"`), as
-  `$type.methods()` and `$type.methods({ static: true })` list them.
+  `$type.$instanceMethods()` and `$type.$typeMethods()` list them.
 - `$call(name, ...args)`: invoke a method by name.
 - `$method(name, options?)`: resolve a bound method for overload/generic/mutating
   control (see [Calling methods](#calling-methods)).
@@ -339,7 +346,7 @@ conforms to. The facade looks in the defining module first and searches the
 other modules only for a name it did not find there, filtering symbols by name
 before demangling anything. Listing a facade (`Object.keys(robot)`, `in`)
 shows the defining module's members plus names already looked up; use
-`robot.$type.methods()` for the full list.
+`robot.$type.$instanceMethods()` for the full list.
 
 ## Calling methods
 
@@ -377,8 +384,8 @@ robot.$method("tally").origin;   // { kind: "protocolExtension", protocol: "Swif
 `module` is the image's name. An ambiguity error between extensions in
 different modules names each overload's module.
 
-Static methods are called on the type wrapper via `ClassType.call` /
-`ValueType.call` (or `.method`):
+Type methods are called on the type wrapper with `call`, or looked up with
+`$typeMethod(name, options)` for an explicit bound method:
 
 ```js
 const made = Swift.type("MyApp.Robot").call("make", "Zed");
@@ -386,6 +393,17 @@ made.greet("X");    // "Hello X, I am Zed"
 
 const Int = Swift.type("Swift.Int");
 Int.call("*", 6, 7);          // 42: operators are static methods; both operands are arguments
+Int.$typeMethod("*").call(6, 7);
+```
+
+`$instanceMethod(name, options)` finds an instance method through its type,
+without an instance. It has an `address` to hook, and `bind(instance)` returns
+the bound method to call:
+
+```js
+const greet = Swift.type("MyApp.Robot").$instanceMethod("greet");
+Swift.Interceptor.attach(greet.address, { /* ... */ });
+greet.bind(robot).call("X");    // "Hello X, I am R2"
 ```
 
 Generic methods take their type arguments explicitly as `SwiftType`s:
@@ -795,18 +813,19 @@ throws instead:
 
 ```js
 const deriveKey = Swift.struct("CryptoKit.HKDF")
-    .method("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
+    .$typeMethod("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
 
 Swift.Interceptor.attach(deriveKey.address, { /* ... */ });
 deriveKey.call(key, 32);   // throws: "... needs CryptoKit.HKDF's type arguments"
 ```
 
-A generic member is found the same way, initializers included through
-`method("init")`. Its `call` throws, so hook it or call it another way:
+A generic member is found the same way, by `$typeMethod`, `$instanceMethod` or
+`$initializer`. Calling it through its type throws, so hook it or call it
+another way:
 
 ```js
 // init<D: ContiguousBytes>(data: D)
-const initData = Swift.struct("CryptoKit.SymmetricKey").method("init", { labels: ["data"] });
+const initData = Swift.struct("CryptoKit.SymmetricKey").$initializer({ labels: ["data"] });
 Swift.Interceptor.attach(initData.address, { /* ... */ });
 ```
 

@@ -59,7 +59,7 @@ describe("value-initializer ownership", () => {
   test("a failed later arg does not leak the non-POD prefix temp", () => {
     const { wrapper, view } = wrapperOverToken("fixturesyms");
     const Keeper = typeOf(metadataFor("fixturesyms.Keeper")!) as StructType;
-    const init = Keeper.initializer({ labels: [null, "tag"] });
+    const init = Keeper.$initializer({ labels: [null, "tag"] });
     const before = view.retainCount;
     expect(() => init.call(wrapper, "bad" as never)).toThrow();
     expect(view.retainCount).toBe(before);
@@ -73,7 +73,7 @@ describe("value-initializer ownership", () => {
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
     const box = (typeOf(metadataFor("fixturesyms.TokenBox")!) as StructType)
-      .initializer({ labels: [null, "tag"] })
+      .$initializer({ labels: [null, "tag"] })
       .call(token, 5) as SwiftObject;
     // The box owns its own +1 on the token; the caller's reference is untouched.
     expect(view.retainCount).toBe(before + 1);

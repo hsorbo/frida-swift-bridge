@@ -4,7 +4,7 @@ import { ClassMetadata } from "../abi/class-metadata.js";
 import { isActor, isDefaultActor } from "../abi/class-descriptor.js";
 import { ValueInstance } from "../abi/value.js";
 import { ClassInstance } from "../abi/heap-object.js";
-import { asSwiftObject, SwiftClassObject, SwiftValueObject, RAW } from "./object-facade.js";
+import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, RAW } from "./object-facade.js";
 import { SwiftValue } from "../abi/instance.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
@@ -20,6 +20,8 @@ import {
   CallArg,
   CallResult,
   MethodResolveOptions,
+  ValueMethodResolveOptions,
+  MemberOrigin,
   PropertyInfo,
   bindStaticMethod,
   bindValueInitializer,
@@ -48,8 +50,16 @@ export interface TypeMember {
 }
 
 export interface MethodQuery {
-  static?: boolean;
   inherited?: boolean;
+}
+
+// The type-level lookups each name one kind of member, so they take no static option.
+export type MemberLookupOptions = Omit<ValueMethodResolveOptions, "static">;
+
+export interface SwiftInstanceMethod {
+  readonly address: NativePointer;
+  readonly origin: MemberOrigin;
+  bind(receiver: SwiftObject): SwiftBoundMethod;
 }
 
 function typeKindName(metadata: Metadata): string {
@@ -147,10 +157,30 @@ export class SwiftType {
     return this.moduleName;
   }
 
-  methods(options: MethodQuery = {}): string[] {
-    const { static: wantStatic = false, inherited = true } = options;
+  $typeMethods(options: MethodQuery = {}): string[] {
+    return this.selectors(true, options);
+  }
+
+  $instanceMethods(options: MethodQuery = {}): string[] {
+    return this.selectors(false, options);
+  }
+
+  // Found by name alone, so it has no receiver: hook its address, or bind an instance to call it.
+  $instanceMethod(name: string, options: MemberLookupOptions = {}): SwiftInstanceMethod {
+    const member = findMember(this.name, name, { ...lowerResolveOptions(options), static: false });
+    if (member === null) {
+      throw new Error(`no instance method ${name} on ${this.name}`);
+    }
+    return {
+      address: member.address,
+      origin: member.origin,
+      bind: (receiver) => receiver.$method(name, options),
+    };
+  }
+
+  private selectors(isStatic: boolean, { inherited = true }: MethodQuery): string[] {
     return enumerateMethods(this.name, "allLoadedModules", inherited ? "withSuperclasses" : "thisType")
-      .filter((m) => m.kind === "method" && m.isStatic === wantStatic)
+      .filter((m) => m.kind === "method" && m.isStatic === isStatic)
       .map((m) => m.selector);
   }
 
@@ -168,10 +198,9 @@ export class SwiftType {
 }
 
 export class ValueType extends SwiftType {
-  method(name: string, options: MethodResolveOptions = {}): SwiftBoundMethod {
+  $typeMethod(name: string, options: MemberLookupOptions = {}): SwiftBoundMethod {
     const raw = lowerResolveOptions(options);
-    // An initializer is not a static member, so it is matched without the static filter.
-    const lookup = name === "init" ? raw : { ...raw, static: true };
+    const lookup = { ...raw, static: true };
     if (isUnboundGeneric(this)) {
       return unboundGenericMethod(this.name, name, lookup);
     }
@@ -181,27 +210,33 @@ export class ValueType extends SwiftType {
         return generic;
       }
     }
-    if (name === "init") {
-      const init = bindValueInitializer(metadataOf(this), raw);
-      return { address: init.address, origin: init.resolved.origin!, call: (...args) => init.call(...args) };
-    }
     return narrowBoundMethod(bindStaticMethod(metadataOf(this), name, raw));
   }
 
   call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
-    return this.method(name).call(...args);
+    return this.$typeMethod(name).call(...args);
   }
 
-  initializer(options: MethodResolveOptions = {}): SwiftBoundInitializer {
-    return narrowBoundInitializer(bindValueInitializer(metadataOf(this), lowerResolveOptions(options)));
+  $initializer(options: MemberLookupOptions = {}): SwiftBoundInitializer {
+    const raw = lowerResolveOptions(options);
+    if (isUnboundGeneric(this)) {
+      return unboundGenericMethod(this.name, "init", raw);
+    }
+    if (findMethod(this.name, "init", raw) === null) {
+      const generic = genericMember(this.name, "init", raw);
+      if (generic !== null) {
+        return generic;
+      }
+    }
+    return narrowBoundInitializer(bindValueInitializer(metadataOf(this), raw));
   }
 
   init(...args: CallArg[]): SwiftValueObject | null {
     const labeled = asLabeledArgs(args);
     if (labeled !== null && this.hasInitializer(labeled.labels)) {
-      return this.initializer({ labels: labeled.labels }).call(...labeled.values);
+      return this.$initializer({ labels: labeled.labels }).call(...labeled.values);
     }
-    return this.initializer({ arity: args.length }).call(...args);
+    return this.$initializer({ arity: args.length }).call(...args);
   }
 
   private hasInitializer(labels: string[]): boolean {
@@ -369,9 +404,9 @@ export class ClassType extends SwiftType {
   init(...args: CallArg[]): SwiftClassObject {
     const labeled = asLabeledArgs(args);
     if (labeled !== null && this.hasInitializer(labeled.labels)) {
-      return this.initializer({ labels: labeled.labels }).call(...labeled.values);
+      return this.$initializer({ labels: labeled.labels }).call(...labeled.values);
     }
-    return this.initializer({ arity: args.length }).call(...args);
+    return this.$initializer({ arity: args.length }).call(...args);
   }
 
   private hasInitializer(labels: string[]): boolean {
@@ -380,7 +415,7 @@ export class ClassType extends SwiftType {
     return declares("definingModule") || declares("allLoadedModules");
   }
 
-  initializer(options: MethodResolveOptions = {}): SwiftClassBoundInitializer {
+  $initializer(options: MemberLookupOptions = {}): SwiftClassBoundInitializer {
     const own = matchInitializers(this.resolveInitializers("definingModule"), options);
     const chosen =
       own.length === 1 ? own[0] : selectInitializer(this.resolveInitializers("allLoadedModules"), options);
@@ -406,7 +441,7 @@ export class ClassType extends SwiftType {
     };
   }
 
-  method(name: string, options: MethodResolveOptions = {}): SwiftBoundMethod {
+  $typeMethod(name: string, options: MemberLookupOptions = {}): SwiftBoundMethod {
     const raw = lowerResolveOptions({ ...options, static: true });
     if (isUnboundGeneric(this)) {
       return unboundGenericMethod(this.fullName, name, raw);
@@ -424,7 +459,7 @@ export class ClassType extends SwiftType {
   }
 
   call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
-    return this.method(name).call(...args);
+    return this.$typeMethod(name).call(...args);
   }
 
   private get fullName(): string {
@@ -555,8 +590,14 @@ function isUnboundGeneric(type: SwiftType): boolean {
 type LookupOptions = ReturnType<typeof lowerResolveOptions>;
 
 // A member found by name alone: its address can be hooked, but call refuses rather than guess at
-// what binding it needs.
-function addressOnly(member: FoundMember, refusal: string): SwiftBoundMethod {
+// what binding it needs. Its call never returns, so it stands in for a bound method or initializer.
+interface SwiftAddressOnly {
+  readonly address: NativePointer;
+  readonly origin: MemberOrigin;
+  call(...args: CallArg[]): never;
+}
+
+function addressOnly(member: FoundMember, refusal: string): SwiftAddressOnly {
   return {
     address: member.address,
     origin: member.origin,
@@ -568,7 +609,7 @@ function addressOnly(member: FoundMember, refusal: string): SwiftBoundMethod {
 
 // Every specialization shares a member's unspecialized code, so it is found without type arguments;
 // calling it would need them as self metadata.
-function unboundGenericMethod(typeName: string, name: string, options: LookupOptions): SwiftBoundMethod {
+function unboundGenericMethod(typeName: string, name: string, options: LookupOptions): SwiftAddressOnly {
   const member = findMember(typeName, name, options);
   if (member === null) {
     throw new Error(`no method ${name} on ${typeName}`);
@@ -577,7 +618,7 @@ function unboundGenericMethod(typeName: string, name: string, options: LookupOpt
 }
 
 // A generic member, e.g. init<D>(data: D), which findMethod skips.
-function genericMember(typeName: string, name: string, options: LookupOptions): SwiftBoundMethod | null {
+function genericMember(typeName: string, name: string, options: LookupOptions): SwiftAddressOnly | null {
   const member = findMember(typeName, name, options);
   if (member === null || !member.generic) {
     return null;

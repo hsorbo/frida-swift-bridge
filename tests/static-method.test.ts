@@ -25,7 +25,7 @@ describe("Static value-type method invocation", () => {
   });
 
   test("a bound static method is reusable across calls", () => {
-    const summing = structType("fixture.Accumulator").method("summing");
+    const summing = structType("fixture.Accumulator").$typeMethod("summing");
     expect(summing.call(1, 2)).toEqual(int64(3));
     expect(summing.call(10, 20)).toEqual(int64(30));
   });

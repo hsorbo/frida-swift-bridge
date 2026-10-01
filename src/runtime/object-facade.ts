@@ -214,9 +214,9 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
         case "$fields":
           return isValue ? value.read() : object.read();
         case "$instanceMethods":
-          return target.type.methods();
+          return target.type.$instanceMethods();
         case "$typeMethods":
-          return target.type.methods({ static: true });
+          return target.type.$typeMethods();
         case "$owned":
           return target.owned;
         case "$call":

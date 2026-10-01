@@ -232,6 +232,8 @@ export {
   ForeignReferenceType,
   TypeMember,
   MethodQuery,
+  MemberLookupOptions,
+  SwiftInstanceMethod,
   SwiftClassBoundInitializer,
   TupleTypeElement,
   ParameterConvention,

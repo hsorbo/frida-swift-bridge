@@ -80,6 +80,8 @@ export {
   ForeignReferenceType,
   TypeMember,
   MethodQuery,
+  MemberLookupOptions,
+  SwiftInstanceMethod,
   NativeFunctionType,
   MarshalledFunctionOptions,
   SwiftClassBoundInitializer,

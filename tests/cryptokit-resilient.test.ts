@@ -59,7 +59,7 @@ describe("resilience in Apple frameworks", () => {
     requireDarwin(ctx);
     loadCryptoKit();
 
-    const deriveKey = Swift.struct("CryptoKit.HKDF")!.method("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
+    const deriveKey = Swift.struct("CryptoKit.HKDF")!.$typeMethod("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
     const exported = Process.getModuleByName("CryptoKit").getExportByName(
       "$s9CryptoKit4HKDFV9deriveKey05inputE8Material15outputByteCountAA09SymmetricE0VAH_SitFZ"
     );
@@ -70,10 +70,21 @@ describe("resilience in Apple frameworks", () => {
     requireDarwin(ctx);
     loadCryptoKit();
 
-    const init = Swift.struct("CryptoKit.SymmetricKey")!.method("init", { labels: ["data"] });
+    const init = Swift.struct("CryptoKit.SymmetricKey")!.$initializer({ labels: ["data"] });
     const exported = Process.getModuleByName("CryptoKit").getExportByName(
       "$s9CryptoKit12SymmetricKeyV4dataACx_tc10Foundation15ContiguousBytesRzlufC"
     );
     expect(init.address.equals(exported.strip())).toBe(true);
+  });
+
+  test("a generic framework instance method resolves without an instance", (ctx) => {
+    requireDarwin(ctx);
+    loadCryptoKit();
+
+    const withUnsafeBytes = Swift.struct("CryptoKit.SymmetricKey")!.$instanceMethod("withUnsafeBytes");
+    const exported = Process.getModuleByName("CryptoKit").getExportByName(
+      "$s9CryptoKit12SymmetricKeyV15withUnsafeBytesyxxSWKXEKlF"
+    );
+    expect(withUnsafeBytes.address.equals(exported.strip())).toBe(true);
   });
 });

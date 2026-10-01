@@ -84,8 +84,8 @@ describe("Swift object intrinsics", () => {
     expect(() => { robot("R2").greet = 1; }).toThrow("no property greet on fixture.Robot");
   });
 
-  test("$type.methods() lists callable selectors", () => {
-    const selectors = robot("R2").$type.methods();
+  test("$type.$instanceMethods() lists callable selectors", () => {
+    const selectors = robot("R2").$type.$instanceMethods();
     for (const s of ["greet(_:)", "rename(to:)", "merged(with:)", "at(_:)", "at(_:_:)"]) {
       expect(selectors).toContain(s);
     }
@@ -123,10 +123,10 @@ describe("Swift object intrinsics", () => {
 
   test("methods({ inherited: false }) excludes inherited methods that methods() includes", () => {
     const t = cat().$type;
-    expect(t.methods()).toContain("speak()");
-    expect(t.methods()).toContain("legs()");
-    expect(t.methods({ inherited: false })).toContain("speak()");
-    expect(t.methods({ inherited: false })).not.toContain("legs()");
+    expect(t.$instanceMethods()).toContain("speak()");
+    expect(t.$instanceMethods()).toContain("legs()");
+    expect(t.$instanceMethods({ inherited: false })).toContain("speak()");
+    expect(t.$instanceMethods({ inherited: false })).not.toContain("legs()");
   });
 
   test("$type / $handle expose the wrapped object", () => {

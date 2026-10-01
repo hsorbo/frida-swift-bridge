@@ -53,7 +53,7 @@ describe("a bound method's origin", () => {
 
   test("a static method is its type's own", () => {
     const robot = Swift.type("fixture.Robot") as ClassType;
-    expect(robot.method("make").origin).toEqual({ kind: "own", type: "fixture.Robot", module: FIXTURE_MODULE });
+    expect(robot.$typeMethod("make").origin).toEqual({ kind: "own", type: "fixture.Robot", module: FIXTURE_MODULE });
   });
 });
 

@@ -45,7 +45,7 @@ describe("stable object boundary", () => {
 
   test("initializer() returns a narrow view without resolution internals", () => {
     loadFixtureSyms();
-    const init = (typeOf(metadataFor("fixturesyms.Point")!) as StructType).initializer() as any;
+    const init = (typeOf(metadataFor("fixturesyms.Point")!) as StructType).$initializer() as any;
     expect(typeof init.call).toBe("function");
     expect(init.address.isNull()).toBe(false);
     expect(init.resolved).toBeUndefined();

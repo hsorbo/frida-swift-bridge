@@ -118,7 +118,7 @@ describe("consuming methods on value types", () => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(7);
     const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
-      .initializer({ labels: [null, "tag"] })
+      .$initializer({ labels: [null, "tag"] })
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
     const take = box.$method("take", { self: "consuming" });
@@ -142,7 +142,7 @@ describe("consuming methods on value types", () => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV10takeTaggedySixlF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(11);
     const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
-      .initializer({ labels: [null, "tag"] })
+      .$initializer({ labels: [null, "tag"] })
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
     const take = box.$method("takeTagged", { typeArguments: [Swift.type("Swift.Int")!], self: "consuming" });
@@ -155,7 +155,7 @@ describe("consuming methods on value types", () => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV9takeAsyncSiyYaF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(13);
     const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType)
-      .initializer({ labels: [null, "tag"] })
+      .$initializer({ labels: [null, "tag"] })
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
     const take = box.$method("takeAsync", { self: "consuming" });
