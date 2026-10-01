@@ -36,8 +36,8 @@ describe("Swift object method sugar", () => {
 
   test("disambiguates same-arity overloads via $method labels", () => {
     const o = robot("R2");
-    expect(o.$method("move", { labels: ["to"] }).call(5)).toEqual(int64(5));
-    expect(o.$method("move", { labels: ["by"] }).call(5)).toEqual(int64(50));
+    expect(o.$method("move(to:)").call(5)).toEqual(int64(5));
+    expect(o.$method("move(by:)").call(5)).toEqual(int64(50));
   });
 
   test("$call mirrors the bare-name call", () => {

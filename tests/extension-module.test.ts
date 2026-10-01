@@ -18,7 +18,7 @@ describe("a module loaded after the search has already run", () => {
     expect("fly" in robot).toBe(false);
     expect(Robot.factoryName).toBeUndefined();
     expect("factoryName" in Robot).toBe(false);
-    expect(() => Robot.$initializer({ labels: ["badge"] })).toThrow();
+    expect(() => Robot.$initializer("init(badge:)")).toThrow();
 
     loadNoMetadata();
 
@@ -31,7 +31,7 @@ describe("a module loaded after the search has already run", () => {
     expect(Robot.factoryName()).toBe("factory");
     expect("factoryName" in Robot).toBe(true);
     expect(Robot.$call("factoryName")).toBe("factory");
-    expect(Robot.$initializer({ labels: ["badge"] }).call("7").name).toBe("R-7");
+    expect(Robot.$initializer("init(badge:)").call("7").name).toBe("R-7");
     expect(Robot.init({ badge: "7" }).name).toBe("R-7");
   });
 

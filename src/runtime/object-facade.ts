@@ -9,6 +9,7 @@ import {
   MethodResolveOptions,
   ValueMethodResolveOptions,
   lowerResolveOptions,
+  splitSelector,
 } from "./method.js";
 import { SwiftType, NominalType, ClassType, StructType, EnumType } from "./swift-type.js";
 import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache } from "./facade-members.js";
@@ -117,7 +118,8 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   const readProperty = (name: string): CallResult => (isValue ? value.get(name) : object.get(name));
   const writeProperty = (name: string, v: CallArg): void =>
     isValue ? value.set(name, v) : object.set(name, v);
-  const method = (name: string, options: ValueMethodResolveOptions = {}) => {
+  const method = (selector: string, selectorOptions: ValueMethodResolveOptions = {}) => {
+    const { name, options } = splitSelector(selector, selectorOptions);
     const raw = lowerResolveOptions(options);
     return isValue ? value.method(name, raw) : object.method(name, raw);
   };

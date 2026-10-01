@@ -39,7 +39,7 @@ describe("Optional<resilient struct wrapping a class ref> return", () => {
 
   test("a failable initializer returns a facade or null", () => {
     const holder = Swift.type("resilient.ResilientHolder") as SwiftStruct;
-    expect(holder.$initializer({ labels: ["id"] }).call(9)).not.toBeNull();
-    expect(holder.$initializer({ labels: ["id"] }).call(-1)).toBeNull();
+    expect(holder.$initializer("init(id:)").call(9)).not.toBeNull();
+    expect(holder.$initializer("init(id:)").call(-1)).toBeNull();
   });
 });

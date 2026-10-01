@@ -122,7 +122,7 @@ function reflectionIsStrictAtCompileTime(cls: SwiftClass, st: SwiftStruct, o: Sw
   const selectors: string[] = classInfo.instanceMethods();
   const found: SwiftInstanceMethod = classInfo.instanceMethod("greet");
   const typeMethod: SwiftMember = structInfo.typeMethod("make");
-  const initializer: SwiftMember = classInfo.initializer({ labels: ["name"] });
+  const initializer: SwiftMember = classInfo.initializer("init(name:)");
   const back: SwiftClass = classInfo.facade;
   const superInfo: SwiftType | null = classInfo.superClass;
   void [dynamicInfo, valueInfo, name, selectors, found, typeMethod, initializer, back, superInfo];

@@ -17,6 +17,8 @@ import {
   enumerateMethods,
   enumerateProperties,
   lowerResolveOptions,
+  splitSelector,
+  initializerLookup,
   findMember,
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
@@ -195,15 +197,16 @@ export abstract class NominalType extends SwiftType {
     return this.member(name, { ...options, static: true }, `type method ${name}`);
   }
 
-  initializer(options: MemberLookupOptions = {}): SwiftMember {
-    return this.member(this.initializerSymbolName(), options, "initializer");
+  initializer(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftMember {
+    return this.member(this.initializerSymbolName(), initializerLookup(selector, options), "initializer");
   }
 
   protected initializerSymbolName(): string {
     return "init";
   }
 
-  private member(name: string, options: ValueMethodResolveOptions, description: string): SwiftMember {
+  private member(selector: string, selectorOptions: ValueMethodResolveOptions, description: string): SwiftMember {
+    const { name, options } = splitSelector(selector, selectorOptions);
     const found = findMember(this.name, name, lowerResolveOptions(options));
     if (found === null) {
       throw new Error(`no ${description} on ${this.name}`);

@@ -206,6 +206,35 @@ export interface RawValueMethodResolveOptions extends RawMethodResolveOptions {
   self?: SelfOwnership;
 }
 
+// A member named by its selector, as the listings spell it ("deriveKey(inputKeyMaterial:_:)"),
+// carries its labels in the name.
+export function splitSelector<T extends BaseResolveOptions>(name: string, options: T): { name: string; options: T } {
+  const open = name.indexOf("(");
+  if (open === -1) {
+    return { name, options };
+  }
+  const inner = name.slice(open + 1, -1);
+  const parts = inner.split(":");
+  if (!name.endsWith(")") || parts.pop() !== "" || parts.some((p) => p === "")) {
+    throw new Error(`malformed selector ${name}`);
+  }
+  if (options.labels !== undefined) {
+    throw new Error(`${name} names its labels; drop { labels }`);
+  }
+  return { name: name.slice(0, open), options: { ...options, labels: parts.map((p) => (p === "_" ? null : p)) } };
+}
+
+export function initializerLookup<T extends BaseResolveOptions>(selector: string | T | undefined, options: T): T {
+  if (typeof selector !== "string") {
+    return selector ?? options;
+  }
+  const split = splitSelector(selector, options);
+  if (split.name !== "init") {
+    throw new Error(`${selector} is not an initializer selector`);
+  }
+  return split.options;
+}
+
 export function lowerResolveOptions(stable: ValueMethodResolveOptions): RawValueMethodResolveOptions {
   const { arity, labels, argTypes, returnType, static: isStatic, self, typeArguments } = stable;
   const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, self };
@@ -1340,10 +1369,9 @@ export class BoundAsyncMethod {
           cleanup();
           discardSelf();
           const { selector } = this.resolved;
-          const baseName = selector.split("(")[0];
           throw new Error(
             `${selector} on ${typeName(this.selfRouting.receiver)}: a trailing self past the async argument registers ` +
-              `is only safe if the method takes it; call it as $method("${baseName}", { self: "borrowing" }).call(...), ` +
+              `is only safe if the method takes it; call it as $method("${selector}", { self: "borrowing" }).call(...), ` +
               `or { self: "mutating" } if it mutates`
           );
         }
@@ -1678,10 +1706,9 @@ function valueSelfRouting(receiver: Metadata, selector: string, ownership: SelfO
     return { indirect: true };
   }
   if (ownership === undefined) {
-    const baseName = selector.split("(")[0];
     throw new Error(
       `${selector} on small loadable ${typeName(receiver)}: self routing depends on whether it mutates; ` +
-        `call it as $method("${baseName}", { self: "borrowing" }).call(...), or { self: "mutating" } if it mutates`
+        `call it as $method("${selector}", { self: "borrowing" }).call(...), or { self: "mutating" } if it mutates`
     );
   }
   return ownership === "mutating" ? { indirect: true } : { indirect: false, receiver };

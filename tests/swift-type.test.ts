@@ -67,7 +67,7 @@ describe("type reflection and facades", () => {
     expect(() => t.init(-1)).toThrow(/returned nil/);
   });
 
-  test("SwiftClass.$initializer selects a same-arity overload by labels", () => {
+  test("SwiftClass.$initializer selects a same-arity overload by { labels }, the escape hatch for a bare name", () => {
     const t = Swift.class("fixture.Vec2")!;
     expect(() => t.init(1, 2)).toThrow(/ambiguous/);
     expect(t.$initializer({ labels: ["x", "y"] }).call(1, 2).$fields).toEqual({ a: int64(1), b: int64(2) });
@@ -286,10 +286,10 @@ describe("type-level member lookups by kind", () => {
     expect(described.origin.kind).toBe("own");
   });
 
-  test("reflection describes a class initializer by its labels, at the address the facade binds", () => {
+  test("reflection describes a class initializer by its selector, at the address the facade binds", () => {
     const Vec2 = Swift.class("fixture.Vec2")!;
-    const byLabels = Vec2.$type.initializer({ labels: ["angle", "radius"] });
-    expect(byLabels.address.equals(Vec2.$initializer({ labels: ["angle", "radius"] }).address)).toBe(true);
+    const bySelector = Vec2.$type.initializer("init(angle:radius:)");
+    expect(bySelector.address.equals(Vec2.$initializer("init(angle:radius:)").address)).toBe(true);
     expect(() => Vec2.$type.initializer()).toThrow(/ambiguous/);
   });
 
@@ -297,6 +297,19 @@ describe("type-level member lookups by kind", () => {
     loadFixtureSyms();
     const Point = Swift.struct("fixturesyms.Point")!;
     expect(Point.$type.initializer().address.equals(Point.$initializer().address)).toBe(true);
+  });
+
+  test("a listed selector resolves the same member as its bare name", () => {
+    const Vec2 = Swift.class("fixture.Vec2")!;
+    const robot = Swift.class("fixture.Robot")!;
+    expect(robot.$type.instanceMethods()).toContain("move(to:)");
+    expect(robot.$type.instanceMethod("move(to:)").selector).toBe("move(to:)");
+    expect(robot.$type.instanceMethod("move(by:)").selector).toBe("move(by:)");
+    expect(Vec2.$type.initializer("init(x:y:)").address.equals(Vec2.$initializer({ labels: ["x", "y"] }).address)).toBe(true);
+    expect(() => robot.$type.instanceMethod("move(to:)", { labels: ["to"] })).toThrow(/drop \{ labels \}/);
+    expect(() => robot.$type.instanceMethod("move(to")).toThrow(/malformed selector/);
+    expect(() => robot.$type.instanceMethod("move(to:by)")).toThrow(/malformed selector/);
+    expect(() => Vec2.$initializer("move(to:)")).toThrow(/not an initializer selector/);
   });
 
   test("a generic type named without arguments still describes its members", () => {

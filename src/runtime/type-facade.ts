@@ -24,6 +24,8 @@ import {
   getStaticProperty,
   setStaticProperty,
   lowerResolveOptions,
+  splitSelector,
+  initializerLookup,
   findMethod,
   findMember,
   FoundMember,
@@ -78,7 +80,10 @@ export abstract class SwiftTypeFacade {
   }
 
   abstract $typeMethod(name: string, options?: MemberLookupOptions): SwiftBoundMethod;
-  abstract $initializer(options?: MemberLookupOptions): SwiftBoundInitializer | SwiftClassBoundInitializer;
+  abstract $initializer(
+    selector?: string | MemberLookupOptions,
+    options?: MemberLookupOptions
+  ): SwiftBoundInitializer | SwiftClassBoundInitializer;
   abstract init(...args: CallArg[]): SwiftObject | null;
   protected abstract hasInitializer(labels: string[]): boolean;
 
@@ -94,7 +99,8 @@ export abstract class SwiftTypeFacade {
 export abstract class SwiftValueType extends SwiftTypeFacade {
   declare readonly $type: StructType | EnumType;
 
-  $typeMethod(name: string, options: MemberLookupOptions = {}): SwiftBoundMethod {
+  $typeMethod(selector: string, selectorOptions: MemberLookupOptions = {}): SwiftBoundMethod {
+    const { name, options } = splitSelector(selector, selectorOptions);
     const type = this.$type;
     const raw = lowerResolveOptions(options);
     const lookup = { ...raw, static: true };
@@ -110,7 +116,8 @@ export abstract class SwiftValueType extends SwiftTypeFacade {
     return narrowBoundMethod(bindStaticMethod(metadataOf(type), name, raw));
   }
 
-  $initializer(options: MemberLookupOptions = {}): SwiftBoundInitializer {
+  $initializer(selector?: string | MemberLookupOptions, selectorOptions: MemberLookupOptions = {}): SwiftBoundInitializer {
+    const options = initializerLookup(selector, selectorOptions);
     const type = this.$type;
     const raw = lowerResolveOptions(options);
     if (isUnboundGeneric(type)) {
@@ -253,7 +260,8 @@ export class SwiftClass extends SwiftTypeFacade {
     return declares("definingModule") || declares("allLoadedModules");
   }
 
-  $initializer(options: MemberLookupOptions = {}): SwiftClassBoundInitializer {
+  $initializer(selector?: string | MemberLookupOptions, selectorOptions: MemberLookupOptions = {}): SwiftClassBoundInitializer {
+    const options = initializerLookup(selector, selectorOptions);
     const own = matchInitializers(this.resolveInitializers("definingModule"), options);
     const chosen =
       own.length === 1 ? own[0] : selectInitializer(this.resolveInitializers("allLoadedModules"), options);
@@ -286,7 +294,8 @@ export class SwiftClass extends SwiftTypeFacade {
     };
   }
 
-  $typeMethod(name: string, options: MemberLookupOptions = {}): SwiftBoundMethod {
+  $typeMethod(selector: string, selectorOptions: MemberLookupOptions = {}): SwiftBoundMethod {
+    const { name, options } = splitSelector(selector, selectorOptions);
     const type = this.$type;
     const raw = lowerResolveOptions({ ...options, static: true });
     if (isUnboundGeneric(type)) {

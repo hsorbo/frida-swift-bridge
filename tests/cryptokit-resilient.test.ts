@@ -59,7 +59,7 @@ describe("resilience in Apple frameworks", () => {
     requireDarwin(ctx);
     loadCryptoKit();
 
-    const deriveKey = Swift.struct("CryptoKit.HKDF")!.$typeMethod("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
+    const deriveKey = Swift.struct("CryptoKit.HKDF")!.$typeMethod("deriveKey(inputKeyMaterial:outputByteCount:)");
     const exported = Process.getModuleByName("CryptoKit").getExportByName(
       "$s9CryptoKit4HKDFV9deriveKey05inputE8Material15outputByteCountAA09SymmetricE0VAH_SitFZ"
     );
@@ -70,7 +70,7 @@ describe("resilience in Apple frameworks", () => {
     requireDarwin(ctx);
     loadCryptoKit();
 
-    const init = Swift.struct("CryptoKit.SymmetricKey")!.$initializer({ labels: ["data"] });
+    const init = Swift.struct("CryptoKit.SymmetricKey")!.$initializer("init(data:)");
     const exported = Process.getModuleByName("CryptoKit").getExportByName(
       "$s9CryptoKit12SymmetricKeyV4dataACx_tc10Foundation15ContiguousBytesRzlufC"
     );

@@ -44,7 +44,7 @@ describe("protocol-extension members on a conforming type", () => {
     expect(n.scaledTwice()).toEqual(int64(22));
   });
 
-  test("an overloaded extension method is picked by labels", () => {
+  test("an overloaded extension method is picked by { labels }", () => {
     const n = (Swift.type("fixture.NarrowScalar") as SwiftStruct).$new({ n: 11 });
     expect(n.$method("scaledTwice", { labels: [null] }).call(3)).toEqual(int64(66));
     expect(n.$method("scaledTwice", { labels: ["by"] }).call(3)).toEqual(int64(67));

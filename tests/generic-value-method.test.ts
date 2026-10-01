@@ -89,6 +89,6 @@ describe("inferred self convention of optimized generic methods on a small value
 
   test("a callee that reads neither layout still requires the self option", () => {
     const Int = metadataFor("Swift.Int")!;
-    expect(() => box("optimized.Counter", { total: 1 }).method("ignore", { typeArguments: [Int] })).toThrow('$method("ignore", { self: "borrowing" }).call(...)');
+    expect(() => box("optimized.Counter", { total: 1 }).method("ignore", { typeArguments: [Int] })).toThrow('$method("ignore(_:)", { self: "borrowing" }).call(...)');
   });
 });
