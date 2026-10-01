@@ -44,7 +44,7 @@ import { demangle } from "./demangle.js";
 import { typeName } from "./type-name.js";
 import { Protocol, protocolsForType } from "./protocol.js";
 import { findType, swiftTypes } from "../reflection/registry.js";
-import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache } from "./facade-members.js";
+import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache, FacadeMembers, FacadeCallable } from "./facade-members.js";
 
 export interface TypeMember {
   name: string;
@@ -112,7 +112,15 @@ interface RawState {
   metadata: Metadata | null;
 }
 
-const rawState = new WeakMap<SwiftType, RawState>();
+const RAW_STATE: unique symbol = Symbol("swift.type.raw");
+
+interface WithRawState {
+  [RAW_STATE]: RawState;
+}
+
+function rawStateOf(type: SwiftType): RawState {
+  return (type as unknown as WithRawState)[RAW_STATE];
+}
 
 export class SwiftType {
   /**
@@ -121,12 +129,10 @@ export class SwiftType {
    * declarations (`stripInternal` is off), so this is a documentation-level boundary only.
    */
   constructor(source: Metadata | ContextDescriptor) {
-    rawState.set(
-      this,
+    (this as unknown as WithRawState)[RAW_STATE] =
       source instanceof ContextDescriptor
         ? { descriptor: source, metadata: null }
-        : { descriptor: null, metadata: source }
-    );
+        : { descriptor: null, metadata: source };
   }
 
   // The facade answers any Swift member name; raw metadata and descriptor stay under /abi.
@@ -604,7 +610,7 @@ export class FunctionType extends SwiftType {
 }
 
 export function metadataOf(type: SwiftType): Metadata {
-  const state = rawState.get(type)!;
+  const state = rawStateOf(type);
   if (state.metadata === null) {
     state.metadata = getMetadata(state.descriptor!);
   }
@@ -612,17 +618,17 @@ export function metadataOf(type: SwiftType): Metadata {
 }
 
 export function descriptorOf(type: SwiftType): ContextDescriptor {
-  const state = rawState.get(type)!;
+  const state = rawStateOf(type);
   return state.descriptor ?? metadataDescriptorOf(type);
 }
 
 function backingDescriptorOf(type: SwiftType): ContextDescriptor | null {
-  return rawState.get(type)!.descriptor;
+  return rawStateOf(type).descriptor;
 }
 
 // A generic type named without its arguments has a descriptor but no metadata.
 function isUnboundGeneric(type: SwiftType): boolean {
-  const state = rawState.get(type)!;
+  const state = rawStateOf(type);
   return state.metadata === null && state.descriptor !== null && state.descriptor.isGeneric;
 }
 
@@ -723,112 +729,131 @@ const RESERVED = new Set(["constructor", "toString", "valueOf", "toJSON", "hasOw
 // their Swift names, the bridge's own members under $. Resolution is per name and lazy, like an
 // object's; the listing stays shallow (the defining module).
 function typeFacade<T extends NominalType>(target: T): T {
-  const name = (): string => target.$name;
-  const enumType = target instanceof EnumType ? target : null;
+  return new Proxy(target, typeFacadeHandler as ProxyHandler<T>);
+}
 
-  const members = facadeMembers(name, true);
+interface TypeFacadeState {
+  members: FacadeMembers;
+  callable: (name: string) => FacadeCallable;
+  cases: Map<string, boolean> | null;
+  has: (key: string) => boolean;
+}
 
-  let payloadByCase: Map<string, boolean> | null = null;
-  const cases = (): Map<string, boolean> => {
-    if (payloadByCase === null) {
-      payloadByCase = new Map();
-      if (enumType !== null) {
-        for (const field of enumerateFields(descriptorOf(enumType))) {
-          payloadByCase.set(field.name, field.mangledTypeName !== null);
-        }
+const typeFacadeStates = new WeakMap<NominalType, TypeFacadeState>();
+
+function typeFacadeState(target: NominalType): TypeFacadeState {
+  let state = typeFacadeStates.get(target);
+  if (state === undefined) {
+    state = {
+      members: facadeMembers(() => target.$name, true),
+      callable: callableCache((method, args) => target.$typeMethod(method, invokeOptions(args)).call(...args)),
+      cases: null,
+      has: (key) => typeFacadeHas(target, key),
+    };
+    typeFacadeStates.set(target, state);
+  }
+  return state;
+}
+
+function enumCases(target: NominalType): Map<string, boolean> {
+  const state = typeFacadeState(target);
+  if (state.cases === null) {
+    state.cases = new Map();
+    if (target instanceof EnumType) {
+      for (const field of enumerateFields(descriptorOf(target))) {
+        state.cases.set(field.name, field.mangledTypeName !== null);
       }
     }
-    return payloadByCase;
-  };
+  }
+  return state.cases;
+}
 
-  const nestedType = (key: string): SwiftType | null => {
-    const descriptor = findType(`${name()}.${key}`);
-    return descriptor === null ? null : typeFromDescriptor(descriptor);
-  };
-  const nestedTypeNames = (): string[] => {
-    const prefix = `${name()}.`;
-    const names: string[] = [];
-    for (const descriptor of swiftTypes()) {
-      const simple = descriptor.name;
-      if (simple !== null && descriptor.fullTypeName === prefix + simple) {
-        names.push(simple);
-      }
+function nestedType(target: NominalType, key: string): SwiftType | null {
+  const descriptor = findType(`${target.$name}.${key}`);
+  return descriptor === null ? null : typeFromDescriptor(descriptor);
+}
+
+function nestedTypeNames(target: NominalType): string[] {
+  const prefix = `${target.$name}.`;
+  const names: string[] = [];
+  for (const descriptor of swiftTypes()) {
+    const simple = descriptor.name;
+    if (simple !== null && descriptor.fullTypeName === prefix + simple) {
+      names.push(simple);
     }
-    return names;
-  };
+  }
+  return names;
+}
 
-  const has = (key: string): boolean => {
+function typeFacadeHas(target: NominalType, key: string): boolean {
+  if (isBridgeMember(key, RESERVED)) {
+    return Reflect.has(target, key);
+  }
+  if (POISON.has(key)) {
+    return false;
+  }
+  const m = typeFacadeState(target).members.including(key);
+  return m.methods.has(key) || m.properties.has(key) || enumCases(target).has(key) || nestedType(target, key) !== null;
+}
+
+const typeFacadeHandler: ProxyHandler<NominalType> = {
+  has(t, key) {
+    return typeof key === "string" ? typeFacadeHas(t, key) : Reflect.has(t, key);
+  },
+  get(t, key) {
+    if (typeof key === "symbol") {
+      return Reflect.get(t, key);
+    }
+    if (key === "hasOwnProperty") {
+      return typeFacadeState(t).has;
+    }
     if (isBridgeMember(key, RESERVED)) {
-      return Reflect.has(target, key);
+      const member = Reflect.get(t, key, t);
+      return typeof member === "function" && key !== "constructor" ? member.bind(t) : member;
     }
     if (POISON.has(key)) {
+      return undefined;
+    }
+    const state = typeFacadeState(t);
+    const m = state.members.including(key);
+    if (m.properties.has(key)) {
+      return getStaticProperty(metadataOf(t), key);
+    }
+    if (m.methods.has(key)) {
+      return state.callable(key);
+    }
+    const hasPayload = enumCases(t).get(key);
+    if (hasPayload !== undefined) {
+      const enumType = t as EnumType;
+      return hasPayload ? (payload: SwiftValue) => enumType.$case(key, payload) : enumType.$case(key);
+    }
+    return nestedType(t, key) ?? undefined;
+  },
+  set(t, key, value) {
+    if (typeof key !== "string") {
       return false;
     }
-    const m = members.including(key);
-    return m.methods.has(key) || m.properties.has(key) || cases().has(key) || nestedType(key) !== null;
-  };
-
-  const callable = callableCache((method, args) => target.$typeMethod(method, invokeOptions(args)).call(...args));
-
-  const proxy = new Proxy(target, {
-    has(t, key) {
-      return typeof key === "string" ? has(key) : Reflect.has(t, key);
-    },
-    get(t, key) {
-      if (typeof key === "symbol") {
-        return Reflect.get(t, key);
-      }
-      if (key === "hasOwnProperty") {
-        return has;
-      }
-      if (isBridgeMember(key, RESERVED)) {
-        const member = Reflect.get(t, key, t);
-        return typeof member === "function" && key !== "constructor" ? member.bind(t) : member;
-      }
-      if (POISON.has(key)) {
-        return undefined;
-      }
-      const m = members.including(key);
-      if (m.properties.has(key)) {
-        return getStaticProperty(metadataOf(t), key);
-      }
-      if (m.methods.has(key)) {
-        return callable(key);
-      }
-      const hasPayload = cases().get(key);
-      if (hasPayload !== undefined) {
-        return hasPayload ? (payload: SwiftValue) => enumType!.$case(key, payload) : enumType!.$case(key);
-      }
-      return nestedType(key) ?? undefined;
-    },
-    set(t, key, value) {
-      if (typeof key !== "string") {
-        return false;
-      }
-      const m = isBridgeMember(key, RESERVED) || POISON.has(key) ? null : members.including(key);
-      if (m === null || !m.properties.has(key)) {
-        throw new Error(`no static property ${key} on ${name()}`);
-      }
-      if (!m.writableProperties.has(key)) {
-        throw new Error(`${key} on ${name()} is read-only`);
-      }
-      setStaticProperty(metadataOf(t), key, value);
-      return true;
-    },
-    ownKeys() {
-      const m = members.own();
-      return [...new Set([...m.methods, ...m.properties, ...cases().keys(), ...nestedTypeNames()])];
-    },
-    getOwnPropertyDescriptor(_t, key) {
-      if (typeof key !== "string" || !has(key)) {
-        return undefined;
-      }
-      return { writable: members.own().writableProperties.has(key), configurable: true, enumerable: true };
-    },
-  });
-  rawState.set(proxy, rawState.get(target)!);
-  return proxy;
-}
+    const m = isBridgeMember(key, RESERVED) || POISON.has(key) ? null : typeFacadeState(t).members.including(key);
+    if (m === null || !m.properties.has(key)) {
+      throw new Error(`no static property ${key} on ${t.$name}`);
+    }
+    if (!m.writableProperties.has(key)) {
+      throw new Error(`${key} on ${t.$name} is read-only`);
+    }
+    setStaticProperty(metadataOf(t), key, value);
+    return true;
+  },
+  ownKeys(t) {
+    const m = typeFacadeState(t).members.own();
+    return [...new Set([...m.methods, ...m.properties, ...enumCases(t).keys(), ...nestedTypeNames(t)])];
+  },
+  getOwnPropertyDescriptor(t, key) {
+    if (typeof key !== "string" || !typeFacadeHas(t, key)) {
+      return undefined;
+    }
+    return { writable: typeFacadeState(t).members.own().writableProperties.has(key), configurable: true, enumerable: true };
+  },
+};
 
 const wrappers = new Map<string, SwiftType>();
 
@@ -911,7 +936,7 @@ export function typeOf(metadata: Metadata): SwiftType {
     return cachedWrapper(metadata.handle, () => wrapperFromMetadata(metadata));
   }
   const wrapper = cachedWrapper(descriptor.handle, () => wrapperFromMetadata(metadata));
-  const state = rawState.get(wrapper)!;
+  const state = rawStateOf(wrapper);
   state.metadata ??= metadata;
   state.descriptor ??= descriptor;
   return wrapper;

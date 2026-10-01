@@ -105,7 +105,16 @@ export class ContextDescriptor {
     return null;
   }
 
+  private memoizedFullTypeName: string | null | undefined;
+
   get fullTypeName(): string | null {
+    if (this.memoizedFullTypeName === undefined) {
+      this.memoizedFullTypeName = this.computeFullTypeName();
+    }
+    return this.memoizedFullTypeName;
+  }
+
+  private computeFullTypeName(): string | null {
     const name = this.name;
     if (name === null) {
       return null;
@@ -113,7 +122,8 @@ export class ContextDescriptor {
     const components = [name];
     let ctx: ContextDescriptor | null = this.parent;
     while (ctx !== null) {
-      if (ctx.isType) {
+      const kind = ctx.kind;
+      if (kind === ContextDescriptorKind.Class || kind === ContextDescriptorKind.Struct || kind === ContextDescriptorKind.Enum) {
         const parentName = ctx.name;
         if (parentName === null) {
           break;
@@ -122,17 +132,17 @@ export class ContextDescriptor {
         ctx = ctx.parent;
         continue;
       }
-      if (ctx.kind === ContextDescriptorKind.Extension) {
+      if (kind === ContextDescriptorKind.Extension) {
         const extended = extendedTypeName(ctx);
         return extended === null ? null : `${extended}.${components.join(".")}`;
       }
-      if (ctx.kind === ContextDescriptorKind.Anonymous) {
+      if (kind === ContextDescriptorKind.Anonymous) {
         ctx = ctx.parent;
         continue;
       }
       break;
     }
-    const module = this.moduleName;
+    const module = ctx?.kind === ContextDescriptorKind.Module ? ctx.name : this.moduleName;
     return module === null ? components.join(".") : `${module}.${components.join(".")}`;
   }
 }
