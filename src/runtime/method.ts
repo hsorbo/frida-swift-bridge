@@ -271,7 +271,7 @@ interface TypeMembers {
 }
 
 const tableCache = new Map<string, TypeMembers>();
-const invokerCache = new Map<string, SwiftNativeFunction>();
+const idleInvokers = new Map<string, SwiftNativeFunction[]>();
 
 function rawArg(value: CallArg): CallArg | ClassInstance | ValueInstance {
   return value !== null && typeof value === "object"
@@ -1149,9 +1149,24 @@ function argPlanKey(plan: ArgPlan): string {
   }
 }
 
-// One trampoline per distinct lowering, whichever route planned the call: the key is the lowering,
-// not the address, so an index invocation never reuses a symbol-route invoker built for other types.
-function invokerFor(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata | null): SwiftNativeFunction {
+function makeInvoker(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata | null): SwiftNativeFunction {
+  const argTypes = plan.argPlans.map(swiftArgType);
+  if (trailingSelf !== null) {
+    argTypes.push(trailingSelf);
+  }
+  return makeSwiftNativeFunction(plan.address, plan.returnPlan === null ? null : swiftArgType(plan.returnPlan), argTypes, {
+    hasSelf,
+    throws: plan.throws,
+    typeArguments: plan.typeArguments,
+    witnessTables: plan.witnessTables,
+  });
+}
+
+// Trampolines are pooled per distinct lowering, whichever route planned the call: the key is the
+// lowering, not the address, so an index invocation never reuses a symbol-route invoker built for
+// other types. A trampoline's save and result buffers are its own, so a call nested inside one in
+// flight (a closure body calling the method that runs it) takes another; idle ones are reused.
+function withInvoker<T>(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata | null, use: (fn: SwiftNativeFunction) => T): T {
   const key = [
     plan.address,
     hasSelf ? "s" : "",
@@ -1162,21 +1177,17 @@ function invokerFor(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata | n
     plan.typeArguments.map((m) => m.handle).join(","),
     plan.witnessTables.join(","),
   ].join("|");
-  let fn = invokerCache.get(key);
-  if (fn === undefined) {
-    const argTypes = plan.argPlans.map(swiftArgType);
-    if (trailingSelf !== null) {
-      argTypes.push(trailingSelf);
-    }
-    fn = makeSwiftNativeFunction(plan.address, plan.returnPlan === null ? null : swiftArgType(plan.returnPlan), argTypes, {
-      hasSelf,
-      throws: plan.throws,
-      typeArguments: plan.typeArguments,
-      witnessTables: plan.witnessTables,
-    });
-    invokerCache.set(key, fn);
+  let idle = idleInvokers.get(key);
+  if (idle === undefined) {
+    idle = [];
+    idleInvokers.set(key, idle);
   }
-  return fn;
+  const fn = idle.pop() ?? makeInvoker(plan, hasSelf, trailingSelf);
+  try {
+    return use(fn);
+  } finally {
+    idle.push(fn);
+  }
 }
 
 // A generic or abstract return is @out even when its concrete type would ride registers.
@@ -1217,7 +1228,8 @@ export class BoundMethod {
   private readonly consumedSelf: Metadata | null;
   private readonly executor: SerialExecutorRef | null;
   private readonly adoptResult: boolean;
-  private readonly fn: SwiftNativeFunction | null;
+  private readonly hasSelf: boolean;
+  private readonly trailingSelf: Metadata | null;
   private readonly result: AsyncResultShape | null;
 
   constructor(readonly plan: CallPlan, binding: Binding = {}) {
@@ -1229,15 +1241,15 @@ export class BoundMethod {
     this.consumedSelf = binding.consumedSelf ?? null;
     this.executor = binding.executor ?? null;
     this.adoptResult = binding.adoptResult === true;
+    this.hasSelf = this.self !== null && this.selfInRegister();
+    this.trailingSelf = this.self !== null && !this.routing.indirect ? this.routing.receiver : null;
     if (plan.async) {
       if (plan.asyncFunctionPointer === undefined) {
         throw new Error(`${plan.selector} is not async`);
       }
-      this.fn = null;
       this.result = resultShapeOf(plan);
     } else {
-      const trailing = this.self !== null && !this.routing.indirect ? this.routing.receiver : null;
-      this.fn = invokerFor(plan, this.self !== null && this.selfInRegister(), trailing);
+      withInvoker(plan, this.hasSelf, this.trailingSelf, () => undefined); // lowering errors surface at bind
       this.result = null;
     }
   }
@@ -1264,7 +1276,9 @@ export class BoundMethod {
     }
     const marshalled = marshalPlannedArgs(this.plan, args);
     const self = this.self !== null && this.consumedSelf !== null ? copyOfValue(this.consumedSelf, this.self) : this.self;
-    return this.fn === null ? this.invokeAsync(marshalled, self) : this.invokeSync(this.fn, marshalled, self);
+    return this.plan.async
+      ? this.invokeAsync(marshalled, self)
+      : withInvoker(this.plan, this.hasSelf, this.trailingSelf, (fn) => this.invokeSync(fn, marshalled, self));
   }
 
   private invokeSync(fn: SwiftNativeFunction, marshalled: PlannedArgs, self: NativePointer | null): CallResult {
@@ -3198,13 +3212,8 @@ export function actorSerialExecutor(actorType: Metadata, self: NativePointer): S
     return null;
   }
   const address = new WitnessTable(tableAddr, actorType).requirement(getter.witnessIndex);
-  const key = `actor-executor:${address}`;
-  let fn = invokerCache.get(key);
-  if (fn === undefined) {
-    fn = makeSwiftNativeFunction(address, unownedSerialExecutorType, [], { hasSelf: true });
-    invokerCache.set(key, fn);
-  }
-  const ref = fn(self);
+  const plan = accessorPlan(address, unownedSerialExecutorType, "getter");
+  const ref = withInvoker(plan, true, null, (fn) => fn(self));
   if (ref === null) {
     return null;
   }

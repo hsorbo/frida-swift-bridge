@@ -227,6 +227,37 @@ describe("escaping closure context", () => {
 describe("closure through the $call facade", () => {
   beforeEach(() => { loadFixture(); });
 
+  // A closure body may call the method that is running it; that call's trampoline must not be the one
+  // mid-flight, whose save and result buffers it would overwrite.
+  test("a closure body can call the same method again while it is in flight", () => {
+    const ByteSource = metadataFor("fixture.ByteSource")!;
+    const buffers: NativePointer[] = []; // rooted: a collected Memory.alloc is freed
+    const sourceOf = (data: number[]) => {
+      const buffer = Memory.alloc(data.length);
+      buffer.writeByteArray(data);
+      buffers.push(buffer);
+      const self = Memory.alloc(ByteSource.valueWitnesses.stride);
+      self.writePointer(buffer);
+      self.add(Process.pointerSize).writeU64(data.length);
+      return asSwiftObject(ValueInstance.borrow(ByteSource, self));
+    };
+    const outer = sourceOf([1, 2, 3]);
+    const inner = sourceOf([7, 8]);
+    const seen: number[][] = [];
+    outer.$method("withBytes", { self: "borrowing", typeArguments: [] }).call(
+      Swift.closure((buf) => {
+        inner.$method("withBytes", { self: "borrowing", typeArguments: [] }).call(
+          Swift.closure((innerBuf) => {
+            seen.push(Array.from(new Uint8Array(innerBuf.readBytes())));
+          })
+        );
+        seen.push(Array.from(new Uint8Array(buf.readBytes())));
+      })
+    );
+    expect(seen).toEqual([[7, 8], [1, 2, 3]]);
+    void buffers;
+  });
+
   test("Swift.closure passed to a generic rethrows method receives the bytes", () => {
     const data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
     const buffer = Memory.alloc(data.length);
