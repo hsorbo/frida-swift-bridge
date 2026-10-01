@@ -1119,6 +1119,15 @@ public final class Clash {
     public func field() -> Int { handle + 100 }
 }
 
+// Type members named like the type facade's bridge spellings ($name/$get/$call) and one it reserves
+// (toString): the bare Swift names stay reachable, the reserved one through $call.
+public struct ClashingType {
+    public static var name: String { "clash" }
+    public static func get() -> String { "got" }
+    public static func call() -> Int { 14 }
+    public static func toString() -> String { "swift" }
+}
+
 // Non-final so pub/hidden get vtable slots; hidden is internal (absent from the export trie).
 public class Dispatcher {
     public init() {}

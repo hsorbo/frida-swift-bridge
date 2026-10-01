@@ -684,27 +684,27 @@ function symbolMayName(name: string): SymbolFilter | null {
   return (symbol) => words.every((w) => symbol.includes(w));
 }
 
-export interface InstanceMemberKinds {
+export interface MemberKinds {
   method: boolean;
   property: boolean;
   writable: boolean;
 }
 
-export function instanceMemberKindsInOtherModules(typeName: string, name: string): InstanceMemberKinds {
+export function memberKindsInOtherModules(typeName: string, name: string, isStatic = false): MemberKinds {
   const fullName = canonicalTypeName(typeName);
   const mayName = symbolMayName(name);
-  const found: InstanceMemberKinds = { method: false, property: false, writable: false };
+  const found: MemberKinds = { method: false, property: false, writable: false };
   const consider = (members: TypeMembers, isMethod: (c: MethodCandidate) => boolean): void => {
     found.method ||= members.methods.some((c) => c.name === name && isMethod(c));
-    found.property ||= members.accessors.some((a) => a.member === name && !a.isStatic);
-    found.writable ||= members.accessors.some((a) => a.member === name && !a.isStatic && a.kind === "setter");
+    found.property ||= members.accessors.some((a) => a.member === name && a.isStatic === isStatic);
+    found.writable ||= members.accessors.some((a) => a.member === name && a.isStatic === isStatic && a.kind === "setter");
   };
-  const isInstanceMethod = (c: MethodCandidate): boolean => !c.isStatic && methodKind(c.name) === "method";
+  const isMethod = (c: MethodCandidate): boolean => c.isStatic === isStatic && methodKind(c.name) === "method";
   for (const className of classChainNames(fullName)) {
-    consider(foreignMembers(className, mayName), isInstanceMethod);
+    consider(foreignMembers(className, mayName), isMethod);
   }
   for (const conformance of conformanceMembers(fullName, mayName)) {
-    consider(conformance.members, (c) => isConformanceMethod(c) && isInstanceMethod(c));
+    consider(conformance.members, (c) => isConformanceMethod(c) && isMethod(c));
   }
   return found;
 }
@@ -2664,6 +2664,15 @@ export function getStaticProperty(receiver: Metadata, member: string): CallResul
     return conformanceGetProperty(canonicalTypeName(name), receiver.handle, member, true);
   }
   return decodeReturn(accessor.type, invokerForAccessor(accessor, null)(receiver.handle));
+}
+
+export function setStaticProperty(receiver: Metadata, member: string, value: CallArg): void {
+  const name = typeName(receiver);
+  const accessor = findAccessor(name, member, "setter", true);
+  if (accessor === null) {
+    throw new Error(`no static setter for ${member} on ${name}`);
+  }
+  invokerForAccessor(accessor, null)(receiver.handle, marshalConsumedArgs([accessor.type], [value])[0]);
 }
 
 // Setter self is inout (mutating), so it stays indirect; newValue is +1/owned and the callee consumes

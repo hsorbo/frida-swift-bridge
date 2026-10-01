@@ -30,6 +30,8 @@ import {
   ModuleScope,
   enumerateProperties,
   getStaticProperty,
+  setStaticProperty,
+  memberKindsInOtherModules,
   lowerResolveOptions,
   findMethod,
   findMember,
@@ -42,6 +44,8 @@ import { readFunctionType, ParameterOwnership } from "../abi/function-type.js";
 import { demangle } from "./demangle.js";
 import { typeName } from "./type-name.js";
 import { Protocol, protocolsForType } from "./protocol.js";
+import { findType, swiftTypes } from "../reflection/registry.js";
+import { ClosureSpec } from "./closure.js";
 
 export interface TypeMember {
   name: string;
@@ -111,6 +115,15 @@ export class SwiftType {
         ? { descriptor: source, metadata: null }
         : { descriptor: null, metadata: source }
     );
+  }
+
+  // The facade answers any Swift member name; raw metadata and descriptor stay under /abi.
+  [key: string]: any;
+  declare readonly metadata?: never;
+  declare readonly descriptor?: never;
+
+  toString(): string {
+    return this.$name;
   }
 
   get $name(): string {
@@ -213,8 +226,8 @@ export class ValueType extends SwiftType {
     return narrowBoundMethod(bindStaticMethod(metadataOf(this), name, raw));
   }
 
-  $call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
-    return this.$typeMethod(name).call(...args);
+  $call(name: string, ...args: CallArg[]): CallResult | Promise<CallResult> {
+    return this.$typeMethod(name, invokeOptions(args)).call(...args);
   }
 
   $initializer(options: MemberLookupOptions = {}): SwiftBoundInitializer {
@@ -458,8 +471,8 @@ export class ClassType extends SwiftType {
     );
   }
 
-  $call(name: string, ...args: SwiftValue[]): CallResult | Promise<CallResult> {
-    return this.$typeMethod(name).call(...args);
+  $call(name: string, ...args: CallArg[]): CallResult | Promise<CallResult> {
+    return this.$typeMethod(name, invokeOptions(args)).call(...args);
   }
 
   private get fullName(): string {
@@ -678,6 +691,177 @@ export function swiftFunction(
     callMarshalled(argMetadata, args, returnMetadata, (argPtrs) => raw(...argPtrs), conventions);
 }
 
+const RESERVED = new Set(["constructor", "toString", "valueOf", "toJSON", "hasOwnProperty", "init"]);
+
+// A synthesized `then` would make the facade thenable and silently break `await`; never a member.
+const POISON = new Set(["then", "catch", "finally"]);
+
+function isBridgeMember(key: string): boolean {
+  return key.startsWith("$") || RESERVED.has(key);
+}
+
+function invokeOptions(args: CallArg[]): MemberLookupOptions {
+  const options: MemberLookupOptions = { arity: args.length };
+  if (args.some((a) => a instanceof ClosureSpec)) {
+    options.typeArguments = []; // generic path; planGenericMethod infers the closure-result R
+  }
+  return options;
+}
+
+interface TypeMemberIndex {
+  methods: Set<string>;
+  properties: Set<string>;
+  writableProperties: Set<string>;
+}
+
+// A nominal type's facade: its type methods, static properties, enum cases and nested types under
+// their Swift names, the bridge's own members under $. Resolution is per name and lazy, like an
+// object's; the listing stays shallow (the defining module).
+function typeFacade<T extends ValueType | ClassType>(target: T): T {
+  const name = (): string => target.$name;
+
+  let index: TypeMemberIndex | null = null;
+  const members = (): TypeMemberIndex => {
+    if (index === null) {
+      const properties = enumerateProperties(name(), "definingModule").filter((p) => p.isStatic);
+      index = {
+        methods: new Set(
+          enumerateMethods(name(), "definingModule")
+            .filter((m) => m.kind === "method" && m.isStatic)
+            .map((m) => m.name)
+        ),
+        properties: new Set(properties.map((p) => p.name)),
+        writableProperties: new Set(properties.filter((p) => p.writable).map((p) => p.name)),
+      };
+    }
+    return index;
+  };
+  const searchedInOtherModules = new Set<string>();
+  const membersIncludingOtherModules = (key: string): TypeMemberIndex => {
+    const own = members();
+    if (own.methods.has(key) || own.properties.has(key) || searchedInOtherModules.has(key)) {
+      return own;
+    }
+    searchedInOtherModules.add(key);
+    const found = memberKindsInOtherModules(name(), key, true);
+    if (found.method) {
+      own.methods.add(key);
+    }
+    if (found.property) {
+      own.properties.add(key);
+    }
+    if (found.writable) {
+      own.writableProperties.add(key);
+    }
+    return own;
+  };
+
+  let payloadByCase: Map<string, boolean> | null = null;
+  const cases = (): Map<string, boolean> => {
+    if (payloadByCase === null) {
+      payloadByCase = new Map();
+      if (target instanceof EnumType) {
+        for (const field of enumerateFields(descriptorOf(target))) {
+          payloadByCase.set(field.name, field.mangledTypeName !== null);
+        }
+      }
+    }
+    return payloadByCase;
+  };
+
+  const nestedType = (key: string): SwiftType | null => {
+    const descriptor = findType(`${name()}.${key}`);
+    return descriptor === null ? null : typeFromDescriptor(descriptor);
+  };
+  const nestedTypeNames = (): string[] => {
+    const prefix = `${name()}.`;
+    const names: string[] = [];
+    for (const descriptor of swiftTypes()) {
+      const simple = descriptor.name;
+      if (simple !== null && descriptor.fullTypeName === prefix + simple) {
+        names.push(simple);
+      }
+    }
+    return names;
+  };
+
+  const has = (key: string): boolean => {
+    if (isBridgeMember(key)) {
+      return Reflect.has(target, key);
+    }
+    if (POISON.has(key)) {
+      return false;
+    }
+    const m = membersIncludingOtherModules(key);
+    return m.methods.has(key) || m.properties.has(key) || cases().has(key) || nestedType(key) !== null;
+  };
+
+  const callables = new Map<string, (...args: CallArg[]) => CallResult | Promise<CallResult>>();
+
+  const proxy = new Proxy(target, {
+    has(t, key) {
+      return typeof key === "string" ? has(key) : Reflect.has(t, key);
+    },
+    get(t, key) {
+      if (typeof key === "symbol") {
+        return Reflect.get(t, key);
+      }
+      if (key === "hasOwnProperty") {
+        return has;
+      }
+      if (isBridgeMember(key)) {
+        const member = Reflect.get(t, key, t);
+        return typeof member === "function" && key !== "constructor" ? member.bind(t) : member;
+      }
+      if (POISON.has(key)) {
+        return undefined;
+      }
+      const m = membersIncludingOtherModules(key);
+      if (m.properties.has(key)) {
+        return getStaticProperty(metadataOf(t), key);
+      }
+      if (m.methods.has(key)) {
+        let fn = callables.get(key);
+        if (fn === undefined) {
+          fn = (...args: CallArg[]) => t.$typeMethod(key, invokeOptions(args)).call(...args);
+          callables.set(key, fn);
+        }
+        return fn;
+      }
+      const hasPayload = cases().get(key);
+      if (hasPayload !== undefined) {
+        const enumType = t as EnumType;
+        return hasPayload ? (payload: SwiftValue) => enumType.$case(key, payload) : enumType.$case(key);
+      }
+      return nestedType(key) ?? undefined;
+    },
+    set(t, key, value) {
+      if (typeof key !== "string") {
+        return false;
+      }
+      const m = isBridgeMember(key) || POISON.has(key) ? null : membersIncludingOtherModules(key);
+      if (m === null || !m.properties.has(key)) {
+        throw new Error(`no static property ${key} on ${name()}`);
+      }
+      if (!m.writableProperties.has(key)) {
+        throw new Error(`${key} on ${name()} is read-only`);
+      }
+      setStaticProperty(metadataOf(t), key, value);
+      return true;
+    },
+    ownKeys() {
+      const m = members();
+      return [...new Set([...m.methods, ...m.properties, ...cases().keys(), ...nestedTypeNames()])];
+    },
+    getOwnPropertyDescriptor(_t, key) {
+      const writable = typeof key === "string" && members().writableProperties.has(key);
+      return { writable, configurable: true, enumerable: true };
+    },
+  });
+  rawState.set(proxy, rawState.get(target)!);
+  return proxy;
+}
+
 const wrappers = new Map<string, SwiftType>();
 
 function cachedWrapper<T extends SwiftType>(key: NativePointer, make: () => T): T {
@@ -693,11 +877,11 @@ function cachedWrapper<T extends SwiftType>(key: NativePointer, make: () => T): 
 function wrapperFromDescriptor(descriptor: ContextDescriptor): SwiftType {
   switch (descriptor.kind) {
     case ContextDescriptorKind.Class:
-      return new ClassType(descriptor);
+      return typeFacade(new ClassType(descriptor));
     case ContextDescriptorKind.Struct:
-      return new StructType(descriptor);
+      return typeFacade(new StructType(descriptor));
     case ContextDescriptorKind.Enum:
-      return new EnumType(descriptor);
+      return typeFacade(new EnumType(descriptor));
     default:
       throw new Error(`descriptor kind ${descriptor.kind} is not a type`);
   }
@@ -710,12 +894,12 @@ export function typeFromDescriptor(descriptor: ContextDescriptor): SwiftType {
 function wrapperFromMetadata(metadata: Metadata): SwiftType {
   switch (metadata.kind) {
     case MetadataKind.Struct:
-      return new StructType(metadata);
+      return typeFacade(new StructType(metadata));
     case MetadataKind.Enum:
     case MetadataKind.Optional:
-      return new EnumType(metadata);
+      return typeFacade(new EnumType(metadata));
     case MetadataKind.Class:
-      return new ClassType(metadata);
+      return typeFacade(new ClassType(metadata));
     case MetadataKind.Tuple:
       return new TupleType(metadata);
     case MetadataKind.Metatype:

@@ -12,7 +12,7 @@ import {
   lowerResolveOptions,
   enumerateMethods,
   enumerateProperties,
-  instanceMemberKindsInOtherModules,
+  memberKindsInOtherModules,
 } from "./method.js";
 import { typeName } from "./type-name.js";
 import { SwiftType } from "./swift-type.js";
@@ -171,7 +171,7 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
       return own;
     }
     searchedInOtherModules.add(key);
-    const found = instanceMemberKindsInOtherModules(fullName(), key);
+    const found = memberKindsInOtherModules(fullName(), key);
     if (found.method) {
       own.methods.add(key);
     }

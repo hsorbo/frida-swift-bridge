@@ -105,9 +105,10 @@ function rawMetadataStaysUnderAbi(type: SwiftType) {
   const descriptor: ContextDescriptor = descriptorOf(type);
   void [metadata, descriptor];
   // @ts-expect-error raw metadata stays under /abi metadataOf()
-  type.metadata;
+  const rawMetadata: Metadata = type.metadata;
   // @ts-expect-error raw descriptor stays under /abi descriptorOf()
-  type.descriptor;
+  const rawDescriptor: ContextDescriptor = type.descriptor;
+  void [rawMetadata, rawDescriptor];
 }
 
 function protocolRawInspectionStaysUnderAbi(p: Protocol, comp: ProtocolComposition) {

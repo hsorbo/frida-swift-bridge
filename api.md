@@ -163,8 +163,9 @@ several statically linked modules, and `libswiftCore` holds the module `Swift`.
 Touching `Swift.modules` scans nothing. A lookup reads type sections only until
 it finds the name. Listing keys, or looking up a module that doesn't exist,
 reads every loaded image's type sections. Printing a namespace (in the REPL, or
-through `JSON.stringify`) shows only its names and does not descend into them. Nested types are not reachable through
-the namespace yet; use `Swift.type("MyApp.Outer.Inner")`.
+through `JSON.stringify`) shows only its names and does not descend into them.
+A nested type hangs off its parent, so `Swift.modules.MyApp.Outer.Inner` is
+`Swift.type("MyApp.Outer.Inner")`.
 
 To walk a module's types without knowing their names, use the lazy generators.
 They yield descriptor-backed wrappers and don't parse a type you never touch:
@@ -181,10 +182,28 @@ span every loaded Swift image and reflect modules loaded later.
 
 ## Types
 
-Every wrapper extends `SwiftType`. The bridge's own members of a type are
-`$`-prefixed, like an object's controls, so they never collide with a Swift
-member of the same name; `init` is the one bare member, because it names
-Swift's initializer.
+Every wrapper extends `SwiftType`. A class, struct or enum wrapper is a facade
+like an [object](#objects-and-values): its Swift members answer to their bare
+names, and the bridge's own members are `$`-prefixed so they never collide
+with one. `init` is the one bare bridge member, because it names Swift's
+initializer.
+
+```js
+const Robot = Swift.modules.MyApp.Robot;
+Robot.make("Zed");            // type method
+Robot.fleetSize;              // static property; assignment writes a static var
+Swift.modules.MyApp.Suit.hearts;        // enum case
+Swift.modules.MyApp.Pick.value(42);     // enum case with a payload
+Swift.modules.MyApp.Outer.Inner;        // nested type
+```
+
+A name resolves when it is read, so touching a type scans nothing. A type
+method resolves by arity like an object's; the `$typeMethod` and `$get` forms
+below take the same names with explicit options. `Object.keys(type)` lists the
+defining module's type methods, static properties, cases and nested types;
+members other modules add resolve by name but are not listed. A Swift member
+named like a reserved JS method (`toString`, `toJSON`, `valueOf`,
+`hasOwnProperty`, `constructor`) stays reachable through `$call` and `$get`.
 
 - `type.$name`: the fully-qualified name, including every enclosing context
   (`MyApp.Outer.Inner`).
@@ -275,13 +294,17 @@ differ only in argument type — resolve explicitly with
 `.call(...)`.
 
 Structs — `StructType.$new(value)` (an alias for `$fromJS`) builds a value from a
-plain JS object; `EnumType.$case(name, payload?)` builds an enum case:
+plain JS object. Enum cases are members of the enum: a case without a payload
+is a value, a case with one is called with it. `EnumType.$case(name, payload?)`
+is the string-keyed form:
 
 ```js
 const rect = Swift.type("MyApp.Rect").$new({ width: 3, height: 4 });
 
-const empty = Swift.type("MyApp.Pick").$case("empty");
-const some  = Swift.type("MyApp.Pick").$case("value", 42);
+const Pick = Swift.type("MyApp.Pick");
+const empty = Pick.empty;
+const some  = Pick.value(42);
+Pick.$case("value", 42);         // the same, by name
 ```
 
 Value types also offer storage-oriented constructors that mirror the underlying
@@ -388,12 +411,15 @@ robot.$method("tally").origin;   // { kind: "protocolExtension", protocol: "Swif
 `module` is the image's name. An ambiguity error between extensions in
 different modules names each overload's module.
 
-Type methods are called on the type wrapper with `call`, or looked up with
-`$typeMethod(name, options)` for an explicit bound method:
+Type methods are called on the type wrapper by their bare name, or with
+`$call(name, ...args)`; `$typeMethod(name, options)` looks one up as an
+explicit bound method:
 
 ```js
-const made = Swift.type("MyApp.Robot").$call("make", "Zed");
+const Robot = Swift.type("MyApp.Robot");
+const made = Robot.make("Zed");
 made.greet("X");    // "Hello X, I am Zed"
+Robot.$call("make", "Zed");      // the same, by name
 
 const Int = Swift.type("Swift.Int");
 Int.$call("*", 6, 7);          // 42: operators are static methods; both operands are arguments
@@ -580,10 +606,14 @@ Swift.type("MyApp.Robot").$properties.map(p => p.name);   // ["name", "badge"]
 ```
 
 Static properties, including those a protocol extension provides, read through
-the type:
+the type by their bare name or with `$get`; assigning a static `var` runs its
+setter, and a `let` or a computed property without one throws:
 
 ```js
-Swift.type("MyApp.Robot").$get("fleetSize");   // 12
+const Robot = Swift.type("MyApp.Robot");
+Robot.fleetSize;              // 12
+Robot.$get("fleetSize");      // the same, by name
+Robot.fleetSize = 13;
 ```
 
 For direct access to a stored field's storage, `$field(name)` returns a live
