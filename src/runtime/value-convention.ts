@@ -1,6 +1,7 @@
 import { swiftExportsOfTokens } from "./symbol-index.js";
 import { demangle } from "./demangle.js";
 import { resolveType } from "./symbolication.js";
+import { SWIFTCC } from "./swiftcc.js";
 
 export type ValueConvention = "direct" | "indirect";
 
@@ -64,9 +65,9 @@ const MAX_PROBED = 8;
 // Frida crashes reading operands of lane-indexed SIMD instructions, so operands are only read for the
 // scalar mnemonics this scan interprets.
 const arm64: ArchProbe = {
-  selfRegister: "x20",
-  asyncContextRegister: "x22",
-  indirectResultRegister: "x8",
+  selfRegister: SWIFTCC.self,
+  asyncContextRegister: SWIFTCC.asyncContext,
+  indirectResultRegister: SWIFTCC.indirectResult,
   argumentRegisters: ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7"],
   calleeSavedRegisters: new Set(["x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28"]),
   trapMnemonics: new Set(["brk", "udf", "hlt"]),
@@ -130,9 +131,9 @@ const arm64: ArchProbe = {
 };
 
 const x64: ArchProbe = {
-  selfRegister: "r13",
-  asyncContextRegister: "r14",
-  indirectResultRegister: "rax",
+  selfRegister: SWIFTCC.self,
+  asyncContextRegister: SWIFTCC.asyncContext,
+  indirectResultRegister: SWIFTCC.indirectResult,
   argumentRegisters: ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"],
   calleeSavedRegisters: new Set(["rbx", "rbp", "r12", "r13", "r14", "r15"]),
   trapMnemonics: new Set(["ud0", "ud1", "ud2", "int3", "hlt"]),

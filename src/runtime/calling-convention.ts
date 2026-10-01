@@ -9,6 +9,7 @@ import { moduleKey, swiftExportsOfTokens } from "./symbol-index.js";
 import { demangle } from "./demangle.js";
 import { signCode } from "../basic/pac.js";
 import { probeValueConvention } from "./value-convention.js";
+import { FloatClass, GP_ARG_REGISTERS, FP_ARG_REGISTERS, SWIFTCC, putSseScalarMove } from "./swiftcc.js";
 
 const MAX_DIRECT_REGISTERS = 4;
 
@@ -149,7 +150,7 @@ export function shouldPassIndirectly(metadata: Metadata): boolean {
   return !metadata.valueWitnesses.isBitwiseTakable || registerCount(loweredScalars(metadata)) > MAX_DIRECT_REGISTERS;
 }
 
-export type FloatClass = "double" | "float";
+export type { FloatClass } from "./swiftcc.js";
 
 export function floatClass(metadata: Metadata): FloatClass | null {
   switch (typeName(metadata)) {
@@ -297,8 +298,6 @@ function singleCasePayload(metadata: Metadata): AggregateMember[] | null {
   return payload === null ? null : [{ type: payload, offset: 0 }];
 }
 
-const GP_ARG_REGISTERS = ARCH === "arm64" ? 8 : 6;
-const FP_ARG_REGISTERS = 8;
 // Darwin arm64 packs a stack-passed scalar at its own size and alignment; AAPCS64 and SysV x86-64
 // give each one an 8-byte slot.
 const PACKS_STACK_ARGS = ARCH === "arm64" && Process.platform === "darwin";
@@ -729,8 +728,6 @@ function writeArm64Trampoline(code: NativePointer, cfg: TrampolineConfig): void 
   });
 }
 
-const X86_RESULT_GP: X86Register[] = ["rax", "rdx", "rcx", "r8"];
-
 function writeX86Trampoline(code: NativePointer, cfg: TrampolineConfig): void {
   const savesContext = cfg.selfBuffer !== null || cfg.errorBuffer !== null;
 
@@ -769,9 +766,9 @@ function writeX86Trampoline(code: NativePointer, cfg: TrampolineConfig): void {
       writer.putMovRegAddress("r10", cfg.resultBuffer);
       for (const location of cfg.resultRegisters) {
         if (location.register === "gp") {
-          writer.putMovRegOffsetPtrReg("r10", frameOffset(location), X86_RESULT_GP[location.index]);
+          writer.putMovRegOffsetPtrReg("r10", frameOffset(location), SWIFTCC.gpResults[location.index] as X86Register);
         } else {
-          putFpStoreToR10(writer, "double", frameOffset(location), location.index);
+          putSseScalarMove(writer, "store", "double", location.index, "r10", frameOffset(location));
         }
       }
     }
@@ -787,10 +784,4 @@ function writeX86Trampoline(code: NativePointer, cfg: TrampolineConfig): void {
 
     writer.flush();
   });
-}
-
-// movss/movsd [r10+off], xmm<index> — X86Writer exposes no SSE store for an arbitrary base/register.
-function putFpStoreToR10(writer: X86Writer, cls: FloatClass, off: number, index: number): void {
-  const prefix = cls === "double" ? 0xf2 : 0xf3;
-  writer.putBytes([prefix, 0x41, 0x0f, 0x11, 0x42 | (index << 3), off & 0xff]);
 }

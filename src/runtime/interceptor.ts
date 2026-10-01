@@ -34,6 +34,7 @@ import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descrip
 import { typeName } from "./type-name.js";
 import { asSwiftObject } from "./object-facade.js";
 import { CallResult, SelfOwnership, witnessTableCount } from "./method.js";
+import { SWIFTCC, FP_ARG_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
 export type SwiftInvocationContext = InvocationContext & { self?: CallResult; typeArguments?: string[] };
 
@@ -359,7 +360,7 @@ function exposeSelf(invocation: SwiftInvocationContext, receiver: Receiver, addr
 }
 
 function selfRegister(context: CpuContext): NativePointer {
-  return gpName(context)[ARCH === "arm64" ? "x20" : "r13"];
+  return gpName(context)[SWIFTCC.self];
 }
 
 // Read before the hook patches the entry, as calls do (method.ts probedSelfOwnership).
@@ -398,8 +399,6 @@ function returnIsIndirect(ret: TypePlan | null): boolean {
 }
 
 const ARCH = Process.arch;
-const X64_GP_ARGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
-const X64_GP_RESULTS = ["rax", "rdx", "rcx", "r8"];
 
 const FP_HOOK_UNSUPPORTED =
   "hooking floating-point register arguments/returns is unsupported on x86-64 (no XMM in the CPU context)";
@@ -418,19 +417,16 @@ function gpName(context: CpuContext): Record<string, NativePointer> {
 }
 
 function gpArg(context: CpuContext, n: number): NativePointer {
-  if (ARCH === "arm64") {
-    return gpName(context)[`x${n}`];
-  }
-  return gpName(context)[X64_GP_ARGS[n]];
+  return gpName(context)[SWIFTCC.gpArgs[n]];
 }
 
 function gpResult(context: CpuContext, n: number): NativePointer {
-  return gpName(context)[ARCH === "arm64" ? `x${n}` : X64_GP_RESULTS[n]];
+  return gpName(context)[SWIFTCC.gpResults[n]];
 }
 
 function fpArg(context: CpuContext, n: number, cls: "double" | "float"): number {
   if (ARCH === "arm64") {
-    return (context as unknown as Record<string, number>)[`${cls === "double" ? "d" : "s"}${n}`];
+    return (context as unknown as Record<string, number>)[SWIFTCC.fpArg(cls, n)];
   }
   return readXmm(context, n, cls);
 }
@@ -493,7 +489,7 @@ function writeRegisterScalar(
 
 function fpResult(context: CpuContext, n: number, cls: "double" | "float"): number {
   if (ARCH === "arm64") {
-    return (context as unknown as Record<string, number>)[`${cls === "double" ? "d" : "s"}${n}`];
+    return (context as unknown as Record<string, number>)[SWIFTCC.fpArg(cls, n)];
   }
   // async completion exposes spilled xmm via `xmmSpill`; a sync hook reads the live CpuContext.
   const spill = (context as unknown as { xmmSpill?: NativePointer }).xmmSpill;
@@ -504,17 +500,16 @@ function fpResult(context: CpuContext, n: number, cls: "double" | "float"): numb
   return cls === "double" ? at.readDouble() : at.readFloat();
 }
 
-// arm64 carries the indirect-result pointer in x8 and the thrown error in x21; x86-64 swiftcc uses rax / r12.
 function indirectResultRegister(context: CpuContext): NativePointer {
-  return ARCH === "arm64" ? gpName(context).x8 : gpName(context).rax;
+  return gpName(context)[SWIFTCC.indirectResult];
 }
 
 function errorRegister(context: CpuContext): NativePointer {
-  return ARCH === "arm64" ? gpName(context).x21 : gpName(context).r12;
+  return gpName(context)[SWIFTCC.error];
 }
 
 function asyncContextRegister(context: CpuContext): NativePointer {
-  return ARCH === "arm64" ? gpName(context).x22 : gpName(context).r14;
+  return gpName(context)[SWIFTCC.asyncContext];
 }
 
 function words(metadata: Metadata): number {
@@ -791,36 +786,34 @@ const X64_SPILL_ERROR = 0x70;
 const X64_SPILL_SIZE = 0x80;
 
 function spillContext(spillPtr: NativePointer, asyncContext: NativePointer): CpuContext {
+  const ctx: Record<string, NativePointer | number> = {};
   if (ARCH === "arm64") {
-    const ctx: Record<string, NativePointer | number> = {};
-    for (let i = 0; i < 8; i++) {
-      ctx[`x${i}`] = spillPtr.add(i * 8).readPointer();
-    }
-    for (let i = 0; i < 8; i++) {
+    SWIFTCC.gpArgs.forEach((reg, i) => {
+      ctx[reg] = spillPtr.add(i * 8).readPointer();
+    });
+    for (let i = 0; i < FP_ARG_REGISTERS; i++) {
       const at = spillPtr.add(0x40 + i * 8);
-      ctx[`d${i}`] = at.readDouble();
-      ctx[`s${i}`] = at.readFloat();
+      ctx[SWIFTCC.fpArg("double", i)] = at.readDouble();
+      ctx[SWIFTCC.fpArg("float", i)] = at.readFloat();
     }
-    ctx.x20 = spillPtr.add(0x80).readPointer();
-    ctx.x22 = asyncContext;
+    ctx[SWIFTCC.self] = spillPtr.add(0x80).readPointer();
+    ctx[SWIFTCC.asyncContext] = asyncContext;
     return ctx as unknown as CpuContext;
   }
   // The resume delivers results in the argument registers; remap them onto the sync result-register
   // names so materializeReturn is shared with the sync path.
-  const ctx: Record<string, NativePointer | number> = {};
-  ctx.rax = spillPtr.add(0x00).readPointer(); // rdi
-  ctx.rdx = spillPtr.add(0x08).readPointer(); // rsi
-  ctx.rcx = spillPtr.add(0x10).readPointer(); // rdx
-  ctx.r8 = spillPtr.add(0x18).readPointer(); // rcx
-  ctx.r13 = spillPtr.add(X64_SPILL_ERROR).readPointer(); // error
-  ctx.r14 = asyncContext;
+  SWIFTCC.gpResults.forEach((reg, i) => {
+    ctx[reg] = spillPtr.add(i * 8).readPointer();
+  });
+  ctx[SWIFTCC.self] = spillPtr.add(X64_SPILL_ERROR).readPointer(); // error
+  ctx[SWIFTCC.asyncContext] = asyncContext;
   (ctx as unknown as { xmmSpill: NativePointer }).xmmSpill = spillPtr.add(X64_SPILL_XMM);
   return ctx as unknown as CpuContext;
 }
 
 // On the resume, the thrown error rides swiftself (x20 / r13).
 function completionErrorValue(context: CpuContext): NativePointer {
-  return ARCH === "arm64" ? gpName(context).x20 : gpName(context).r13;
+  return gpName(context)[SWIFTCC.self];
 }
 
 function fireCompletion(entry: CompletionEntry, context: CpuContext, self: InvocationContext): void {
@@ -901,15 +894,7 @@ function writeArm64CompletionTrampoline(slot: NativePointer, pc: NativePointer):
   w.flush();
 }
 
-const X64_RESULT_ARG_REGS: X86Register[] = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
-
-// Hand-encoded movsd to/from [rsp+off]; the rsp base needs a SIB byte (0x24).
-function putXmmStoreToRsp(w: X86Writer, off: number, index: number): void {
-  w.putBytes([0xf2, 0x0f, 0x11, 0x44 | (index << 3), 0x24, off & 0xff]);
-}
-function putXmmLoadFromRsp(w: X86Writer, index: number, off: number): void {
-  w.putBytes([0xf2, 0x0f, 0x10, 0x44 | (index << 3), 0x24, off & 0xff]);
-}
+const X64_RESULT_ARG_REGS = SWIFTCC.gpArgs as X86Register[];
 
 // r13/r14 are callee-saved so the bridge preserves them; caller-saved result regs are spilled/restored.
 function writeX64CompletionTrampoline(slot: NativePointer, pc: NativePointer): void {
@@ -918,7 +903,7 @@ function writeX64CompletionTrampoline(slot: NativePointer, pc: NativePointer): v
   w.putSubRegImm("rsp", X64_SPILL_SIZE);
   X64_RESULT_ARG_REGS.forEach((r, i) => w.putMovRegOffsetPtrReg("rsp", i * 8, r));
   for (let k = 0; k < 8; k++) {
-    putXmmStoreToRsp(w, X64_SPILL_XMM + k * 8, k);
+    putSseScalarMove(w, "store", "double", k, "rsp", X64_SPILL_XMM + k * 8);
   }
   w.putMovRegOffsetPtrReg("rsp", X64_SPILL_ERROR, "r13");
   w.putMovRegReg("rdi", "r14"); // bridge(asyncContext, spillPtr)
@@ -928,7 +913,7 @@ function writeX64CompletionTrampoline(slot: NativePointer, pc: NativePointer): v
   w.putMovRegReg("r11", "rax"); // r11 = original ResumeParent
   X64_RESULT_ARG_REGS.forEach((r, i) => w.putMovRegRegOffsetPtr(r, "rsp", i * 8));
   for (let k = 0; k < 8; k++) {
-    putXmmLoadFromRsp(w, k, X64_SPILL_XMM + k * 8);
+    putSseScalarMove(w, "load", "double", k, "rsp", X64_SPILL_XMM + k * 8);
   }
   w.putAddRegImm("rsp", X64_SPILL_SIZE);
   w.putPopReg("rbp");

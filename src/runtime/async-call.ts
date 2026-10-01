@@ -4,6 +4,9 @@ import { SwiftError } from "./thrown-error.js";
 import { LIBSWIFT_CORE_NAME, SWIFT_HOST_SUPPORTED } from "./platform.js";
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
 import type { LoweredScalar, RegisterLocation } from "./calling-convention.js";
+import { FloatClass, SWIFTCC, GP_ARG_REGISTERS, GP_RESULT_REGISTERS, FP_RESULT_REGISTERS, putSseScalarMove } from "./swiftcc.js";
+
+export type { FloatClass };
 
 const OFFSETOF_PARENT = 0;
 const OFFSETOF_RESUME_PARENT = Process.pointerSize;
@@ -14,13 +17,13 @@ const ASYNC_CONTEXT_RESUME = 0xd707;
 
 // The continuation is entered as ResumeParent(context, results...), so results ride the argument
 // registers, not the sync-return registers; error rides swiftself (x20 / r13), context is x22 / r14.
-const ARG_REGS_ARM64 = ["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"] as Arm64Register[];
-const GP_RESULT_REGS_ARM64 = ["x0", "x1", "x2", "x3"] as Arm64Register[];
-const ARG_REGS_X64 = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"] as X86Register[];
-const GP_RESULT_REGS_X64 = ["rdi", "rsi", "rdx", "rcx"] as X86Register[];
-const NUM_ARG_REGS = ARCH === "arm64" ? ARG_REGS_ARM64.length : ARG_REGS_X64.length;
-const NUM_GP_RESULT_REGS = 4;
-const NUM_FP_RESULT_REGS = 4;
+const ARG_REGS_ARM64 = SWIFTCC.gpArgs as Arm64Register[];
+const ARG_REGS_X64 = SWIFTCC.gpArgs as X86Register[];
+const GP_RESULT_REGS_ARM64 = ARG_REGS_ARM64.slice(0, GP_RESULT_REGISTERS);
+const GP_RESULT_REGS_X64 = ARG_REGS_X64.slice(0, GP_RESULT_REGISTERS);
+const NUM_ARG_REGS = GP_ARG_REGISTERS;
+const NUM_GP_RESULT_REGS = GP_RESULT_REGISTERS;
+const NUM_FP_RESULT_REGS = FP_RESULT_REGISTERS;
 const MAX_FLOAT_REGS = 8;
 
 const COPY_TASK_LOCALS = 1 << 10;
@@ -31,8 +34,6 @@ const MAX_STACK_WORD_CODE_SIZE = 24;
 const DEFAULT_TIMEOUT_MS = 1000;
 const DISPATCH_TIME_FOREVER = uint64("0xffffffffffffffff");
 const POLL_INTERVAL_MS = 5;
-
-export type FloatClass = "double" | "float";
 
 export interface PlacedResultScalar {
   scalar: LoweredScalar;
@@ -105,7 +106,7 @@ export function currentAsyncTask(): AsyncTask | null {
 }
 
 function fpReg(cls: FloatClass, i: number): Arm64Register {
-  return `${cls === "double" ? "d" : "s"}${i}` as Arm64Register;
+  return SWIFTCC.fpArg(cls, i) as Arm64Register;
 }
 
 function fpStride(cls: FloatClass): number {
@@ -346,17 +347,6 @@ function writeArm64Operation(slot: NativePointer, pc: NativePointer, o: Operatio
   w.flush();
 }
 
-// X86Writer has no SSE moves; hand-encode movsd/movss for an arbitrary base register.
-function putFpLoadFromR11(w: X86Writer, cls: FloatClass, index: number): void {
-  const prefix = cls === "double" ? 0xf2 : 0xf3;
-  w.putBytes([prefix, 0x41, 0x0f, 0x10, 0x03 | (index << 3)]);
-}
-
-function putFpStoreToR10(w: X86Writer, cls: FloatClass, off: number, index: number): void {
-  const prefix = cls === "double" ? 0xf2 : 0xf3;
-  w.putBytes([prefix, 0x41, 0x0f, 0x11, 0x42 | (index << 3), off & 0xff]);
-}
-
 function writeX64Continuation(slot: NativePointer, pc: NativePointer, c: ContinuationCtx): void {
   const w = new X86Writer(slot, { pc });
   w.putPushReg("r15"); // callee-saved: carries the parent context across the call, and 16-aligns rsp
@@ -368,7 +358,7 @@ function writeX64Continuation(slot: NativePointer, pc: NativePointer, c: Continu
   } else if (c.shape.kind === "float") {
     w.putMovRegAddress("r10", c.result);
     for (let i = 0; i < c.shape.count; i++) {
-      putFpStoreToR10(w, c.shape.cls, i * fpStride(c.shape.cls), i);
+      putSseScalarMove(w, "store", c.shape.cls, i, "r10", i * fpStride(c.shape.cls));
     }
   } else if (c.shape.kind === "scalars") {
     w.putMovRegAddress("r10", c.result);
@@ -376,7 +366,7 @@ function writeX64Continuation(slot: NativePointer, pc: NativePointer, c: Continu
       w.putMovRegOffsetPtrReg("r10", resultRegisterSlot({ register: "gp", index: i }), GP_RESULT_REGS_X64[i]);
     }
     for (let i = 0; i < NUM_FP_RESULT_REGS; i++) {
-      putFpStoreToR10(w, "double", resultRegisterSlot({ register: "fp", index: i }), i);
+      putSseScalarMove(w, "store", "double", i, "r10", resultRegisterSlot({ register: "fp", index: i }));
     }
   }
   if (c.throws) {
@@ -419,7 +409,7 @@ function writeX64Operation(slot: NativePointer, pc: NativePointer, o: OperationC
   o.args.forEach((a, i) => w.putMovRegAddress(ARG_REGS_X64[o.gpBase + i], a));
   o.floatArgs.forEach((fa, i) => {
     w.putMovRegAddress("r11", fa.bytes);
-    putFpLoadFromR11(w, fa.cls, i);
+    putSseScalarMove(w, "load", fa.cls, i, "r11", 0);
   });
   if (o.receiver !== undefined) {
     w.putMovRegAddress("r13", o.receiver); // swiftself
