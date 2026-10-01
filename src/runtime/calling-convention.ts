@@ -5,7 +5,7 @@ import { enumerateTupleElements } from "../abi/tuple.js";
 import { SwiftError } from "./thrown-error.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { ContextDescriptorKind } from "../abi/context-descriptor.js";
-import { exportsByPrefix } from "./export-trie.js";
+import { moduleKey, swiftExportsOfTokens } from "./symbol-index.js";
 import { demangle } from "./demangle.js";
 import { signCode } from "../basic/pac.js";
 import { probeValueConvention } from "./value-convention.js";
@@ -115,7 +115,7 @@ function isResilientNominal(metadata: Metadata): boolean {
 
 function exportsOwnEnumCase(image: Module, token: string, fullName: string): boolean {
   const ownCase = `enum case for ${fullName}.`;
-  return exportsByPrefix(image, [`$s${token}`])[0].some((e) => {
+  return swiftExportsOfTokens(image, [token])[0].some((e) => {
     if (!e.name.endsWith("WC")) {
       return false;
     }
@@ -127,7 +127,7 @@ function exportsOwnEnumCase(image: Module, token: string, fullName: string): boo
 const libraryEvolutionImages = new Map<string, boolean>();
 
 function isLibraryEvolutionImage(image: Module): boolean {
-  const key = `${image.path}@${image.base}`;
+  const key = moduleKey(image);
   let known = libraryEvolutionImages.get(key);
   if (known === undefined) {
     known = image

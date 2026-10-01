@@ -3,12 +3,21 @@ import {
   getSwiftSection,
   enumerateTypeContextDescriptors,
 } from "../image/sections.js";
+import { moduleKey } from "../runtime/symbol-index.js";
 
 const SWIFT_SECTIONS = ["__swift5_types", "__swift5_proto", "__swift5_protos", "__swift5_types2"];
 
+const hasSwiftSections = new Map<string, boolean>();
+
 export function* enumerateSwiftModules(): Generator<Module> {
   for (const module of Process.enumerateModules()) {
-    if (SWIFT_SECTIONS.some((name) => getSwiftSection(module, name) !== null)) {
+    const key = moduleKey(module);
+    let present = hasSwiftSections.get(key);
+    if (present === undefined) {
+      present = SWIFT_SECTIONS.some((name) => getSwiftSection(module, name) !== null);
+      hasSwiftSections.set(key, present);
+    }
+    if (present) {
       yield module;
     }
   }

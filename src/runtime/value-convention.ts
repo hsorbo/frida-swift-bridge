@@ -1,4 +1,4 @@
-import { exportsByPrefix } from "./export-trie.js";
+import { swiftExportsOfTokens } from "./symbol-index.js";
 import { demangle } from "./demangle.js";
 import { resolveType } from "./symbolication.js";
 
@@ -257,7 +257,7 @@ function demangledTypeName(token: string): string | null {
 }
 
 function ownMembers(image: Module, token: string): OwnMember[] {
-  return exportsByPrefix(image, [`$s${token}`])[0].map((e) => ({ ...e, demangled: demangle(e.name) ?? "" }));
+  return swiftExportsOfTokens(image, [token])[0].map((e) => ({ ...e, demangled: demangle(e.name) ?? "" }));
 }
 
 function instanceGetters(members: OwnMember[], fullName: string): Getter[] {

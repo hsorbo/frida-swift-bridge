@@ -59,7 +59,8 @@ import {
   compareProtocolDescriptors,
   getExistentialTypeMetadata,
 } from "../abi/existential.js";
-import { exportsByPrefix, PrefixedExport } from "./export-trie.js";
+import { PrefixedExport } from "./export-trie.js";
+import { moduleKey, swiftExportsOfTokens, hasSwiftSymbolWithPrefix, initializerSymbols, initializerSymbolsWithPrefix } from "./symbol-index.js";
 import {
   findProtocol,
   conformsToProtocol,
@@ -590,20 +591,9 @@ function provenToken(fullName: string, descriptor: ContextDescriptor, owner: Mod
 }
 
 function carriesToken(module: Module, token: string): boolean {
-  for (const e of module.enumerateExports()) {
-    if (e.name.includes(token)) {
-      return true;
-    }
-  }
-  for (const s of module.enumerateSymbols()) {
-    if (s.name.includes(token)) {
-      return true;
-    }
-  }
-  return false;
+  return swiftExportsOfTokens(module, [token])[0].length > 0 || hasSwiftSymbolWithPrefix(module, `$s${token}`);
 }
 
-const exportScans = new Map<string, ModuleExportScan>();
 const foreignScans = new Map<string, TypeMembers>();
 
 type SymbolFilter = (symbol: string) => boolean;
@@ -640,49 +630,23 @@ interface MemberTarget {
   withConstrainedExtensions: boolean;
 }
 
-interface ModuleExportScan {
-  scannedTokens: Set<string>;
-  exportsByToken: Map<string, PrefixedExport[]>;
-}
-
-// Only the tokens a module actually exports under are kept, so the common "nothing here" answer
-// costs one set lookup per target and allocates nothing.
 function forEachExportedMembers(
   module: Module,
   targets: MemberTarget[],
   mayName: SymbolFilter | null,
   visit: (targetIndex: number, members: TypeMembers) => void
 ): void {
-  const moduleKey = `${module.path}@${module.base}`;
-  let scan = exportScans.get(moduleKey);
-  if (scan === undefined) {
-    scan = { scannedTokens: new Set(), exportsByToken: new Map() };
-    exportScans.set(moduleKey, scan);
-  }
-  const { scannedTokens, exportsByToken } = scan;
-  const pending = targets.filter((t) => !scannedTokens.has(t.token));
-  if (pending.length > 0) {
-    const found = exportsByPrefix(module, pending.map((t) => `$s${t.token}`));
-    pending.forEach((target, i) => {
-      scannedTokens.add(target.token);
-      if (found[i].length > 0) {
-        exportsByToken.set(target.token, found[i]);
-      }
-    });
-  }
-  if (exportsByToken.size === 0) {
-    return;
-  }
+  const found = swiftExportsOfTokens(module, targets.map((t) => t.token));
   targets.forEach((target, i) => {
-    const exports = exportsByToken.get(target.token);
-    if (exports === undefined) {
+    const exports = found[i];
+    if (exports.length === 0) {
       return;
     }
     if (mayName !== null) {
       visit(i, membersAmong(exports.filter((e) => mayName(e.name)), target));
       return;
     }
-    const key = `${moduleKey}|${target.token}`;
+    const key = `${moduleKey(module)}|${target.token}`;
     let members = foreignScans.get(key);
     if (members === undefined) {
       members = membersAmong(exports, target);
@@ -814,40 +778,28 @@ function definingModuleMembers(fullName: string): TypeMembers {
     throw new Error(`no module owns ${fullName}`);
   }
   const token = mangledTypeToken(descriptor);
-  let members = scanMembers([module], fullName, token, true);
+  let members = scanMembers(module, fullName, token);
   if (token !== null && members.methods.length === 0 && members.accessors.length === 0) {
-    members = scanMembers([module], fullName, null, true);
+    members = scanMembers(module, fullName, null);
   }
   tableCache.set(fullName, members);
   return members;
 }
 
-function scanMembers(
-  modules: Module[],
-  fullName: string,
-  token: string | null,
-  withSymbols: boolean
-): TypeMembers {
+function scanMembers(module: Module, fullName: string, token: string | null): TypeMembers {
   const members: TypeMembers = { methods: [], accessors: [] };
   const seen = new Set<string>();
+  const prefix = token === null ? null : `$s${token}`;
   // initsOnly restricts the symbol-table pass to initializers: value-type inits are omitted from the
   // export trie in non-library-evolution builds, but regular non-exported methods stay reachable only
   // via the vtable, not the symbol route. The export trie carries everything else.
-  const consider = (name: string, address: NativePointer, initsOnly: boolean): void => {
-    if (token === null || name.includes(token)) {
-      considerMember(members, seen, fullName, name, address, initsOnly, false);
-    }
-  };
-  for (const module of modules) {
-    for (const e of module.enumerateExports()) {
-      consider(e.name, e.address, false);
-    }
-    if (!withSymbols) {
-      continue;
-    }
-    for (const s of module.enumerateSymbols()) {
-      consider(s.name, s.address, true);
-    }
+  const exports = token === null ? module.enumerateExports() : swiftExportsOfTokens(module, [token])[0];
+  for (const e of exports) {
+    considerMember(members, seen, fullName, e.name, e.address, false, false);
+  }
+  const initializers = prefix === null ? initializerSymbols(module) : initializerSymbolsWithPrefix(module, prefix);
+  for (const s of initializers) {
+    considerMember(members, seen, fullName, s.name, s.address, true, false);
   }
   return members;
 }
