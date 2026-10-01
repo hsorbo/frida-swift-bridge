@@ -1145,6 +1145,7 @@ public struct Keyed<T> {
     public init(_ value: T) { self.value = value }
     public static func echo(_ x: T) -> T { x }
     public static func first<U>(_ u: U, _ x: T) -> U { u }
+    public static func label(_ n: Int) -> Int { n }
     public func get() -> T { value }
     public func paired<U>(_ u: U) -> T { value }
 }
@@ -1153,6 +1154,7 @@ public class KeyedHolder<T> {
     public init(_ value: T) { self.value = value }
     public func paired<U>(_ u: U) -> U { u }
     public class func make(_ value: T) -> KeyedHolder<T> { KeyedHolder(value) }
+    public class func label(_ n: Int) -> Int { n }
 }
 public func cellPaired<T, U>(_ cell: Cell<T>, _ u: U) -> U { u }
 public func driveKeyed() -> Int {
@@ -1162,6 +1164,8 @@ public func driveKeyed() -> Int {
     _ = keyed.get()
     _ = keyed.paired(8)
     _ = KeyedHolder<String>.make("e").paired(9)
+    _ = Keyed<String>.label(11)
+    _ = KeyedHolder<String>.label(12)
     return cellPaired(Cell("f"), 10)
 }
 public final class LabeledHolder: GenericHolder<Int> {

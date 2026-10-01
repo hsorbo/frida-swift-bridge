@@ -167,6 +167,9 @@ export class SwiftType {
 
 export class ValueType extends SwiftType {
   method(name: string, options: MethodResolveOptions = {}): SwiftBoundMethod {
+    if (isUnboundGeneric(this)) {
+      return unboundGenericMethod(this.name, name, lowerResolveOptions({ ...options, static: true }));
+    }
     return narrowBoundMethod(bindStaticMethod(metadataOf(this), name, lowerResolveOptions(options)));
   }
 
@@ -390,6 +393,9 @@ export class ClassType extends SwiftType {
 
   method(name: string, options: MethodResolveOptions = {}): SwiftBoundMethod {
     const raw = lowerResolveOptions({ ...options, static: true });
+    if (isUnboundGeneric(this)) {
+      return unboundGenericMethod(this.fullName, name, raw);
+    }
     const resolved = findMethod(this.fullName, name, raw);
     const selfMetadata = metadataOf(this).handle;
     if (resolved === null) {
@@ -523,6 +529,32 @@ export function descriptorOf(type: SwiftType): ContextDescriptor {
 
 function backingDescriptorOf(type: SwiftType): ContextDescriptor | null {
   return rawState.get(type)!.descriptor;
+}
+
+// A generic type named without its arguments has a descriptor but no metadata.
+function isUnboundGeneric(type: SwiftType): boolean {
+  const state = rawState.get(type)!;
+  return state.metadata === null && state.descriptor !== null && state.descriptor.isGeneric;
+}
+
+// Every specialization shares a member's unspecialized code, so it is found (and hookable) without
+// type arguments; calling it would need them as self metadata, so call refuses rather than guess.
+function unboundGenericMethod(
+  typeName: string,
+  name: string,
+  options: ReturnType<typeof lowerResolveOptions>
+): SwiftBoundMethod {
+  const resolved = findMethod(typeName, name, options);
+  if (resolved === null) {
+    throw new Error(`no method ${name} on ${typeName}`);
+  }
+  return {
+    address: resolved.address,
+    origin: resolved.origin!,
+    call: () => {
+      throw new Error(`${typeName}.${resolved.selector} needs ${typeName}'s type arguments`);
+    },
+  };
 }
 
 function metadataDescriptorOf(type: SwiftType): ContextDescriptor {

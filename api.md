@@ -787,6 +787,20 @@ Swift.Interceptor.attach(deriveKey, {
 });
 ```
 
+A hook on a static member of a generic type doesn't need the mangled name. Every
+specialization shares the member's unspecialized code, so the type named without
+its arguments still hands out the address. The hook fires for every `H`, and
+`this.typeArguments` says which. Calling needs the type arguments, so `call`
+throws instead:
+
+```js
+const deriveKey = Swift.struct("CryptoKit.HKDF")
+    .method("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
+
+Swift.Interceptor.attach(deriveKey.address, { /* ... */ });
+deriveKey.call(key, 32);   // throws: "... needs CryptoKit.HKDF's type arguments"
+```
+
 A non-mutating method of a generic struct whose layout doesn't depend on its
 type arguments passes `self` by value ahead of them, where the bridge can't find
 them. Decoding its arguments throws at `attach`, and reading

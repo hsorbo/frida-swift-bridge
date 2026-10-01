@@ -54,4 +54,15 @@ describe("resilience in Apple frameworks", () => {
     const data = Swift.struct("Foundation.Data")!.init({ count: 4 })!;
     expect(data.count).toEqual(int64(4));
   });
+
+  test("a static of a generic framework type resolves by name without its type arguments", (ctx) => {
+    requireDarwin(ctx);
+    loadCryptoKit();
+
+    const deriveKey = Swift.struct("CryptoKit.HKDF")!.method("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
+    const exported = Process.getModuleByName("CryptoKit").getExportByName(
+      "$s9CryptoKit4HKDFV9deriveKey05inputE8Material15outputByteCountAA09SymmetricE0VAH_SitFZ"
+    );
+    expect(deriveKey.address.equals(exported.strip())).toBe(true);
+  });
 });

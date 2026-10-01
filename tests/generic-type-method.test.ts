@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture } from "./fixtures/load.js";
+import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
 import { ValueInstance, Metadata, ClassInstance, metadataFor } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
@@ -113,5 +113,45 @@ describe("async methods on a generic value type", () => {
   test("an async return of the type parameter T decodes via Self metadata's type argument", async () => {
     const Int = metadataFor("Swift.Int")!;
     expect(await constrainedBox(Int, 9).method("storedAsync").call()).toEqual(int64(9));
+  });
+});
+
+describe("members of a generic type named without its type arguments", () => {
+  beforeEach(() => { loadFixture(); });
+
+  // The implementation, not a dispatch thunk or method descriptor that also mentions the selector.
+  function implementation(prefix: string): NativePointer {
+    const e = [...loadFixture().enumerateExports()].find((x) => Swift.demangle(x.name)?.startsWith(prefix) === true);
+    if (e === undefined) {
+      throw new Error(`no export ${prefix}`);
+    }
+    return e.address.strip();
+  }
+
+  test("a static of a generic struct resolves to its shared code, hookable but not callable", () => {
+    const label = Swift.struct("fixture.Keyed")!.method("label");
+    expect(label.address.equals(implementation("static fixture.Keyed.label("))).toBe(true);
+    expect(() => label.call(1)).toThrow(/fixture\.Keyed\.label\(_:\) needs fixture\.Keyed's type arguments/);
+  });
+
+  test("a class func of a generic class resolves the same way", () => {
+    const label = Swift.class("fixture.KeyedHolder")!.method("label");
+    expect(label.address.equals(implementation("static fixture.KeyedHolder.label("))).toBe(true);
+    expect(() => label.call(1)).toThrow(/fixture\.KeyedHolder\.label\(_:\) needs fixture\.KeyedHolder's type arguments/);
+  });
+
+  test("a hook on that address sees each call's type arguments", () => {
+    const seen: string[][] = [];
+    const listener = Swift.Interceptor.attach(Swift.struct("fixture.Keyed")!.method("label").address, {
+      onEnter(args) {
+        seen.push([...this.typeArguments!, String(args[0])]);
+      },
+    });
+    try {
+      makeSwiftNativeFunction(fixtureExport("fixture.driveKeyed"), metadataFor("Swift.Int")!, [])();
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual([["Swift.String", "11"]]);
   });
 });
