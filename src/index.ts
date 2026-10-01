@@ -69,6 +69,7 @@ export type {
 } from "./runtime/protocol.js";
 export {
   SwiftType,
+  TypeKind,
   NominalType,
   ValueType,
   StructType,

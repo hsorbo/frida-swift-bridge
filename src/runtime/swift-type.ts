@@ -65,7 +65,20 @@ export interface SwiftInstanceMethod {
   bind(receiver: SwiftObject): SwiftBoundMethod;
 }
 
-function typeKindName(metadata: Metadata): string {
+export type TypeKind =
+  | "class"
+  | "struct"
+  | "enum"
+  | "tuple"
+  | "metatype"
+  | "function"
+  | "existential"
+  | "objc-class"
+  | "foreign-class"
+  | "foreign-reference"
+  | "type";
+
+function typeKindName(metadata: Metadata): TypeKind {
   switch (metadata.kind) {
     case MetadataKind.Class:
       return "class";
@@ -141,7 +154,7 @@ export class SwiftType {
     return { kind: this.$kind, name: this.$name, module: this.jsonModule() };
   }
 
-  get $kind(): string {
+  get $kind(): TypeKind {
     switch (backingDescriptorOf(this)?.kind) {
       case ContextDescriptorKind.Class:
         return "class";
