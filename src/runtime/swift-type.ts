@@ -5,7 +5,7 @@ import { isActor, isDefaultActor } from "../abi/class-descriptor.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
-import { parseSwiftSignature, symbolicate, splitParamConvention, ParamConvention } from "./symbolication.js";
+import { parseSwiftSignature, symbolicate, ParamConvention } from "./symbolication.js";
 import {
   SwiftBoundMethod,
   CallArg,
@@ -435,7 +435,7 @@ function concreteMetadataOf(type: NativeFunctionType, role: string): Metadata {
 function paramConventionsAt(address: NativePointer): ParamConvention[] {
   const symbol = symbolicate(address);
   const parsed = symbol === null ? null : parseSwiftSignature(symbol.demangled);
-  return parsed !== null && parsed.kind === "function" ? parsed.argTypeNames.map((n) => splitParamConvention(n).convention) : [];
+  return parsed !== null && parsed.kind === "function" ? parsed.params.map((p) => p.convention) : [];
 }
 
 export function swiftFunction(

@@ -91,7 +91,7 @@ describe("Swift.function", () => {
 
   test("rejects a symbol whose context is not a type: a dispatch thunk", () => {
     expect(() => Swift.function(loadResilient(), RESILIENT_BASE_GREETING_DISPATCH_THUNK)).toThrow(
-      /greeting\(\): cannot resolve receiver type dispatch thunk of resilient\.ResilientBase/
+      /cannot parse a function signature from dispatch thunk of resilient\.ResilientBase\.greeting/
     );
   });
 

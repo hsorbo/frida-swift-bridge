@@ -5,7 +5,7 @@ import { requireDarwin } from "./swift.js";
 import { Swift } from "../src/index.js";
 import {
   parseSwiftSignature,
-  parseFunctionTypeSpelling,
+  parseTypeExpr,
   symbolicate,
   resolveFunctionSignature,
   resolveType,
@@ -144,23 +144,21 @@ describe("parseSwiftSignature", () => {
   });
 });
 
-describe("parseFunctionTypeSpelling", () => {
+describe("parseTypeExpr function types", () => {
   test("splits a closure type into params and result", () => {
-    expect(parseFunctionTypeSpelling("(Swift.UnsafeRawBufferPointer) throws -> A")).toEqual({
-      params: ["Swift.UnsafeRawBufferPointer"],
-      result: "A",
-      throws: true,
-    });
-    expect(parseFunctionTypeSpelling("(Swift.Int) -> Swift.Bool")).toEqual({
-      params: ["Swift.Int"],
-      result: "Swift.Bool",
-      throws: false,
-    });
+    const throwing = parseTypeExpr("(Swift.UnsafeRawBufferPointer) throws -> A")!;
+    expect(throwing.kind).toBe("function");
+    if (throwing.kind !== "function") return;
+    expect(throwing.params.map((p) => p.type.text)).toEqual(["Swift.UnsafeRawBufferPointer"]);
+    expect(throwing.result.text).toBe("A");
+    expect(throwing.throws).toBe(true);
+    const plain = parseTypeExpr("(Swift.Int) -> Swift.Bool")!;
+    expect(plain.kind === "function" && !plain.throws && plain.result.text === "Swift.Bool").toBe(true);
   });
 
-  test("returns null for a non-function type", () => {
-    expect(parseFunctionTypeSpelling("Swift.Int")).toBeNull();
-    expect(parseFunctionTypeSpelling("(Swift.Int, Swift.Int)")).toBeNull();
+  test("reads a non-function type as something else", () => {
+    expect(parseTypeExpr("Swift.Int")!.kind).toBe("nominal");
+    expect(parseTypeExpr("(Swift.Int, Swift.Int)")!.kind).toBe("tuple");
   });
 });
 

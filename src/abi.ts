@@ -184,11 +184,14 @@ export {
 export { SwiftError } from "./runtime/thrown-error.js";
 export { readString } from "./abi/string.js";
 export {
+  TypeExpr,
+  TypeExprParam,
   SwiftFunctionSignature,
   GenericRequirement,
   SwiftAccessorSignature,
   ParsedSwiftSignature,
   ResolvedFunctionSignature,
+  parseTypeExpr,
   parseSwiftSignature,
   resolveFunctionSignature,
   resolveType,

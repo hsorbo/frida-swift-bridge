@@ -21,15 +21,13 @@ import { AsyncContext } from "../abi/async-context.js";
 import {
   symbolicate,
   parseSwiftSignature,
-  resolveTypeExpr,
+  resolveParsedType,
   hasOpaqueLayout,
-  parseFunctionTypeSpelling,
-  splitBoundTypeName,
-  splitParamConvention,
-  splitTopLevel,
-  REFERENCE_CONTAINERS,
+  isSingleReference,
+  mentionsParam,
   resolveType,
   SwiftFunctionSignature,
+  TypeExpr,
 } from "./symbolication.js";
 import { findType } from "../reflection/registry.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
@@ -51,7 +49,7 @@ export interface SwiftInterceptorOptions {
 type TypePlan =
   | { kind: "concrete"; metadata: Metadata }
   | { kind: "param"; paramIndex: number }
-  | { kind: "use"; expr: string; indirect: boolean } // param-referencing expression: A?, [A], Array<A>
+  | { kind: "use"; expr: TypeExpr; indirect: boolean } // param-referencing expression: A?, [A], Array<A>
   | { kind: "metatype" }; // T.Type: one GP holding the metadata pointer directly (loadable POD)
 
 // A small loadable value's self trails the formal args unless the method mutates it; any other
@@ -69,44 +67,26 @@ interface CallShape {
   receiver: Receiver | null;
 }
 
-function planType(name: string, genericParams: string[]): TypePlan {
-  const paramIndex = genericParams.indexOf(name);
+function planType(type: TypeExpr, genericParams: string[]): TypePlan {
+  const paramIndex = type.kind === "param" ? genericParams.indexOf(type.name) : -1;
   if (paramIndex !== -1) {
     return { kind: "param", paramIndex };
   }
-  const metadata = resolveTypeExpr(name, () => null);
+  const metadata = resolveParsedType(type, () => null);
   if (metadata !== null) {
     return { kind: "concrete", metadata };
   }
-  if (name.endsWith(".Type")) {
+  if (type.kind === "metatype") {
     return { kind: "metatype" };
   }
-  if (genericParams.some((p) => new RegExp(`\\b${p}\\b`).test(name))) {
-    const indirect = hasOpaqueLayout(name, (n) => (genericParams.includes(n) ? "opaque" : null));
-    if (!indirect && !isSingleReference(name)) {
-      throw new Error(`unsupported direct generic use: ${name}`);
+  if (mentionsParam(type, genericParams)) {
+    const indirect = hasOpaqueLayout(type, (n) => (genericParams.includes(n) ? "opaque" : null));
+    if (!indirect && !isSingleReference(type)) {
+      throw new Error(`unsupported direct generic use: ${type.text}`);
     }
-    return { kind: "use", expr: name, indirect };
+    return { kind: "use", expr: type, indirect };
   }
-  throw new Error(`could not resolve type: ${name}`);
-}
-
-// Array/Dictionary/Set, a class, or an Optional of one: one register whatever the generic arguments.
-function isSingleReference(expr: string): boolean {
-  if (expr.endsWith("?")) {
-    return isSingleReference(expr.slice(0, -1));
-  }
-  if (expr.startsWith("[")) {
-    return true;
-  }
-  if (parseFunctionTypeSpelling(expr) !== null) {
-    return false;
-  }
-  const { base, arguments: args } = splitBoundTypeName(expr);
-  if (base === "Swift.Optional") {
-    return isSingleReference(args[0]);
-  }
-  return REFERENCE_CONTAINERS.has(base) || findType(base)?.kind === ContextDescriptorKind.Class;
+  throw new Error(`could not resolve type: ${type.text}`);
 }
 
 function planMetadata(
@@ -120,12 +100,12 @@ function planMetadata(
     case "param":
       return generics[plan.paramIndex];
     case "use": {
-      const metadata = resolveTypeExpr(plan.expr, (name) => {
+      const metadata = resolveParsedType(plan.expr, (name) => {
         const i = genericParams.indexOf(name);
         return i >= 0 ? generics[i] : null;
       });
       if (metadata === null) {
-        throw new Error(`could not resolve generic use: ${plan.expr}`);
+        throw new Error(`could not resolve generic use: ${plan.expr.text}`);
       }
       return metadata;
     }
@@ -187,28 +167,20 @@ function typeParams(type: ContextDescriptor): { names: string[]; depth: number }
   return { names, depth };
 }
 
-function nominalArguments(expr: string): string[] | null {
-  if (expr.endsWith("?")) {
-    return [expr.slice(0, -1)];
-  }
-  if (expr.startsWith("[") && expr.endsWith("]")) {
-    return splitTopLevel(expr.slice(1, -1), ":");
-  }
-  const { arguments: args } = splitBoundTypeName(expr);
-  return args.length > 0 && parseFunctionTypeSpelling(expr) === null ? args : null;
+function nominalArguments(type: TypeExpr): TypeExpr[] {
+  return type.kind === "optional" ? [type.wrapped] : type.kind === "nominal" ? type.args : [];
 }
 
-function paramPaths(expr: string, params: string[], path: number[]): { param: string; path: number[] }[] {
-  expr = expr.trim();
-  if (params.includes(expr)) {
-    return [{ param: expr, path }];
+function paramPaths(type: TypeExpr, params: string[], path: number[]): { param: string; path: number[] }[] {
+  if (type.kind === "param" && params.includes(type.name)) {
+    return [{ param: type.name, path }];
   }
-  return (nominalArguments(expr) ?? []).flatMap((arg, i) => paramPaths(arg, params, [...path, i]));
+  return nominalArguments(type).flatMap((arg, i) => paramPaths(arg, params, [...path, i]));
 }
 
 function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOwnership | undefined): GenericEnvironment {
   const isStatic = /^(static|class) /.test(signature.context);
-  const type = findType(signature.context.replace(/^(static|class) /, "").replace(/< where .*>$/, ""));
+  const type = findType(signature.context.replace(/^(static|class) /, ""));
   const outer = type?.isGeneric ? typeParams(type) : { names: [], depth: 0 };
   const params = [...outer.names, ...signature.genericParams.map((_, i) => genericParamName(outer.depth, i))];
   const carried = new Map<string, ParamSource>();
@@ -230,14 +202,15 @@ function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOw
       outer.names.forEach((name, i) => carried.set(name, { kind: "carried", from: from!, type, path: [i] }));
     }
   }
-  signature.argTypeNames.forEach((name, arg) => {
-    const { convention, type: expr } = splitParamConvention(name);
-    const { base, arguments: args } = splitBoundTypeName(expr.trim());
-    const argType = findType(base);
-    if (convention === "inout" || argType?.kind !== ContextDescriptorKind.Class) {
+  signature.params.forEach(({ convention, type: expr }, arg) => {
+    if (convention === "inout" || expr.kind !== "nominal") {
       return;
     }
-    for (const { param, path } of args.flatMap((a, i) => paramPaths(a, params, [i]))) {
+    const argType = findType(expr.name);
+    if (argType?.kind !== ContextDescriptorKind.Class) {
+      return;
+    }
+    for (const { param, path } of expr.args.flatMap((a, i) => paramPaths(a, params, [i]))) {
       if (!carried.has(param)) {
         carried.set(param, { kind: "carried", from: arg, type: argType, path });
       }
@@ -295,19 +268,23 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
     }
     const generics = genericEnvironment(parsed, ownership);
     const gp = generics.params;
-    const args = parsed.argTypeNames.map((n) => planType(n, gp));
+    const inout = parsed.params.find((p) => p.convention === "inout");
+    if (inout !== undefined) {
+      throw new Error(`cannot hook ${parsed.selector}: inout parameter ${inout.text} is unsupported`);
+    }
+    const args = parsed.params.map((p) => planType(p.type, gp));
     const probe = (metadata: Metadata): SelfOwnership | null =>
       ownership ?? (isAsync ? null : probedOwnership(target, args, parsed, metadata));
     return {
       args,
-      ret: parsed.returnTypeName === null ? null : planType(parsed.returnTypeName, gp),
+      ret: parsed.result === null ? null : planType(parsed.result, gp),
       generics,
       throws: parsed.throws,
       receiver: receiverOf(parsed.context, probe, parsed.name === "init"),
     };
   }
 
-  const memberType = resolveTypeExpr(parsed.typeName, () => null);
+  const memberType = resolveParsedType(parsed.type, () => null);
   if (memberType === null) {
     throw new Error(`could not resolve accessor type: ${symbol.demangled}`);
   }

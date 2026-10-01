@@ -12,20 +12,20 @@ import { findType } from "../reflection/registry.js";
 import { demangle } from "./demangle.js";
 import {
   parseSwiftSignature,
-  parseFunctionTypeSpelling,
-  FunctionTypeSpelling,
+  parseTypeExpr,
+  TypeExpr,
+  TypeExprParam,
   voidMetadata,
   resolveType,
-  resolveTypeExpr,
+  resolveParsedType,
+  ResolveParam,
   hasOpaqueLayout,
   ParamLayout,
-  splitBoundTypeName,
+  REFERENCE_CONTAINERS,
   SwiftFunctionSignature,
   GenericRequirement,
   SwiftAccessorSignature,
   ParsedSwiftSignature,
-  splitTopLevel,
-  splitParamConvention,
   ParamConvention,
   symbolicate,
 } from "./symbolication.js";
@@ -260,6 +260,7 @@ interface AccessorCandidate {
   address: NativePointer;
   member: string;
   kind: AccessorKind | "modify";
+  type: TypeExpr;
   typeName: string;
   isStatic: boolean;
   constraints: string[];
@@ -472,9 +473,29 @@ function methodKind(name: string): MethodKind {
   return name === "init" || name === "__allocating_init" ? "init" : "method";
 }
 
-function splitParams(argTypeNames: string[]): { types: string[]; conventions: ParamConvention[] } {
-  const params = argTypeNames.map(splitParamConvention);
+function splitParams(params: TypeExprParam[]): { types: TypeExpr[]; conventions: ParamConvention[] } {
   return { types: params.map((p) => p.type), conventions: params.map((p) => p.convention) };
+}
+
+function signatureMetadata(
+  signature: SwiftFunctionSignature,
+  resolveParam: ResolveParam = () => null
+): { argTypes: Metadata[]; returnType: Metadata | null } {
+  const argTypes = signature.params.map(({ type }) => {
+    const metadata = resolveParsedType(type, resolveParam);
+    if (metadata === null) {
+      throw new Error(`cannot resolve argument type ${type.text} of ${signature.selector}`);
+    }
+    return metadata;
+  });
+  let returnType: Metadata | null = null;
+  if (signature.result !== null) {
+    returnType = resolveParsedType(signature.result, resolveParam);
+    if (returnType === null) {
+      throw new Error(`cannot resolve return type ${signature.result.text} of ${signature.selector}`);
+    }
+  }
+  return { argTypes, returnType };
 }
 
 function sequenceEqual<T>(actual: T[], wanted: T[]): boolean {
@@ -833,28 +854,30 @@ function considerMember(
     if (initsOnly && signature.name !== "init") {
       return;
     }
-    const { context, isStatic, constraints } = memberContext(signature.context, withConstrainedExtensions);
+    const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
     if (context === fullName) {
       members.methods.push({ address, name: signature.name, mangled: name, isStatic, signature, constraints });
     }
   } else if (!initsOnly) {
-    const { context, isStatic, constraints } = memberContext(signature.context, withConstrainedExtensions);
+    const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
     if (context === fullName) {
-      members.accessors.push({ address, member: signature.member, kind: signature.kind, typeName: signature.typeName, isStatic, constraints });
+      members.accessors.push({ address, member: signature.member, kind: signature.kind, type: signature.type, typeName: signature.typeName, isStatic, constraints });
     }
   }
 }
 
-// A constrained protocol extension's members demangle under `P< where A: Q, A.T == U>`.
+// A constrained protocol extension's members demangle under `P< where A: Q, A.T == U>`; unless
+// those are wanted, the member is kept out by a context no type is named as.
 function memberContext(
-  context: string,
+  signature: ParsedSwiftSignature,
   withConstrainedExtensions: boolean
 ): { context: string; isStatic: boolean; constraints: string[] } {
-  const receiver = stripReceiverKeyword(context);
-  const constrained = withConstrainedExtensions ? /^([^<]*)< where (.*)>$/.exec(receiver.context) : null;
-  return constrained === null
-    ? { ...receiver, constraints: [] }
-    : { context: constrained[1], isStatic: receiver.isStatic, constraints: splitTopLevel(constrained[2], ",") };
+  const receiver = stripReceiverKeyword(signature.context);
+  const constraints = signature.contextConstraints;
+  if (constraints.length > 0 && !withConstrainedExtensions) {
+    return { context: `${receiver.context}< where ${constraints.join(", ")}>`, isStatic: receiver.isStatic, constraints: [] };
+  }
+  return { ...receiver, constraints };
 }
 
 export type TypeScope = "thisType" | "withSuperclasses";
@@ -1053,22 +1076,9 @@ function resolveMethodIn(
     }
 
     const { isStatic, signature, mangled } = candidates[0];
-    const params = splitParams(signature.argTypeNames);
+    const params = splitParams(signature.params);
     const address = candidates[0].address.strip();
-    const argTypes = params.types.map((name) => {
-      const metadata = resolveTypeExpr(name, () => null);
-      if (metadata === null) {
-        throw new Error(`cannot resolve argument type ${name} of ${signature.selector}`);
-      }
-      return metadata;
-    });
-    let returnType: Metadata | null = null;
-    if (signature.returnTypeName !== null) {
-      returnType = resolveTypeExpr(signature.returnTypeName, () => null);
-      if (returnType === null) {
-        throw new Error(`cannot resolve return type ${signature.returnTypeName} of ${signature.selector}`);
-      }
-    }
+    const { argTypes, returnType } = signatureMetadata(signature);
     let asyncFunctionPointer: AsyncFunctionPointer | undefined;
     if (signature.async) {
       const module = Process.findModuleByAddress(address.strip());
@@ -1536,21 +1546,8 @@ function resolveSignatureTypes(
       `${signature.selector} is an initializer, which consumes its arguments; construct through Swift.type(...).init`
     );
   }
-  const params = splitParams(signature.argTypeNames);
-  const argTypes = params.types.map((name) => {
-    const metadata = resolveTypeExpr(name, () => null);
-    if (metadata === null) {
-      throw new Error(`cannot resolve argument type ${name} of ${signature.selector}`);
-    }
-    return metadata;
-  });
-  let returnType: Metadata | null = null;
-  if (signature.returnTypeName !== null) {
-    returnType = resolveTypeExpr(signature.returnTypeName, () => null);
-    if (returnType === null) {
-      throw new Error(`cannot resolve return type ${signature.returnTypeName} of ${signature.selector}`);
-    }
-  }
+  const params = splitParams(signature.params);
+  const { argTypes, returnType } = signatureMetadata(signature);
   return { argTypes, returnType, argConventions: params.conventions };
 }
 
@@ -1834,25 +1831,29 @@ function closurePlan(paramTokens: string[], resultTokens: string[], shape: Closu
 }
 
 function planClosureType(
-  spelling: FunctionTypeSpelling,
+  spelling: Extract<TypeExpr, { kind: "function" }>,
   genericParams: string[],
   typeArguments: Metadata[],
   classBoundParams: Set<string>
 ): ArgPlan {
-  const result = spelling.result.trim();
+  if (spelling.params.some((p) => p.convention !== "borrowed")) {
+    throw new Error(`unsupported closure type ${spelling.text}: parameter conventions are unsupported`);
+  }
+  const params = spelling.params.map((p) => p.type.text);
+  const result = spelling.result.text;
   const resultIsReference = classBoundParams.has(result);
   const resultIsGeneric = genericParams.includes(result) && !resultIsReference;
   const resultIsVoid = result === "()" || result === "Swift.Void";
-  const takesBuffer = spelling.params.length === 1 && spelling.params[0].trim() === RAW_BUFFER_PARAM;
-  if ((spelling.params.length === 0 || takesBuffer) && (resultIsVoid || resultIsGeneric)) {
+  const takesBuffer = params.length === 1 && params[0] === RAW_BUFFER_PARAM;
+  if ((params.length === 0 || takesBuffer) && (resultIsVoid || resultIsGeneric)) {
     const paramTokens = takesBuffer ? [RAW_BUFFER_TOKEN] : [];
     const resultTokens = resultIsGeneric ? [INDIRECT] : [];
     return closurePlan(paramTokens, resultTokens, { mode: "buffer" });
   }
 
-  const params = spelling.params.map((p) => LOADABLE_SCALARS[p.trim()] ?? null);
-  if (params.every((p) => p !== null)) {
-    const scalars = params as LoadableScalar[];
+  const loadable = params.map((p) => LOADABLE_SCALARS[p] ?? null);
+  if (loadable.every((p) => p !== null)) {
+    const scalars = loadable as LoadableScalar[];
     const paramTokens = scalars.map((p) => p.token);
     if (resultIsGeneric) {
       const resultMetadata = typeArguments[genericParams.indexOf(result)];
@@ -1878,88 +1879,67 @@ function planClosureType(
   }
 
   throw new Error(
-    `unsupported closure type (${spelling.params.join(", ")}) -> ${result}; supported: () or (${RAW_BUFFER_PARAM}) returning Void or a generic, or loadable scalars (${Object.keys(LOADABLE_SCALARS).join(", ")}) returning a scalar, Void, or a generic`
+    `unsupported closure type (${params.join(", ")}) -> ${result}; supported: () or (${RAW_BUFFER_PARAM}) returning Void or a generic, or loadable scalars (${Object.keys(LOADABLE_SCALARS).join(", ")}) returning a scalar, Void, or a generic`
   );
 }
 
 // A class-bound generic parameter lowers as a bare reference, not address-only.
 function planGenericType(
-  name: string,
+  type: TypeExpr,
   genericParams: string[],
   typeArguments: Metadata[],
   classBoundParams: Set<string>
 ): ArgPlan {
-  const fn = parseFunctionTypeSpelling(name);
-  if (fn !== null) {
-    return planClosureType(fn, genericParams, typeArguments, classBoundParams);
+  if (type.kind === "function") {
+    return planClosureType(type, genericParams, typeArguments, classBoundParams);
   }
-  const index = genericParams.indexOf(name);
+  const index = type.kind === "param" ? genericParams.indexOf(type.name) : -1;
   if (index !== -1) {
     const metadata = typeArguments[index];
     if (metadata === undefined) {
-      throw new Error(`missing type argument for generic parameter ${name}`);
+      throw new Error(`missing type argument for generic parameter ${type.text}`);
     }
-    return classBoundParams.has(name) ? { kind: "concrete", metadata } : { kind: "generic", index, metadata };
+    return classBoundParams.has(type.text) ? { kind: "concrete", metadata } : { kind: "generic", index, metadata };
   }
-  const concrete = resolveType(name);
+  const concrete = resolveType(type.text);
   if (concrete !== null) {
     return { kind: "concrete", metadata: concrete };
   }
-  return planCompoundType(name, genericParams, typeArguments, classBoundParams);
+  return planCompoundType(type, genericParams, typeArguments, classBoundParams);
 }
 
 function planCompoundType(
-  expr: string,
+  type: TypeExpr,
   genericParams: string[],
   typeArguments: Metadata[],
   classBoundParams: Set<string>
 ): ArgPlan {
-  const metadata = resolveTypeExpr(expr, (name) => {
+  const metadata = resolveParsedType(type, (name) => {
     const i = genericParams.indexOf(name);
     return i === -1 ? null : typeArguments[i] ?? null;
   });
   if (metadata === null) {
-    throw new Error(`cannot resolve generic signature type ${expr}`);
+    throw new Error(`cannot resolve generic signature type ${type.text}`);
   }
-  return compoundIsAddressOnly(expr, genericParams, classBoundParams)
+  return compoundIsAddressOnly(type, genericParams, classBoundParams)
     ? { kind: "abstractIndirect", metadata }
     : { kind: "concrete", metadata };
 }
 
-// Accepts the demangler's desugared spelling (Swift.Array<A>) and the sugared one ([A]). Array/Set/
-// Dictionary are a fixed-layout buffer (direct); Optional<param> embeds the abstract param (indirect)
-// unless the param is class-bound, which makes it a nullable reference.
-function compoundIsAddressOnly(expr: string, genericParams: string[], classBoundParams: Set<string>): boolean {
-  const t = expr.trim();
-  if (t.endsWith("?") || t.endsWith("!")) {
-    return optionalIsAddressOnly(t.slice(0, -1), genericParams, classBoundParams, expr);
+// Array/Set/Dictionary are a fixed-layout buffer (direct); Optional<param> embeds the abstract param
+// (indirect) unless the param is class-bound, which makes it a nullable reference.
+function compoundIsAddressOnly(type: TypeExpr, genericParams: string[], classBoundParams: Set<string>): boolean {
+  if (type.kind === "optional") {
+    const payload = type.wrapped;
+    if (payload.kind === "param" && genericParams.includes(payload.name)) {
+      return !classBoundParams.has(payload.name);
+    }
+    throw new Error(`unsupported compound generic signature type ${type.text} (Optional payload must be a generic parameter)`);
   }
-  if (t.startsWith("[") && t.endsWith("]")) {
+  if (type.kind === "nominal" && REFERENCE_CONTAINERS.has(type.name)) {
     return false;
   }
-  const lt = t.indexOf("<");
-  if (lt !== -1 && t.endsWith(">")) {
-    const base = t.slice(0, lt);
-    if (base === "Swift.Array" || base === "Swift.Dictionary" || base === "Swift.Set") {
-      return false;
-    }
-    if (base === "Swift.Optional") {
-      return optionalIsAddressOnly(t.slice(lt + 1, -1), genericParams, classBoundParams, expr);
-    }
-  }
-  throw new Error(`unsupported compound generic signature type ${expr} (only [T], [K: V] and T? are supported)`);
-}
-
-function optionalIsAddressOnly(
-  payload: string,
-  genericParams: string[],
-  classBoundParams: Set<string>,
-  expr: string
-): boolean {
-  if (genericParams.includes(payload.trim())) {
-    return !classBoundParams.has(payload.trim());
-  }
-  throw new Error(`unsupported compound generic signature type ${expr} (Optional payload must be a generic parameter)`);
+  throw new Error(`unsupported compound generic signature type ${type.text} (only [T], [K: V] and T? are supported)`);
 }
 
 // inout passes the caller's value by address whatever its layout.
@@ -2276,10 +2256,9 @@ function marshalClosure(plan: { discriminator: number; shape: ClosureShape }, ar
 
 function inferClosureTypeArguments(signature: SwiftFunctionSignature): Metadata[] {
   const closureResultParams = new Set<string>();
-  for (const argName of signature.argTypeNames) {
-    const fn = parseFunctionTypeSpelling(argName);
-    if (fn !== null && signature.genericParams.includes(fn.result.trim())) {
-      closureResultParams.add(fn.result.trim());
+  for (const { type } of signature.params) {
+    if (type.kind === "function" && type.result.kind === "param" && signature.genericParams.includes(type.result.name)) {
+      closureResultParams.add(type.result.name);
     }
   }
   return signature.genericParams.map((param) => {
@@ -2305,7 +2284,7 @@ function matchingMethods(
 function argPlanBound(signature: SwiftFunctionSignature): boolean {
   return signature.genericParams.length > 0
     ? signature.simpleGenerics
-    : signature.argTypeNames.some((n) => parseFunctionTypeSpelling(n) !== null);
+    : signature.params.some((p) => p.type.kind === "function");
 }
 
 function planGenericMethod(typeNameArg: string, methodName: string, options: RawMethodResolveOptions): GenericMethodPlan {
@@ -2331,7 +2310,7 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
   if (resolvedTypeArguments.length !== signature.genericParams.length) {
     throw new Error(`${signature.selector} needs ${signature.genericParams.length} type argument(s), got ${typeArguments.length}`);
   }
-  const params = splitParams(signature.argTypeNames);
+  const params = splitParams(signature.params);
   const classBoundParams = new Set(
     signature.conformanceRequirements.filter((r) => requirementBound(r).classBound).map((r) => r.subject)
   );
@@ -2339,9 +2318,9 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     planParam(planGenericType(n, signature.genericParams, resolvedTypeArguments, classBoundParams), params.conventions[i], signature.selector)
   );
   const returnPlan =
-    signature.returnTypeName === null
+    signature.result === null
       ? null
-      : planGenericType(signature.returnTypeName, signature.genericParams, resolvedTypeArguments, classBoundParams);
+      : planGenericType(signature.result, signature.genericParams, resolvedTypeArguments, classBoundParams);
   const witnessTables = options.witnessTables ?? autoWitnessTables(signature, resolvedTypeArguments);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (signature.async) {
@@ -2416,21 +2395,21 @@ export function bindGenericValueMethod(
 // A bare type parameter (T) is address-only in the generic context, unless class-bound, but concretely
 // sized by the instance's type argument; concrete and compound types lower as elsewhere.
 function planTypeMemberArg(
-  name: string,
+  type: TypeExpr,
   typeParams: string[],
   typeArguments: Metadata[],
   classBoundParams: Set<string>
 ): ArgPlan {
-  const index = typeParams.indexOf(name.trim());
+  const index = type.kind === "param" ? typeParams.indexOf(type.name) : -1;
   if (index !== -1) {
     const metadata = typeArguments[index];
-    return classBoundParams.has(name.trim()) ? { kind: "concrete", metadata } : { kind: "abstractIndirect", metadata };
+    return classBoundParams.has(type.text) ? { kind: "concrete", metadata } : { kind: "abstractIndirect", metadata };
   }
-  const concrete = resolveType(name);
+  const concrete = resolveType(type.text);
   if (concrete !== null) {
     return { kind: "concrete", metadata: concrete };
   }
-  return planCompoundType(name, typeParams, typeArguments, classBoundParams);
+  return planCompoundType(type, typeParams, typeArguments, classBoundParams);
 }
 
 // Depth-0 generic parameters mangle as x, q_, q0_, q1_...
@@ -2457,15 +2436,18 @@ function classBoundTypeParams(descriptor: ContextDescriptor, typeParams: string[
 // ("Foo<Swift.Int>" → Int) so it works for both value and class metadata. Parameters are named A,
 // B... by declaration order to match the demangled signatures.
 function genericTypeArguments(receiver: Metadata): { unboundName: string; typeParams: string[]; typeArguments: Metadata[] } {
-  const { base, arguments: argNames } = splitBoundTypeName(typeName(receiver));
-  const typeArguments = argNames.map((n) => {
-    const metadata = resolveTypeExpr(n, () => null);
+  const bound = parseTypeExpr(typeName(receiver));
+  if (bound === null || bound.kind !== "nominal") {
+    throw new Error(`cannot read the type arguments of ${typeName(receiver)}`);
+  }
+  const typeArguments = bound.args.map((arg) => {
+    const metadata = resolveParsedType(arg, () => null);
     if (metadata === null) {
-      throw new Error(`cannot resolve type argument ${n} of ${base}`);
+      throw new Error(`cannot resolve type argument ${arg.text} of ${bound.name}`);
     }
     return metadata;
   });
-  return { unboundName: base, typeParams: typeArguments.map((_, i) => String.fromCharCode(65 + i)), typeArguments };
+  return { unboundName: bound.name, typeParams: typeArguments.map((_, i) => String.fromCharCode(65 + i)), typeArguments };
 }
 
 // Methods on a generic type, no method-level generics. self is indirect (class: object in x20;
@@ -2487,15 +2469,15 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     throw new Error(`ambiguous method ${methodName} on ${unboundName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`);
   }
   const { address, signature, mangled } = candidates[0];
-  const params = splitParams(signature.argTypeNames);
+  const params = splitParams(signature.params);
   const classBound = classBoundTypeParams(findType(unboundName)!, typeParams);
   const argPlans = params.types.map((n, i) =>
     planParam(planTypeMemberArg(n, typeParams, typeArguments, classBound), params.conventions[i], signature.selector)
   );
   const returnPlan =
-    signature.returnTypeName === null
+    signature.result === null
       ? null
-      : planTypeMemberArg(signature.returnTypeName, typeParams, typeArguments, classBound);
+      : planTypeMemberArg(signature.result, typeParams, typeArguments, classBound);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (signature.async) {
     const module = Process.findModuleByAddress(address.strip());
@@ -2593,8 +2575,7 @@ function resolveAccessorIn(
     if (candidate === undefined) {
       continue;
     }
-    // resolveTypeExpr, not a bare nominal lookup: an accessor type can be generic (`Int?`, `[Int]`, …).
-    const type = resolveTypeExpr(candidate.typeName, () => null);
+    const type = resolveParsedType(candidate.type, () => null);
     if (type === null) {
       throw new Error(`cannot resolve ${kind} type ${candidate.typeName} of ${className}.${member}`);
     }
@@ -3177,21 +3158,8 @@ function resolveWitnessSignature(
   signature: SwiftFunctionSignature,
   classBound: Set<string>
 ): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector" | "abstractArgs" | "abstractReturn" | "argConventions"> {
-  const params = splitParams(signature.argTypeNames);
-  const argTypes = params.types.map((name) => {
-    const metadata = resolveTypeExpr(name, (n) => resolveWitnessSelfOrAssociatedType(table, n));
-    if (metadata === null) {
-      throw new Error(`cannot resolve argument type ${name} of ${signature.selector}`);
-    }
-    return metadata;
-  });
-  let returnType: Metadata | null = null;
-  if (signature.returnTypeName !== null) {
-    returnType = resolveTypeExpr(signature.returnTypeName, (n) => resolveWitnessSelfOrAssociatedType(table, n));
-    if (returnType === null) {
-      throw new Error(`cannot resolve return type ${signature.returnTypeName} of ${signature.selector}`);
-    }
-  }
+  const params = splitParams(signature.params);
+  const { argTypes, returnType } = signatureMetadata(signature, (n) => resolveWitnessSelfOrAssociatedType(table, n));
   const isAbstract = protocolLevelOpaque(table, classBound);
   return {
     argTypes,
@@ -3199,7 +3167,7 @@ function resolveWitnessSignature(
     throws: signature.throws,
     selector: signature.selector,
     abstractArgs: params.types.map(isAbstract),
-    abstractReturn: signature.returnTypeName !== null && isAbstract(signature.returnTypeName),
+    abstractReturn: signature.result !== null && isAbstract(signature.result),
     argConventions: params.conventions,
   };
 }
@@ -3256,7 +3224,7 @@ function resolveWitnessAccessor(table: WitnessTable, member: string, kind: Acces
     return resolveExtensionAccessor(table, member, kind);
   }
   const address = table.requirement(match.requirement.witnessIndex);
-  return witnessAccessor(table, address, member, kind, match.signature.typeName, selfSignature(table, [])!);
+  return witnessAccessor(table, address, member, kind, match.signature.type, selfSignature(table, [])!);
 }
 
 function resolveExtensionAccessor(
@@ -3287,7 +3255,7 @@ function resolveExtensionAccessor(
   }
   const address = requirement === null ? match.address.strip() : table.requirement(requirement.witnessIndex);
   const signature = selfSignature(table, requirement === null ? match.constraints : [])!;
-  return witnessAccessor(table, address, member, kind, match.typeName, signature);
+  return witnessAccessor(table, address, member, kind, match.type, signature);
 }
 
 function witnessAccessor(
@@ -3295,24 +3263,24 @@ function witnessAccessor(
   address: NativePointer,
   member: string,
   kind: AccessorKind,
-  typeName: string,
+  spelled: TypeExpr,
   signature: SelfSignature
 ): ResolvedWitnessAccessor {
-  const type = resolveTypeExpr(typeName, (n) => resolveWitnessSelfOrAssociatedType(table, n));
+  const type = resolveParsedType(spelled, (n) => resolveWitnessSelfOrAssociatedType(table, n));
   if (type === null) {
-    throw new Error(`cannot resolve ${kind} type ${typeName} of ${member}`);
+    throw new Error(`cannot resolve ${kind} type ${spelled.text} of ${member}`);
   }
-  const abstract = protocolLevelOpaque(table, signature.classBound)(typeName);
+  const abstract = protocolLevelOpaque(table, signature.classBound)(spelled);
   return { address, type, kind, abstract, table, ...signature };
 }
 
-function protocolLevelOpaque(table: WitnessTable, signatureClassBound: Set<string>): (typeName: string) => boolean {
+function protocolLevelOpaque(table: WitnessTable, signatureClassBound: Set<string>): (type: TypeExpr) => boolean {
   const classBound = classBoundSubjects(protocolOf(table));
   for (const subject of signatureClassBound) {
     classBound.add(subject);
   }
-  return (typeName) =>
-    hasOpaqueLayout(typeName, (name): ParamLayout | null => {
+  return (type) =>
+    hasOpaqueLayout(type, (name): ParamLayout | null => {
       if (name !== "A" && !name.startsWith("A.")) {
         return null;
       }

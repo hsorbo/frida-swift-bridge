@@ -7,42 +7,27 @@ import { buildGenericMetadata } from "../abi/generic-instantiation.js";
 import { getExistentialTypeMetadata } from "../abi/existential.js";
 import { resolveTypeByMangledName } from "../abi/field-descriptor.js";
 import { getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
+import { TypeExpr, parseTypeExpr, SwiftFunctionSignature } from "./type-expr.js";
+
+export {
+  TypeExpr,
+  TypeExprParam,
+  ParamConvention,
+  GenericRequirement,
+  SwiftFunctionSignature,
+  SwiftAccessorSignature,
+  ParsedSwiftSignature,
+  parseTypeExpr,
+  parseSwiftSignature,
+  childTypes,
+  mentionsParam,
+} from "./type-expr.js";
 
 export interface SwiftSymbol {
   address: NativePointer;
   name: string;
   demangled: string;
 }
-
-export interface SwiftFunctionSignature {
-  kind: "function";
-  context: string;
-  name: string;
-  genericParams: string[];
-  // false for same-type / pack / shape signatures: metadata count != genericParams.length
-  simpleGenerics: boolean;
-  async: boolean;
-  throws: boolean;
-  argTypeNames: string[];
-  argLabels: (string | null)[]; // null = unlabelled
-  returnTypeName: string | null;
-  selector: string; // e.g. "greet(name:to:)"
-  conformanceRequirements: GenericRequirement[];
-}
-
-export interface GenericRequirement {
-  subject: string;
-  protocol: string;
-}
-
-export interface SwiftAccessorSignature {
-  kind: "getter" | "setter" | "modify";
-  context: string;
-  member: string;
-  typeName: string;
-}
-
-export type ParsedSwiftSignature = SwiftFunctionSignature | SwiftAccessorSignature;
 
 export interface ResolvedFunctionSignature {
   throws: boolean;
@@ -100,141 +85,6 @@ export function symbolicate(address: NativePointer): SwiftSymbol | null {
   return { address, name, demangled };
 }
 
-export function parseSwiftSignature(demangled: string): ParsedSwiftSignature | null {
-  // A cross-module extension member is prefixed `(extension in Module):`, after `static ` or `class `
-  // if any; drop it so the paren is not mistaken for the argument list and the context is the bare
-  // receiver type.
-  const s = demangled.replace(/^((?:static |class )?)\(extension in [^)]+\):/, "$1");
-  const accessor = parseAccessor(s);
-  if (accessor !== null) {
-    return accessor;
-  }
-  return parseFunction(s);
-}
-
-function parseAccessor(s: string): SwiftAccessorSignature | null {
-  for (const kind of ["getter", "setter", "modify"] as const) {
-    const marker = `.${kind} : `;
-    const at = s.indexOf(marker);
-    if (at === -1) {
-      continue;
-    }
-    const path = s.slice(0, at);
-    const typeName = s.slice(at + marker.length).trim();
-    const dot = lastTopLevelDot(path);
-    if (dot === -1) {
-      return null;
-    }
-    return { kind, context: path.slice(0, dot), member: path.slice(dot + 1), typeName };
-  }
-  return null;
-}
-
-function parseFunction(s: string): SwiftFunctionSignature | null {
-  const open = topLevelIndexOf(s, "(");
-  if (open === -1) {
-    return null;
-  }
-  const close = matchingBracket(s, open);
-  if (close === -1) {
-    return null;
-  }
-
-  const path = s.slice(0, open);
-  const dot = lastTopLevelDot(path);
-  if (dot === -1) {
-    return null;
-  }
-
-  const inner = s.slice(open + 1, close);
-  const parsedArgs = splitTopLevel(inner, ",").map(argLabelAndType);
-  const argTypeNames = parsedArgs.map((a) => a.type);
-  const argLabels = parsedArgs.map((a) => a.label);
-
-  const tail = s.slice(close + 1);
-  const arrow = tail.indexOf("->");
-  if (arrow === -1) {
-    return null;
-  }
-  const returnTypeName = tail.slice(arrow + 2).trim();
-
-  const { name: declName, genericParams, simpleGenerics, conformanceRequirements } = splitGenericClause(
-    path.slice(dot + 1)
-  );
-  const name = stripOperatorFixity(declName);
-  const selector = `${name}(${argLabels.map((l) => `${l ?? "_"}:`).join("")})`;
-
-  return {
-    kind: "function",
-    context: path.slice(0, dot),
-    name,
-    genericParams,
-    simpleGenerics,
-    async: /\basync\b/.test(tail.slice(0, arrow)),
-    throws: /\b(?:re)?throws\b/.test(tail.slice(0, arrow)),
-    argTypeNames,
-    argLabels,
-    returnTypeName: returnTypeName === "()" ? null : returnTypeName,
-    selector,
-    conformanceRequirements,
-  };
-}
-
-function splitGenericClause(name: string): {
-  name: string;
-  genericParams: string[];
-  simpleGenerics: boolean;
-  conformanceRequirements: GenericRequirement[];
-} {
-  const lt = topLevelIndexOf(name, "<");
-  if (lt === -1 || !name.endsWith(">")) {
-    return { name, genericParams: [], simpleGenerics: true, conformanceRequirements: [] };
-  }
-  const inner = name.slice(lt + 1, name.length - 1);
-  const segments = splitTopLevel(inner, " where ");
-  const params = splitTopLevel(segments[0], ",");
-  const whereClause = segments.length > 1 ? segments[1] : "";
-  const simpleGenerics = params.every((p) => /^[A-Za-z_]\w*$/.test(p)) && !/==/.test(whereClause);
-  return {
-    name: name.slice(0, lt),
-    genericParams: params.map((p) => p.split(/\s+/)[0]),
-    simpleGenerics,
-    conformanceRequirements: parseConformanceRequirements(whereClause),
-  };
-}
-
-function parseConformanceRequirements(whereClause: string): GenericRequirement[] {
-  if (whereClause === "") {
-    return [];
-  }
-  const requirements: GenericRequirement[] = [];
-  for (const clause of splitTopLevel(whereClause, ",")) {
-    const colon = topLevelIndexOf(clause, ":");
-    if (colon === -1) {
-      continue; // same-type (==) or layout requirement: no witness table
-    }
-    const subject = clause.slice(0, colon).trim();
-    for (const protocol of splitTopLevel(clause.slice(colon + 1), " & ")) {
-      requirements.push({ subject, protocol });
-    }
-  }
-  return requirements;
-}
-
-// "== infix" → "=="
-function stripOperatorFixity(name: string): string {
-  return name.replace(/ (?:infix|prefix|postfix)$/, "");
-}
-
-function argLabelAndType(item: string): { label: string | null; type: string } {
-  const colon = topLevelIndexOf(item, ": ");
-  if (colon === -1) {
-    return { label: null, type: item.trim() };
-  }
-  const label = item.slice(0, colon).trim();
-  return { label: label === "_" ? null : label, type: item.slice(colon + 2).trim() };
-}
-
 export function resolveFunctionSignature(
   signature: SwiftFunctionSignature
 ): ResolvedFunctionSignature | null {
@@ -289,14 +139,15 @@ function resolveMangled(mangled: string): Metadata | null {
 }
 
 function resolveProtocolExistential(name: string): Metadata | null {
-  const stripped = name.startsWith("any ") ? name.slice(4).trim() : name;
-  const parts = splitTopLevel(stripped, " & ");
-  if (parts.length === 0) {
-    return null;
-  }
+  const parsed = parseTypeExpr(name);
+  const members = parsed === null ? [] : parsed.kind === "existential" ? parsed.members : [parsed];
+  return members.length === 0 ? null : existentialOf(members);
+}
+
+function existentialOf(members: TypeExpr[]): Metadata | null {
   const protocols: ContextDescriptor[] = [];
-  for (const part of parts) {
-    const protocol = findProtocol(part);
+  for (const member of members) {
+    const protocol = member.kind === "nominal" && member.args.length === 0 ? findProtocol(member.name) : null;
     if (protocol === null) {
       return null;
     }
@@ -333,37 +184,8 @@ export function voidMetadata(): Metadata {
   return voidMetadataCache;
 }
 
-export interface FunctionTypeSpelling {
-  params: string[];
-  result: string;
-  throws: boolean;
-}
-
-// Recognizes a closure/function type spelling like "(Swift.Int) throws -> A"; null otherwise.
-export function parseFunctionTypeSpelling(name: string): FunctionTypeSpelling | null {
-  const t = name.trim();
-  if (!t.startsWith("(")) {
-    return null;
-  }
-  const close = matchingBracket(t, 0);
-  if (close === -1) {
-    return null;
-  }
-  const tail = t.slice(close + 1);
-  const arrow = topLevelIndexOf(tail, "->");
-  if (arrow === -1) {
-    return null;
-  }
-  const inner = t.slice(1, close).trim();
-  return {
-    params: inner === "" ? [] : splitTopLevel(inner, ","),
-    result: tail.slice(arrow + 2).trim(),
-    throws: /\b(?:re)?throws\b/.test(tail.slice(0, arrow)),
-  };
-}
-
-function instantiate(base: string, args: (Metadata | null)[]): Metadata | null {
-  const descriptor = findType(base);
+function instantiate(name: string, args: (Metadata | null)[]): Metadata | null {
+  const descriptor = findType(name);
   if (descriptor === null || args.some((a) => a === null)) {
     return null;
   }
@@ -374,86 +196,46 @@ function instantiate(base: string, args: (Metadata | null)[]): Metadata | null {
   }
 }
 
-// "fixture.Box<Swift.Int, Swift.String>" → { base: "fixture.Box", arguments: ["Swift.Int", "Swift.String"] };
-// an unparameterized name yields no arguments.
-export function splitBoundTypeName(name: string): { base: string; arguments: string[] } {
-  const lt = topLevelIndexOf(name, "<");
-  if (lt === -1 || !name.endsWith(">")) {
-    return { base: name, arguments: [] };
-  }
-  return { base: name.slice(0, lt), arguments: splitTopLevel(name.slice(lt + 1, -1), ",") };
-}
+export type ResolveParam = (name: string) => Metadata | null;
 
-export type ParamConvention = "borrowed" | "owned" | "inout";
-
-const OWNERSHIP_MODIFIER = /^(__owned|consuming|inout)\s+/;
-
-export function splitParamConvention(name: string): { convention: ParamConvention; type: string } {
-  const match = OWNERSHIP_MODIFIER.exec(name.trim());
-  if (match === null) {
-    return { convention: "borrowed", type: name };
-  }
-  return { convention: match[1] === "inout" ? "inout" : "owned", type: name.trim().slice(match[0].length) };
-}
-
-// Desugars A? / [A] / [K: V] / Base<...>, resolving each leaf via resolveParam (generics) or findType.
-// A leading borrow modifier (init params spell a non-consuming String as `__shared String`) is not
-// part of the type and is dropped; __owned/inout are split off upstream, by splitParamConvention.
-export function resolveTypeExpr(
-  expr: string,
-  resolveParam: (name: string) => Metadata | null
-): Metadata | null {
-  expr = expr.trim().replace(/^(?:__shared|borrowing)\s+/, "");
-  if (expr.endsWith("?") || expr.endsWith("!")) {
-    return instantiate("Swift.Optional", [resolveTypeExpr(expr.slice(0, -1), resolveParam)]);
-  }
-  // `(A) -> B` is a function type, not a tuple: its `)` is not the last character.
-  if (expr.startsWith("(") && matchingBracket(expr, 0) === expr.length - 1) {
-    return resolveTupleExpr(expr.slice(1, -1), resolveParam);
-  }
-  if (expr.startsWith("[") && matchingBracket(expr, 0) === expr.length - 1) {
-    const inner = expr.slice(1, -1);
-    const colon = topLevelIndexOf(inner, ":");
-    if (colon !== -1) {
-      return instantiate("Swift.Dictionary", [
-        resolveTypeExpr(inner.slice(0, colon), resolveParam),
-        resolveTypeExpr(inner.slice(colon + 1), resolveParam),
-      ]);
+// Metadata for a type spelling: generic parameters and their associated types go through
+// resolveParam, every other leaf through findType. Function, metatype, opaque and pack types have
+// no metadata the bridge builds.
+export function resolveParsedType(type: TypeExpr, resolveParam: ResolveParam): Metadata | null {
+  switch (type.kind) {
+    case "nominal":
+      return type.args.length > 0
+        ? instantiate(type.name, type.args.map((a) => resolveParsedType(a, resolveParam)))
+        : resolveParam(type.text) ?? resolveType(type.name);
+    case "param":
+    case "member":
+      return resolveParam(type.text);
+    case "optional":
+      return instantiate("Swift.Optional", [resolveParsedType(type.wrapped, resolveParam)]);
+    case "tuple": {
+      if (type.elements.length === 0) {
+        return voidMetadata();
+      }
+      const elements: Metadata[] = [];
+      for (const element of type.elements) {
+        const metadata = resolveParsedType(element.type, resolveParam);
+        if (metadata === null) {
+          return null;
+        }
+        elements.push(metadata);
+      }
+      return getUnlabelledTupleTypeMetadata(elements);
     }
-    return instantiate("Swift.Array", [resolveTypeExpr(inner, resolveParam)]);
-  }
-  const lt = topLevelIndexOf(expr, "<");
-  if (lt !== -1 && expr.endsWith(">")) {
-    const args = splitTopLevel(expr.slice(lt + 1, -1), ",").map((a) =>
-      resolveTypeExpr(a, resolveParam)
-    );
-    return instantiate(expr.slice(0, lt), args);
-  }
-  return resolveParam(expr) ?? resolveType(expr);
-}
-
-// `inner` is a parenthesized body: `()` is Void, a lone unlabelled element is that bare type.
-function resolveTupleExpr(
-  inner: string,
-  resolveParam: (name: string) => Metadata | null
-): Metadata | null {
-  const parts = splitTopLevel(inner, ",");
-  if (parts.length === 0) {
-    return voidMetadata();
-  }
-  const elements: Metadata[] = [];
-  for (const part of parts) {
-    const colon = topLevelIndexOf(part, ": ");
-    const element = resolveTypeExpr(colon === -1 ? part : part.slice(colon + 2), resolveParam);
-    if (element === null) {
+    case "existential":
+      return existentialOf(type.members);
+    default:
       return null;
-    }
-    elements.push(element);
   }
-  if (elements.length === 1 && topLevelIndexOf(parts[0], ": ") === -1) {
-    return elements[0];
-  }
-  return getUnlabelledTupleTypeMetadata(elements);
+}
+
+export function resolveTypeExpr(expr: string, resolveParam: ResolveParam): Metadata | null {
+  const parsed = parseTypeExpr(expr);
+  return parsed === null ? null : resolveParsedType(parsed, resolveParam);
 }
 
 export type ParamLayout = "opaque" | "reference";
@@ -463,116 +245,42 @@ export const REFERENCE_CONTAINERS = new Set(["Swift.Array", "Swift.Dictionary", 
 // Whether a type is address-only where its params are opaque, as in a protocol witness thunk or an
 // unspecialized generic: an opaque param is, and so is a value type storing one inline. A tuple
 // mentioning one is lowered per element, which a single verdict can't express.
-export function hasOpaqueLayout(expr: string, paramLayout: (name: string) => ParamLayout | null): boolean {
-  expr = expr.trim().replace(/^(?:__shared|borrowing)\s+/, "");
-  if (!isTupleExpr(expr)) {
-    return embedsOpaqueParam(expr, paramLayout);
+export function hasOpaqueLayout(type: TypeExpr, paramLayout: (name: string) => ParamLayout | null): boolean {
+  if (type.kind !== "tuple") {
+    return embedsOpaqueParam(type, paramLayout);
   }
-  const elements = tupleElementTypes(expr);
-  if (elements.length === 1) {
-    return hasOpaqueLayout(elements[0], paramLayout);
-  }
-  if (elements.some((e) => embedsOpaqueParam(e, paramLayout))) {
-    throw new Error(`unsupported tuple with an opaque element: ${expr}`);
+  if (type.elements.some((e) => embedsOpaqueParam(e.type, paramLayout))) {
+    throw new Error(`unsupported tuple with an opaque element: ${type.text}`);
   }
   return false;
 }
 
-function embedsOpaqueParam(expr: string, paramLayout: (name: string) => ParamLayout | null): boolean {
-  if (expr.endsWith("?") || expr.endsWith("!")) {
-    return embedsOpaqueParam(expr.slice(0, -1), paramLayout);
+function embedsOpaqueParam(type: TypeExpr, paramLayout: (name: string) => ParamLayout | null): boolean {
+  switch (type.kind) {
+    case "param":
+    case "member":
+      return paramLayout(type.text) === "opaque";
+    case "optional":
+      return embedsOpaqueParam(type.wrapped, paramLayout);
+    case "tuple":
+      return type.elements.some((e) => embedsOpaqueParam(e.type, paramLayout));
+    case "nominal":
+      if (type.args.length === 0) {
+        return paramLayout(type.text) === "opaque";
+      }
+      if (REFERENCE_CONTAINERS.has(type.name) || findType(type.name)?.kind === ContextDescriptorKind.Class) {
+        return false;
+      }
+      return type.args.some((a) => embedsOpaqueParam(a, paramLayout));
+    default:
+      return false;
   }
-  if (expr.startsWith("[") || expr.endsWith(".Type") || parseFunctionTypeSpelling(expr) !== null) {
-    return false;
-  }
-  if (isTupleExpr(expr)) {
-    return tupleElementTypes(expr).some((e) => embedsOpaqueParam(e, paramLayout));
-  }
-  const { base, arguments: args } = splitBoundTypeName(expr);
-  if (args.length === 0) {
-    return paramLayout(expr) === "opaque";
-  }
-  if (base === "Swift.Optional") {
-    return embedsOpaqueParam(args[0], paramLayout);
-  }
-  if (REFERENCE_CONTAINERS.has(base) || findType(base)?.kind === ContextDescriptorKind.Class) {
-    return false;
-  }
-  return args.some((a) => embedsOpaqueParam(a, paramLayout));
 }
 
-function isTupleExpr(expr: string): boolean {
-  return expr.startsWith("(") && matchingBracket(expr, 0) === expr.length - 1;
-}
-
-function tupleElementTypes(expr: string): string[] {
-  return splitTopLevel(expr.slice(1, -1), ",").map((part) => {
-    const colon = topLevelIndexOf(part, ": ");
-    return colon === -1 ? part : part.slice(colon + 2).trim();
-  });
-}
-
-const OPEN: Record<string, string> = { "(": ")", "<": ">", "[": "]" };
-const CLOSE = new Set([")", ">", "]"]);
-
-// The `>` in a `->` arrow closes nothing — skipping it keeps function-typed params (closures) intact.
-function depthDelta(s: string, i: number): number {
-  const ch = s[i];
-  if (ch in OPEN) return 1;
-  if (CLOSE.has(ch)) return ch === ">" && s[i - 1] === "-" ? 0 : -1;
-  return 0;
-}
-
-function topLevelIndexOf(s: string, needle: string): number {
-  let depth = 0;
-  for (let i = 0; i < s.length; i++) {
-    if (depth === 0 && s.startsWith(needle, i)) {
-      return i;
-    }
-    depth += depthDelta(s, i);
+// Array/Dictionary/Set, a class, or an Optional of one: one register whatever the generic arguments.
+export function isSingleReference(type: TypeExpr): boolean {
+  if (type.kind === "optional") {
+    return isSingleReference(type.wrapped);
   }
-  return -1;
-}
-
-function lastTopLevelDot(s: string): number {
-  let depth = 0;
-  let last = -1;
-  for (let i = 0; i < s.length; i++) {
-    if (depth === 0 && s[i] === ".") {
-      last = i;
-    }
-    depth += depthDelta(s, i);
-  }
-  return last;
-}
-
-function matchingBracket(s: string, open: number): number {
-  let depth = 0;
-  for (let i = open; i < s.length; i++) {
-    depth += depthDelta(s, i);
-    if (depth === 0) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-export function splitTopLevel(s: string, sep: string): string[] {
-  if (s.trim() === "") {
-    return [];
-  }
-  const parts: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < s.length; i++) {
-    if (depth === 0 && s.startsWith(sep, i)) {
-      parts.push(s.slice(start, i));
-      i += sep.length - 1;
-      start = i + 1;
-      continue;
-    }
-    depth += depthDelta(s, i);
-  }
-  parts.push(s.slice(start));
-  return parts.map((p) => p.trim());
+  return type.kind === "nominal" && (REFERENCE_CONTAINERS.has(type.name) || findType(type.name)?.kind === ContextDescriptorKind.Class);
 }

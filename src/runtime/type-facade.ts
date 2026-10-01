@@ -4,7 +4,7 @@ import { SwiftValue } from "../abi/instance.js";
 import { enumerateFields } from "../abi/field-descriptor.js";
 import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, RAW } from "./object-facade.js";
 import { makeSwiftNativeFunction } from "./calling-convention.js";
-import { resolveType } from "./symbolication.js";
+import { resolveType, parseTypeExpr } from "./symbolication.js";
 import {
   BoundMethod,
   BoundAsyncMethod,
@@ -183,7 +183,7 @@ interface ClassInitializer {
 }
 
 function isOptionalTypeName(name: string): boolean {
-  return /[?!]$/.test(name) || name.startsWith("Swift.Optional<");
+  return parseTypeExpr(name)?.kind === "optional";
 }
 
 // A lone plain { label: value } object selects a labeled initializer, keys mapping to labels in order;
