@@ -30,7 +30,7 @@ import {
   FoundMember,
   bindConformanceMethod,
 } from "./method.js";
-import { findType, swiftTypes } from "../reflection/registry.js";
+import { findNestedType, nestedTypeNamesOf } from "../reflection/registry.js";
 import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 import {
   NominalType,
@@ -408,7 +408,7 @@ function typeFacadeState(target: SwiftTypeFacade): TypeFacadeState {
         }
         return nestedType(t, key) ?? undefined;
       },
-      ownKeys: (t, own) => [...new Set([...own.methods, ...own.properties, ...enumCases(t).keys(), ...nestedTypeNames(t)])],
+      ownKeys: (t, own) => [...new Set([...own.methods, ...own.properties, ...enumCases(t).keys(), ...nestedTypeNamesOf(t.$type.name)])],
       owner: () => target.$type.name,
       propertyNoun: "static property",
     };
@@ -431,20 +431,8 @@ function enumCases(target: SwiftTypeFacade): Map<string, boolean> {
 }
 
 function nestedType(target: SwiftTypeFacade, key: string): SwiftTypeFacade | null {
-  const descriptor = findType(`${target.$type.name}.${key}`);
+  const descriptor = findNestedType(target.$type.name, key);
   return descriptor === null ? null : typeFromDescriptor(descriptor).facade;
-}
-
-function nestedTypeNames(target: SwiftTypeFacade): string[] {
-  const prefix = `${target.$type.name}.`;
-  const names: string[] = [];
-  for (const descriptor of swiftTypes()) {
-    const simple = descriptor.name;
-    if (simple !== null && descriptor.fullTypeName === prefix + simple) {
-      names.push(simple);
-    }
-  }
-  return names;
 }
 
 function typeFacadeHas(target: SwiftTypeFacade, key: string): boolean {

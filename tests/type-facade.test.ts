@@ -64,6 +64,9 @@ describe("Swift type member sugar", () => {
     const Outer = Swift.modules.fixture.Outer as SwiftStruct;
     expect(Outer.Inner).toBe(Swift.type("fixture.Outer.Inner"));
     expect(Outer.FromExt.$type.name).toBe("fixture.Outer.FromExt");
+    const Optional = Swift.type("Swift.Optional")!;
+    expect(Object.keys(Optional)).toContain("ExtensionProbe");
+    expect(Optional.ExtensionProbe.$type.name).toBe("Swift.Optional.ExtensionProbe");
     expect(Outer.Inner.$new({ value: 21 }).doubled()).toEqual(int64(42));
   });
 

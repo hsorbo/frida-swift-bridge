@@ -28,6 +28,8 @@ describe("the JS fallback for the Swift resolver", () => {
       "types:*!fixture.Robot",
       "types:*!*.Robot",
       "types:*!(extension in fixture):*",
+      "types:*!fixture.Outer.*",
+      "types:*!(extension in *):Swift.Optional*.*",
       `protocols:${conformance.path}!*`,
       "protocols:*!fixture.*",
       "protocols:*!*.Flyable",

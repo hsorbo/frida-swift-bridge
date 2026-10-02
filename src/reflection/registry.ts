@@ -21,6 +21,10 @@ export function* enumerateSwiftModules(): Generator<Module> {
   }
 }
 
+// Hits only: a qualified name's descriptor never changes, while a miss can be answered by a module
+// loaded later.
+const resolved = new Map<string, ContextDescriptor>();
+
 function* typeDescriptors(query: string): Generator<ContextDescriptor> {
   for (const match of swiftMatches(query)) {
     const descriptor = new ContextDescriptor(match.address);
@@ -43,6 +47,34 @@ export function* swiftImages(): Generator<Module> {
 export function* typesNamedUnder(moduleName: string): Generator<ContextDescriptor> {
   yield* typeDescriptors(`types:*!${moduleName}.*`);
   yield* typeDescriptors(`types:*!(extension in ${moduleName}):*`);
+}
+
+function* nestedTypes(parentName: string, name: string): Generator<ContextDescriptor> {
+  for (const query of [`types:*!${parentName}.${name}`, `types:*!(extension in *):${parentName}*.${name}`]) {
+    for (const descriptor of typeDescriptors(query)) {
+      const simple = descriptor.name;
+      if (simple !== null && descriptor.fullTypeName === `${parentName}.${simple}`) {
+        yield descriptor;
+      }
+    }
+  }
+}
+
+export function nestedTypeNamesOf(parentName: string): string[] {
+  return [...nestedTypes(parentName, "*")].map((descriptor) => descriptor.name!);
+}
+
+export function findNestedType(parentName: string, name: string): ContextDescriptor | null {
+  const fullName = `${parentName}.${name}`;
+  const hit = resolved.get(fullName);
+  if (hit !== undefined) {
+    return hit;
+  }
+  for (const descriptor of nestedTypes(parentName, name)) {
+    resolved.set(fullName, descriptor);
+    return descriptor;
+  }
+  return null;
 }
 
 export function* swiftTypes(module?: Module): Generator<ContextDescriptor> {
@@ -68,10 +100,6 @@ export function* swiftStructs(module?: Module): Generator<ContextDescriptor> {
 export function* swiftEnums(module?: Module): Generator<ContextDescriptor> {
   yield* typesByKind(ContextDescriptorKind.Enum, module);
 }
-
-// Hits only: a qualified name's descriptor never changes, while a miss can be answered by a module
-// loaded later.
-const resolved = new Map<string, ContextDescriptor>();
 
 export function findType(name: string): ContextDescriptor | null {
   const hit = resolved.get(name);
