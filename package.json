@@ -34,15 +34,15 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "frida": "^17.16.0",
+    "frida": "^17.20.0",
     "typescript": "^6.0.3"
   },
   "devDependencies": {
-    "@frida/injest": "^0.1.4",
+    "@frida/injest": "^0.1.5",
     "@types/frida-gum": "^19.10.0",
     "@types/node": "^26.1.0"
   },
   "allowScripts": {
-    "frida@17.11.0": true
+    "frida@17.20.0": true
   }
 }
