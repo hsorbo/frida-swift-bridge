@@ -810,21 +810,69 @@ function tokenIsSpelled(module: Module, token: string): boolean {
 }
 
 function scanMembers(module: Module, fullName: string, token: string | null): TypeMembers {
+  if (token === null) {
+    const exported = exportedByContext(module).get(fullName) ?? { methods: [], accessors: [] };
+    const seen = new Set(exported.methods.map((c) => c.address.strip().toString()));
+    const inits = (initializersByContext(module).get(fullName)?.methods ?? []).filter((c) => !seen.has(c.address.strip().toString()));
+    return { methods: [...exported.methods, ...inits], accessors: exported.accessors };
+  }
   const members: TypeMembers = { methods: [], accessors: [] };
   const seen = new Set<string>();
-  const prefix = token === null ? null : `$s${token}`;
-  // initsOnly restricts the symbol-table pass to initializers: value-type inits are omitted from the
-  // export trie in non-library-evolution builds, but regular non-exported methods stay reachable only
-  // via the vtable, not the symbol route. The export trie carries everything else.
-  const exports = token === null ? module.enumerateExports() : swiftExportsOfTokens(module, [token])[0];
-  for (const e of exports) {
+  const prefix = `$s${token}`;
+  for (const e of swiftExportsOfTokens(module, [token])[0]) {
     considerMember(members, seen, fullName, e.name, e.address, false, false);
   }
-  const initializers = prefix === null ? initializerSymbols(module) : initializerSymbolsWithPrefix(module, prefix);
-  for (const s of initializers) {
+  for (const s of initializerSymbolsWithPrefix(module, prefix)) {
     considerMember(members, seen, fullName, s.name, s.address, true, false);
   }
   return members;
+}
+
+const exportedIndexes = new Map<string, Map<string, TypeMembers>>();
+const initializerIndexes = new Map<string, Map<string, TypeMembers>>();
+
+function exportedByContext(module: Module): Map<string, TypeMembers> {
+  const key = moduleKey(module);
+  let index = exportedIndexes.get(key);
+  if (index === undefined) {
+    index = indexByContext(module.enumerateExports(), false);
+    exportedIndexes.set(key, index);
+  }
+  return index;
+}
+
+function initializersByContext(module: Module): Map<string, TypeMembers> {
+  const key = moduleKey(module);
+  let index = initializerIndexes.get(key);
+  if (index === undefined) {
+    index = indexByContext(initializerSymbols(module), true);
+    initializerIndexes.set(key, index);
+  }
+  return index;
+}
+
+function indexByContext(symbols: PrefixedExport[], initsOnly: boolean): Map<string, TypeMembers> {
+  const byContext = new Map<string, TypeMembers>();
+  const seen = new Set<string>();
+  for (const s of symbols) {
+    const key = s.address.strip().toString();
+    if (s.address.isNull() || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    const demangled = demangledMember(s.name);
+    const parsed = demangled === null ? null : parseMember(demangled, s.name, s.address, initsOnly, false);
+    if (parsed === null) {
+      continue;
+    }
+    let members = byContext.get(parsed.context);
+    if (members === undefined) {
+      members = { methods: [], accessors: [] };
+      byContext.set(parsed.context, members);
+    }
+    addMember(members, parsed);
+  }
+  return byContext;
 }
 
 function considerMember(
@@ -841,30 +889,60 @@ function considerMember(
     return;
   }
   seen.add(key);
-  const demangled = demangle(name)?.replace(PRIVATE_DECL_NAME, "$1") ?? null;
-  if (demangled === null) {
+  const demangled = demangledMember(name);
+  if (demangled === null || !demangled.includes(fullName)) {
     return;
   }
-  if (!demangled.includes(fullName)) {
-    return;
+  const parsed = parseMember(demangled, name, address, initsOnly, withConstrainedExtensions);
+  if (parsed !== null && parsed.context === fullName) {
+    addMember(members, parsed);
   }
+}
+
+interface ParsedMember {
+  context: string;
+  method: MethodCandidate | null;
+  accessor: AccessorCandidate | null;
+}
+
+function demangledMember(name: string): string | null {
+  return demangle(name)?.replace(PRIVATE_DECL_NAME, "$1") ?? null;
+}
+
+function parseMember(
+  demangled: string,
+  name: string,
+  address: NativePointer,
+  initsOnly: boolean,
+  withConstrainedExtensions: boolean
+): ParsedMember | null {
   const signature = parseSwiftSignature(demangled);
   if (signature === null) {
-    return;
+    return null;
   }
   if (signature.kind === "function") {
     if (initsOnly && signature.name !== "init") {
-      return;
+      return null;
     }
     const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
-    if (context === fullName) {
-      members.methods.push({ address, name: signature.name, mangled: name, isStatic, signature, constraints });
-    }
-  } else if (!initsOnly) {
-    const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
-    if (context === fullName) {
-      members.accessors.push({ address, member: signature.member, kind: signature.kind, type: signature.type, typeName: signature.typeName, isStatic, constraints });
-    }
+    return { context, method: { address, name: signature.name, mangled: name, isStatic, signature, constraints }, accessor: null };
+  }
+  if (initsOnly) {
+    return null;
+  }
+  const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
+  return {
+    context,
+    method: null,
+    accessor: { address, member: signature.member, kind: signature.kind, type: signature.type, typeName: signature.typeName, isStatic, constraints },
+  };
+}
+
+function addMember(members: TypeMembers, parsed: ParsedMember): void {
+  if (parsed.method !== null) {
+    members.methods.push(parsed.method);
+  } else if (parsed.accessor !== null) {
+    members.accessors.push(parsed.accessor);
   }
 }
 

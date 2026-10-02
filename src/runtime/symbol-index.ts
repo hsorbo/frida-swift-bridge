@@ -7,6 +7,7 @@ export interface PrefixedExport {
 
 interface ModuleIndex {
   initializers: PrefixedExport[] | null;
+  swiftSymbolNames: string[] | null;
   enumTags: PrefixedExport[] | null;
   exportsByToken: Map<string, PrefixedExport[]>;
 }
@@ -23,7 +24,7 @@ function indexOf(module: Module): ModuleIndex {
   const key = moduleKey(module);
   let index = indexes.get(key);
   if (index === undefined) {
-    index = { initializers: null, enumTags: null, exportsByToken: new Map() };
+    index = { initializers: null, swiftSymbolNames: null, enumTags: null, exportsByToken: new Map() };
     indexes.set(key, index);
   }
   return index;
@@ -74,8 +75,33 @@ function hasPrefix(name: string, prefix: string): boolean {
   return name.startsWith(prefix) || (name.charCodeAt(0) === 0x5f && name.startsWith(prefix, 1));
 }
 
+function swiftSymbolNames(module: Module): string[] {
+  const index = indexOf(module);
+  if (index.swiftSymbolNames === null) {
+    const names: string[] = [];
+    for (const s of module.enumerateSymbols()) {
+      if (isSwiftSymbol(s.name)) {
+        names.push(s.name.charCodeAt(0) === 0x5f ? s.name.slice(1) : s.name);
+      }
+    }
+    index.swiftSymbolNames = names.sort();
+  }
+  return index.swiftSymbolNames;
+}
+
 export function hasSwiftSymbolWithPrefix(module: Module, prefix: string): boolean {
-  return module.enumerateSymbols().some((s) => hasPrefix(s.name, prefix));
+  const names = swiftSymbolNames(module);
+  let lo = 0;
+  let hi = names.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (names[mid] < prefix) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo < names.length && names[lo].startsWith(prefix);
 }
 
 // The export trie omits a value type's initializers in a non-library-evolution build, and they are
