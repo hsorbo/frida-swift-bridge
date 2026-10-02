@@ -4,8 +4,8 @@ import {
   RelativeDirectPointer,
   RelativeIndirectablePointer,
 } from "../basic/relative-pointer.js";
-import { getSwiftSection, SwiftSection } from "../image/sections.js";
-import { conformanceScanner, ConformanceScanner } from "./conformance-scan.js";
+import { getSwiftSection } from "../image/sections.js";
+import { conformanceScanner } from "./conformance-scan.js";
 import { enumerateSwiftModules } from "../reflection/registry.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import {
@@ -201,18 +201,31 @@ function conformanceIndexOf(module: Module): ConformanceIndex {
   let index = conformanceIndexes.get(key);
   if (index === undefined) {
     index = { protocolsByType: new Map(), typesByProtocol: new Map() };
-    for (const conformance of enumerateProtocolConformances(module)) {
-      const type = conformance.typeDescriptor;
-      const protocol = conformance.protocol;
-      if (type === null || protocol === null) {
-        continue;
-      }
-      appendTo(index.protocolsByType, type.toString(), protocol);
-      appendTo(index.typesByProtocol, protocol.handle.toString(), new ContextDescriptor(type));
+    for (const { type, protocol } of conformancePairs(module)) {
+      appendTo(index.protocolsByType, type.toString(), new ContextDescriptor(protocol));
+      appendTo(index.typesByProtocol, protocol.toString(), new ContextDescriptor(type));
     }
     conformanceIndexes.set(key, index);
   }
   return index;
+}
+
+function* conformancePairs(module: Module): Generator<{ type: NativePointer; protocol: NativePointer }> {
+  const scanner = conformanceScanner();
+  if (scanner !== null) {
+    const section = getSwiftSection(module, "__swift5_proto");
+    if (section !== null) {
+      yield* scanner.pairsOf(section);
+    }
+    return;
+  }
+  for (const conformance of enumerateProtocolConformances(module)) {
+    const type = conformance.typeDescriptor;
+    const protocol = conformance.protocol;
+    if (type !== null && protocol !== null) {
+      yield { type, protocol: protocol.handle };
+    }
+  }
 }
 
 function appendTo(map: Map<string, ContextDescriptor[]>, key: string, value: ContextDescriptor): void {
@@ -224,10 +237,7 @@ function appendTo(map: Map<string, ContextDescriptor[]>, key: string, value: Con
   }
 }
 
-function collectAcrossModules(
-  scan: (scanner: ConformanceScanner, section: SwiftSection) => NativePointer[],
-  select: (index: ConformanceIndex) => ContextDescriptor[] | undefined
-): ContextDescriptor[] {
+function collectAcrossModules(select: (index: ConformanceIndex) => ContextDescriptor[] | undefined): ContextDescriptor[] {
   const result: ContextDescriptor[] = [];
   const seen = new Set<string>();
   const add = (descriptor: ContextDescriptor): void => {
@@ -237,32 +247,18 @@ function collectAcrossModules(
       result.push(descriptor);
     }
   };
-  const scanner = conformanceScanner();
   for (const module of enumerateSwiftModules()) {
-    if (scanner === null) {
-      (select(conformanceIndexOf(module)) ?? []).forEach(add);
-      continue;
-    }
-    const section = getSwiftSection(module, "__swift5_proto");
-    if (section !== null) {
-      scan(scanner, section).forEach((handle) => add(new ContextDescriptor(handle)));
-    }
+    (select(conformanceIndexOf(module)) ?? []).forEach(add);
   }
   return result;
 }
 
 export function conformingProtocols(typeDescriptor: NativePointer): ContextDescriptor[] {
   const key = typeDescriptor.toString();
-  return collectAcrossModules(
-    (scanner, section) => scanner.protocolsOf(section, typeDescriptor),
-    (index) => index.protocolsByType.get(key)
-  );
+  return collectAcrossModules((index) => index.protocolsByType.get(key));
 }
 
 export function conformingTypes(protocol: ContextDescriptor): ContextDescriptor[] {
   const key = protocol.handle.toString();
-  return collectAcrossModules(
-    (scanner, section) => scanner.typesOf(section, protocol.handle),
-    (index) => index.typesByProtocol.get(key)
-  );
+  return collectAcrossModules((index) => index.typesByProtocol.get(key));
 }

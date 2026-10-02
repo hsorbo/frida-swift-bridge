@@ -56,9 +56,8 @@ conformance_type (const ConformanceDescriptor * conformance)
   }
 }
 
-static guint
-scan (const gint32 * records, guint count, gconstpointer type, gconstpointer protocol,
-    gconstpointer * matches, guint capacity)
+guint
+conformance_pairs (const gint32 * records, guint count, gconstpointer * pairs, guint capacity)
 {
   guint found = 0;
   guint i;
@@ -66,49 +65,36 @@ scan (const gint32 * records, guint count, gconstpointer type, gconstpointer pro
   for (i = 0; i != count; i++)
   {
     const ConformanceDescriptor * conformance = resolve_indirectable (&records[i]);
-    gconstpointer conformance_protocol, t;
+    gconstpointer protocol, type;
 
     if (conformance == NULL)
       continue;
-    conformance_protocol = resolve_indirectable (&conformance->protocol);
-    t = conformance_type (conformance);
-    if (conformance_protocol == NULL || t == NULL)
-      continue;
-    if (type != NULL && t != type)
-      continue;
-    if (protocol != NULL && conformance_protocol != protocol)
+    protocol = resolve_indirectable (&conformance->protocol);
+    type = conformance_type (conformance);
+    if (protocol == NULL || type == NULL)
       continue;
     if (found < capacity)
-      matches[found] = (type != NULL) ? conformance_protocol : t;
+    {
+      pairs[2 * found] = type;
+      pairs[2 * found + 1] = protocol;
+    }
     found++;
   }
 
   return found;
 }
-
-guint
-protocols_of_type (const gint32 * records, guint count, gconstpointer type, gconstpointer * matches,
-    guint capacity)
-{
-  return scan (records, count, type, NULL, matches, capacity);
-}
-
-guint
-types_of_protocol (const gint32 * records, guint count, gconstpointer protocol, gconstpointer * matches,
-    guint capacity)
-{
-  return scan (records, count, NULL, protocol, matches, capacity);
-}
 `;
 
 const RECORD_SIZE = 4;
 
-type ScanFunction = NativeFunction<number, [NativePointer, number, NativePointer, NativePointer, number]>;
+export interface ConformancePair {
+  type: NativePointer;
+  protocol: NativePointer;
+}
 
 export interface ConformanceScanner {
   handle: CModule;
-  protocolsOf(section: SwiftSection, typeDescriptor: NativePointer): NativePointer[];
-  typesOf(section: SwiftSection, protocol: NativePointer): NativePointer[];
+  pairsOf(section: SwiftSection): ConformancePair[];
 }
 
 let scanner: ConformanceScanner | null | undefined;
@@ -132,29 +118,19 @@ export function conformanceScanner(): ConformanceScanner | null {
 
 function compileScanner(): ConformanceScanner {
   const cm = new CModule(code);
-  const signature: [NativeFunctionArgumentType, NativeFunctionArgumentType, NativeFunctionArgumentType,
-    NativeFunctionArgumentType, NativeFunctionArgumentType] = ["pointer", "uint", "pointer", "pointer", "uint"];
-  const protocolsOfType: ScanFunction = new NativeFunction(cm.protocols_of_type, "uint", signature);
-  const typesOfProtocol: ScanFunction = new NativeFunction(cm.types_of_protocol, "uint", signature);
-  let capacity = 64;
-  let matches = Memory.alloc(capacity * Process.pointerSize);
-  const run = (fn: ScanFunction, section: SwiftSection, key: NativePointer): NativePointer[] => {
-    const count = section.size / RECORD_SIZE;
-    let found = fn(section.address, count, key, matches, capacity);
-    if (found > capacity) {
-      capacity = found;
-      matches = Memory.alloc(capacity * Process.pointerSize);
-      found = fn(section.address, count, key, matches, capacity);
-    }
-    const result: NativePointer[] = [];
-    for (let i = 0; i !== found; i++) {
-      result.push(matches.add(i * Process.pointerSize).readPointer());
-    }
-    return result;
-  };
+  const conformancePairs = new NativeFunction(cm.conformance_pairs, "uint", ["pointer", "uint", "pointer", "uint"]);
   return {
     handle: cm,
-    protocolsOf: (section, typeDescriptor) => run(protocolsOfType, section, typeDescriptor),
-    typesOf: (section, protocol) => run(typesOfProtocol, section, protocol),
+    pairsOf(section) {
+      const count = section.size / RECORD_SIZE;
+      const pairs = Memory.alloc(count * 2 * Process.pointerSize);
+      const found = conformancePairs(section.address, count, pairs, count);
+      const result: ConformancePair[] = [];
+      for (let i = 0; i !== found; i++) {
+        const at = pairs.add(i * 2 * Process.pointerSize);
+        result.push({ type: at.readPointer(), protocol: at.add(Process.pointerSize).readPointer() });
+      }
+      return result;
+    },
   };
 }

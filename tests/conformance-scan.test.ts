@@ -8,10 +8,6 @@ import { getSwiftSection } from "../src/image/sections.js";
 import { enumerateProtocolConformances, findProtocol } from "../src/abi/protocol-conformance.js";
 import { conformanceScanner } from "../src/abi/conformance-scan.js";
 
-function sorted(pointers: NativePointer[]): string[] {
-  return pointers.map((p) => p.toString()).sort();
-}
-
 describe("native conformance scan", () => {
   test("agrees with the record-by-record walk in every loaded Swift module", () => {
     loadSwiftCore();
@@ -28,21 +24,13 @@ describe("native conformance scan", () => {
       if (section === null) {
         continue;
       }
-      const conformances = [...enumerateProtocolConformances(module)];
-      for (const type of [intType, describer]) {
-        const expected = conformances
-          .filter((c) => c.typeDescriptor?.equals(type) && c.protocol !== null)
-          .map((c) => c.protocol!.handle);
-        expect(sorted(scanner.protocolsOf(section, type))).toEqual(sorted(expected));
-        seen += expected.length;
-      }
-      for (const protocol of [hashable, labeled]) {
-        const expected = conformances
-          .filter((c) => c.protocol?.handle.equals(protocol) && c.typeDescriptor !== null)
-          .map((c) => c.typeDescriptor!);
-        expect(sorted(scanner.typesOf(section, protocol))).toEqual(sorted(expected));
-        seen += expected.length;
-      }
+      const expected = [...enumerateProtocolConformances(module)]
+        .filter((c) => c.typeDescriptor !== null && c.protocol !== null)
+        .map((c) => `${c.typeDescriptor}:${c.protocol!.handle}`)
+        .sort();
+      const scanned = scanner.pairsOf(section).map((p) => `${p.type}:${p.protocol}`).sort();
+      expect(scanned).toEqual(expected);
+      seen += expected.filter((pair) => [intType, describer, hashable, labeled].some((h) => pair.includes(h.toString()))).length;
     }
     expect(seen).toBeGreaterThan(0);
   });
