@@ -20,7 +20,8 @@ export type TypeExpr =
   | { kind: "optional"; text: string; wrapped: TypeExpr; implicitlyUnwrapped: boolean }
   | { kind: "metatype"; text: string; instance: TypeExpr; existential: boolean }
   | { kind: "existential"; text: string; members: TypeExpr[] }
-  | { kind: "opaque"; text: string; constraint: TypeExpr }
+  | { kind: "opaque"; text: string; constraint: TypeExpr | null }
+  | { kind: "sameType"; text: string; subject: TypeExpr; type: TypeExpr }
   | { kind: "variadic"; text: string; element: TypeExpr }
   | { kind: "pack"; text: string; element: TypeExpr };
 
@@ -42,7 +43,9 @@ export function childTypes(type: TypeExpr): TypeExpr[] {
     case "existential":
       return type.members;
     case "opaque":
-      return [type.constraint];
+      return type.constraint === null ? [] : [type.constraint];
+    case "sameType":
+      return [type.subject, type.type];
     case "variadic":
     case "pack":
       return [type.element];
@@ -178,7 +181,7 @@ class Parser {
       return { kind: "existential", text: this.text(start), members };
     }
     if (this.word("some")) {
-      const constraint = this.postfixed();
+      const constraint = this.atTypeStart() ? this.postfixed() : null;
       return { kind: "opaque", text: this.text(start), constraint };
     }
     if (this.word("repeat") || this.word("each")) {
@@ -204,6 +207,11 @@ class Parser {
       members.push(this.postfixed());
     }
     return members;
+  }
+
+  private atTypeStart(): boolean {
+    const ch = this.peek();
+    return ch === "(" || ch === "[" || IDENT_START.test(ch);
   }
 
   private atMetatypeSuffix(): boolean {
@@ -351,8 +359,7 @@ class Parser {
       if (this.peek() === "<") {
         this.pos++;
         for (;;) {
-          args.push(this.type());
-          this.skipSpaces();
+          args.push(this.genericArgument());
           if (this.peek() !== ",") {
             break;
           }
@@ -382,6 +389,20 @@ class Parser {
       return { kind: "optional", text, wrapped: args[0], implicitlyUnwrapped: false };
     }
     return { kind: "nominal", text, name, args };
+  }
+
+  // A parameterized existential's primary associated type prints as `Self.P.A == T`.
+  private genericArgument(): TypeExpr {
+    const start = this.pos;
+    const subject = this.type();
+    this.skipSpaces();
+    if (!this.at("== ")) {
+      return subject;
+    }
+    this.pos += 3;
+    const type = this.type();
+    this.skipSpaces();
+    return { kind: "sameType", text: this.text(start), subject, type };
   }
 
   // The bracketed text at the cursor, kept as is; the `>` of an arrow closes nothing.

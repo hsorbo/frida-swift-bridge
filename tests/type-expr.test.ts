@@ -89,7 +89,13 @@ describe("parseTypeExpr", () => {
     expect(any.kind === "existential" && any.members.map((m) => m.text).join("|")).toBe("Swift.Hashable|Swift.Sendable");
     expect(parseTypeExpr("Swift.Equatable & Swift.Hashable")!.kind).toBe("existential");
     const some = parseTypeExpr("some Swift.Sequence")!;
-    expect(some.kind === "opaque" && some.constraint.text === "Swift.Sequence").toBe(true);
+    expect(some.kind === "opaque" && some.constraint?.text === "Swift.Sequence").toBe(true);
+    const bare = parseTypeExpr("some")!;
+    expect(bare.kind === "opaque" && bare.constraint === null).toBe(true);
+    const parameterized = parseTypeExpr("any fixture.Holder<Self.fixture.Holder.Item == Swift.Int>")!;
+    if (parameterized.kind !== "existential" || parameterized.members[0].kind !== "nominal") throw new Error(parameterized.text);
+    const arg = parameterized.members[0].args[0];
+    expect(arg.kind === "sameType" && arg.subject.text === "Self.fixture.Holder.Item" && arg.type.text === "Swift.Int").toBe(true);
     const variadic = parseTypeExpr("Swift.Int...")!;
     expect(variadic.kind === "variadic" && variadic.element.text === "Swift.Int").toBe(true);
     expect(parseTypeExpr("repeat each A")!.kind).toBe("pack");
@@ -139,6 +145,13 @@ describe("parseSwiftSignature", () => {
     expect(onMember.conformanceRequirements).toEqual([{ subject: "A", protocol: "Swift.Sequence" }]);
     expect(fn("m.f<A, B where A == B>(A, B) -> A").simpleGenerics).toBe(false);
     expect(fn("m.f<A where A == Swift.Int>(A) -> A").simpleGenerics).toBe(false);
+  });
+
+  test("keeps a function whose result is a bare opaque type or a parameterized existential", () => {
+    expect(fn("fixture.makeOpaqueGreeter() -> some").returnTypeName).toBe("some");
+    const holder = fn("fixture.makeHolderInt() -> any fixture.Holder<Self.fixture.Holder.Item == Swift.Int>");
+    expect(holder.returnTypeName).toBe("any fixture.Holder<Self.fixture.Holder.Item == Swift.Int>");
+    expect(holder.result?.kind).toBe("existential");
   });
 
   test("returns null for entity lines that are not a function or accessor", () => {
