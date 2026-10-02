@@ -58,8 +58,7 @@ import {
   compareProtocolDescriptors,
   getExistentialTypeMetadata,
 } from "../abi/existential.js";
-import { PrefixedExport } from "./export-trie.js";
-import { moduleKey, swiftExportsOfTokens, hasSwiftSymbolWithPrefix, initializerSymbols, initializerSymbolsWithPrefix } from "./symbol-index.js";
+import { PrefixedExport, moduleKey, swiftExportsOfTokens, hasSwiftSymbolWithPrefix, initializerSymbols, initializerSymbolsWithPrefix } from "./symbol-index.js";
 import {
   findProtocol,
   conformsToProtocol,
