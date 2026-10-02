@@ -1,6 +1,6 @@
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
-import { protocolDescriptors } from "../abi/protocol-conformance.js";
-import { findType, swiftTypes } from "../reflection/registry.js";
+import { protocolDescriptors, protocolsNamedUnder } from "../abi/protocol-conformance.js";
+import { findType, swiftTypes, typesNamedUnder } from "../reflection/registry.js";
 import { typeFromDescriptor } from "./swift-type.js";
 import { SwiftTypeFacade } from "./type-facade.js";
 import { Protocol, StableProtocol } from "./protocol.js";
@@ -12,9 +12,14 @@ export type ModuleRegistry = { readonly [module: string]: ModuleNamespace };
 
 const ENUMERABLE = { writable: false, configurable: true, enumerable: true };
 
-function* declarations(): Generator<ContextDescriptor> {
-  yield* swiftTypes();
-  yield* protocolDescriptors();
+function* declarations(moduleName?: string): Generator<ContextDescriptor> {
+  if (moduleName === undefined) {
+    yield* swiftTypes();
+    yield* protocolDescriptors();
+    return;
+  }
+  yield* typesNamedUnder(moduleName);
+  yield* protocolsNamedUnder(moduleName);
 }
 
 // A private declaration sits under an anonymous context between it and its module.
@@ -33,7 +38,7 @@ function moduleExists(name: string): boolean {
   if (knownModules.has(name)) {
     return true;
   }
-  for (const descriptor of declarations()) {
+  for (const descriptor of declarations(name)) {
     if (descriptor.moduleName === name) {
       knownModules.add(name);
       return true;
@@ -87,7 +92,7 @@ function moduleNamespace(moduleName: string): ModuleNamespace {
     `Swift.modules.${moduleName}`,
     (name) => findMember(moduleName, name),
     function* () {
-      for (const descriptor of declarations()) {
+      for (const descriptor of declarations(moduleName)) {
         const name = descriptor.name;
         if (name !== null && topLevelModuleName(descriptor) === moduleName) {
           yield name;

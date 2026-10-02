@@ -1,9 +1,7 @@
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
-import {
-  getSwiftSection,
-  enumerateTypeContextDescriptors,
-} from "../image/sections.js";
+import { getSwiftSection } from "../image/sections.js";
 import { moduleKey } from "../runtime/symbol-index.js";
+import { swiftMatches } from "../runtime/swift-resolver.js";
 
 const SWIFT_SECTIONS = ["__swift5_types", "__swift5_proto", "__swift5_protos", "__swift5_types2"];
 
@@ -23,114 +21,32 @@ export function* enumerateSwiftModules(): Generator<Module> {
   }
 }
 
-export function* enumerateTypes(module: Module): Generator<ContextDescriptor> {
-  for (const handle of enumerateTypeContextDescriptors(module)) {
-    const descriptor = new ContextDescriptor(handle);
+function* typeDescriptors(query: string): Generator<ContextDescriptor> {
+  for (const match of swiftMatches(query)) {
+    const descriptor = new ContextDescriptor(match.address);
     if (descriptor.isType) {
       yield descriptor;
     }
   }
 }
 
-interface TypeScan {
-  parsed: ContextDescriptor[];
-  remaining: Generator<ContextDescriptor> | null;
-  firstModuleName?: string | null;
-  index: TypeIndex | null;
-}
-
-// Built once an image's parse is complete: its types by simple name, and the first component of every
-// full name in it (an image normally holds one module, but a type nested in an extension of another
-// module's type is named under that module).
-interface TypeIndex {
-  byName: Map<string, ContextDescriptor[]>;
-  moduleNames: Set<string>;
-}
-
-// Stale after dlclose, but Swift dylibs are effectively never unloaded.
-const typeScansByModulePath = new Map<string, TypeScan>();
-
-function scanOf(module: Module): TypeScan {
-  let scan = typeScansByModulePath.get(module.path);
-  if (scan === undefined) {
-    scan = { parsed: [], remaining: enumerateTypes(module), index: null };
-    typeScansByModulePath.set(module.path, scan);
-  }
-  return scan;
-}
-
-function* typesOf(module: Module): Generator<ContextDescriptor> {
-  const scan = scanOf(module);
-  for (let i = 0; ; i++) {
-    if (i < scan.parsed.length) {
-      yield scan.parsed[i];
-      continue;
-    }
-    if (scan.remaining === null) {
-      return;
-    }
-    const next = scan.remaining.next();
-    if (next.done) {
-      scan.remaining = null;
-      return;
-    }
-    scan.parsed.push(next.value);
-    yield next.value;
-  }
-}
-
-// The module its first type belongs to: one descriptor read, enough to tell which image a
-// qualified name most likely lives in without parsing the rest.
-function firstModuleNameOf(module: Module): string | null {
-  const scan = scanOf(module);
-  if (scan.firstModuleName === undefined) {
-    const first = typesOf(module).next();
-    scan.firstModuleName = first.done ? null : first.value.moduleName;
-  }
-  return scan.firstModuleName;
-}
-
-function indexOf(module: Module): TypeIndex {
-  const scan = scanOf(module);
-  if (scan.index === null) {
-    for (const _ of typesOf(module)) {
-      // complete the parse
-    }
-    const byName = new Map<string, ContextDescriptor[]>();
-    const moduleNames = new Set<string>();
-    for (const descriptor of scan.parsed) {
-      const name = descriptor.name;
-      if (name === null) {
-        continue;
-      }
-      const list = byName.get(name);
-      if (list === undefined) {
-        byName.set(name, [descriptor]);
-      } else {
-        list.push(descriptor);
-      }
-      const fullName = descriptor.fullTypeName;
-      if (fullName !== null) {
-        moduleNames.add(fullName.slice(0, fullName.indexOf(".")));
-      }
-    }
-    scan.index = { byName, moduleNames };
-  }
-  return scan.index;
+export function* enumerateTypes(module: Module): Generator<ContextDescriptor> {
+  yield* typeDescriptors(`types:${module.path}!*`);
 }
 
 export function* swiftImages(): Generator<Module> {
   yield* enumerateSwiftModules();
 }
 
+// A type declared in the module's extension of another module's type is spelled
+// `(extension in M):Outer.Name` by the resolver and listed under M like any other declaration.
+export function* typesNamedUnder(moduleName: string): Generator<ContextDescriptor> {
+  yield* typeDescriptors(`types:*!${moduleName}.*`);
+  yield* typeDescriptors(`types:*!(extension in ${moduleName}):*`);
+}
+
 export function* swiftTypes(module?: Module): Generator<ContextDescriptor> {
-  if (module !== undefined) {
-    yield* typesOf(module);
-    return;
-  }
-  for (const m of enumerateSwiftModules()) {
-    yield* typesOf(m);
-  }
+  yield* module === undefined ? typeDescriptors("types:*!*") : enumerateTypes(module);
 }
 
 function* typesByKind(kind: ContextDescriptorKind, module?: Module): Generator<ContextDescriptor> {
@@ -153,6 +69,8 @@ export function* swiftEnums(module?: Module): Generator<ContextDescriptor> {
   yield* typesByKind(ContextDescriptorKind.Enum, module);
 }
 
+// Hits only: a qualified name's descriptor never changes, while a miss can be answered by a module
+// loaded later.
 const resolved = new Map<string, ContextDescriptor>();
 
 export function findType(name: string): ContextDescriptor | null {
@@ -164,42 +82,33 @@ export function findType(name: string): ContextDescriptor | null {
   if (dot === -1) {
     return findUniqueType(name);
   }
-  const simpleName = name.slice(dot + 1);
-  const moduleName = name.slice(0, name.indexOf("."));
-  const images = [...enumerateSwiftModules()];
-  // The images whose first type names the module are indexed first; only if none holds the type is
-  // every other image parsed, which also settles later misses without another walk.
-  const likely = images.filter((m) => firstModuleNameOf(m) === moduleName);
-  const others = images.filter((m) => firstModuleNameOf(m) !== moduleName);
-  for (const module of [...likely, ...others]) {
-    const index = indexOf(module);
-    if (!index.moduleNames.has(moduleName)) {
-      continue;
-    }
-    const descriptor = (index.byName.get(simpleName) ?? []).find((d) => d.fullTypeName === name);
-    if (descriptor !== undefined) {
-      resolved.set(name, descriptor);
-      return descriptor;
+  // The resolver spells a type declared in another module's extension as the demangler does,
+  // `(extension in M):Outer<A>.Name`, so a name the exact spelling misses is retried by its last
+  // component and settled by the bridge's own spelling.
+  for (const query of [`types:*!${name}`, `types:*!*.${name.slice(dot + 1)}`]) {
+    for (const descriptor of typeDescriptors(query)) {
+      if (descriptor.fullTypeName === name) {
+        resolved.set(name, descriptor);
+        return descriptor;
+      }
     }
   }
   return null;
 }
 
-// A bare name is accepted only when it resolves uniquely across loaded images, so every image is
-// indexed before committing. Distinct descriptors that share a qualified name denote the same type
-// (dyld cache aliases), not ambiguity. Never cached: a later-loaded image can make it ambiguous.
+// A bare name is accepted only when it resolves uniquely across loaded images. Distinct descriptors
+// that share a qualified name denote the same type (dyld cache aliases), not ambiguity. Never
+// cached: a later-loaded image can make it ambiguous.
 function findUniqueType(simpleName: string): ContextDescriptor | null {
   let match: ContextDescriptor | null = null;
   const candidateNames = new Set<string>();
-  for (const module of enumerateSwiftModules()) {
-    for (const descriptor of indexOf(module).byName.get(simpleName) ?? []) {
-      const fullName = descriptor.fullTypeName;
-      if (fullName === null) {
-        continue;
-      }
-      match = descriptor;
-      candidateNames.add(fullName);
+  for (const descriptor of typeDescriptors(`types:*!*.${simpleName}`)) {
+    const fullName = descriptor.fullTypeName;
+    if (fullName === null || descriptor.name !== simpleName) {
+      continue;
     }
+    match = descriptor;
+    candidateNames.add(fullName);
   }
   if (candidateNames.size > 1) {
     throw new Error(`ambiguous type name "${simpleName}": ${[...candidateNames].sort().join(", ")}; qualify it with a module`);

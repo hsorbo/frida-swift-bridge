@@ -1,12 +1,11 @@
-import { ContextDescriptor } from "./context-descriptor.js";
+import { ContextDescriptor, ContextDescriptorKind } from "./context-descriptor.js";
 import { Metadata } from "./metadata.js";
 import {
   RelativeDirectPointer,
   RelativeIndirectablePointer,
 } from "../basic/relative-pointer.js";
 import { getSwiftSection } from "../image/sections.js";
-import { conformanceScanner } from "./conformance-scan.js";
-import { enumerateSwiftModules } from "../reflection/registry.js";
+import { swiftMatches } from "../runtime/swift-resolver.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import {
   GenericRequirementDescriptor,
@@ -116,27 +115,22 @@ function resolveProtocolRecord(record: NativePointer): NativePointer | null {
   return (offset & 1) !== 0 ? address.readPointer().strip() : address;
 }
 
-const cachedProtocolsByModulePath = new Map<string, ContextDescriptor[]>();
-
-function protocolsOf(module: Module): ContextDescriptor[] {
-  let list = cachedProtocolsByModulePath.get(module.path);
-  if (list === undefined) {
-    list = [...enumerateProtocols(module)];
-    cachedProtocolsByModulePath.set(module.path, list);
+function* protocolsMatching(query: string): Generator<ContextDescriptor> {
+  for (const match of swiftMatches(query)) {
+    yield new ContextDescriptor(match.address);
   }
-  return list;
 }
 
 export function* protocolDescriptors(module?: Module): Generator<ContextDescriptor> {
-  if (module !== undefined) {
-    yield* protocolsOf(module);
-    return;
-  }
-  for (const m of enumerateSwiftModules()) {
-    yield* protocolsOf(m);
-  }
+  yield* protocolsMatching(module === undefined ? "protocols:*!*" : `protocols:${module.path}!*`);
 }
 
+export function* protocolsNamedUnder(moduleName: string): Generator<ContextDescriptor> {
+  yield* protocolsMatching(`protocols:*!${moduleName}.*`);
+}
+
+// Hits only: a qualified name's descriptor never changes, while a miss can be answered by a module
+// loaded later.
 const resolvedProtocols = new Map<string, ContextDescriptor>();
 
 export function findProtocol(name: string): ContextDescriptor | null {
@@ -144,38 +138,29 @@ export function findProtocol(name: string): ContextDescriptor | null {
   if (hit !== undefined) {
     return hit;
   }
-
-  const dot = name.lastIndexOf(".");
-  const simpleName = dot === -1 ? name : name.slice(dot + 1);
-  const qualified = dot === -1 ? null : name;
-
-  let match: ContextDescriptor | null = null;
-  const candidateNames = new Set<string>();
-  for (const module of enumerateSwiftModules()) {
-    for (const protocol of protocolsOf(module)) {
-      if (protocol.name !== simpleName) {
-        continue;
-      }
-      if (qualified !== null) {
-        if (protocol.fullTypeName !== qualified) {
-          continue;
-        }
+  if (name.includes(".")) {
+    for (const protocol of protocolsMatching(`protocols:*!${name}`)) {
+      if (protocol.fullTypeName === name) {
         resolvedProtocols.set(name, protocol);
         return protocol;
       }
-      const fullName = protocol.fullTypeName;
-      if (fullName === null) {
-        continue;
-      }
-      match = protocol;
-      candidateNames.add(fullName);
     }
+    return null;
+  }
+  // Never cached: a later-loaded image can make a bare name ambiguous.
+  let match: ContextDescriptor | null = null;
+  const candidateNames = new Set<string>();
+  for (const protocol of protocolsMatching(`protocols:*!*.${name}`)) {
+    const fullName = protocol.fullTypeName;
+    if (fullName === null || protocol.name !== name) {
+      continue;
+    }
+    match = protocol;
+    candidateNames.add(fullName);
   }
   if (candidateNames.size > 1) {
     throw new Error(`ambiguous protocol name "${name}": ${[...candidateNames].sort().join(", ")}; qualify it with a module`);
   }
-
-  // Never cached: a later-loaded image can make a bare name ambiguous.
   return match;
 }
 
@@ -187,78 +172,67 @@ export function conformsToProtocol(
   return witnessTable.isNull() ? null : witnessTable;
 }
 
-interface ConformanceIndex {
-  protocolsByType: Map<string, ContextDescriptor[]>;
-  typesByProtocol: Map<string, ContextDescriptor[]>;
-}
-
-const conformanceIndexes = new Map<string, ConformanceIndex>();
-
-// Keyed on the module, not on the answer: "T conforms to nothing" stops being true as soon as a
-// module declaring a retroactive conformance is loaded.
-function conformanceIndexOf(module: Module): ConformanceIndex {
-  const key = `${module.path}@${module.base}`;
-  let index = conformanceIndexes.get(key);
-  if (index === undefined) {
-    index = { protocolsByType: new Map(), typesByProtocol: new Map() };
-    for (const { type, protocol } of conformancePairs(module)) {
-      appendTo(index.protocolsByType, type.toString(), new ContextDescriptor(protocol));
-      appendTo(index.typesByProtocol, protocol.toString(), new ContextDescriptor(type));
-    }
-    conformanceIndexes.set(key, index);
-  }
-  return index;
-}
-
-function* conformancePairs(module: Module): Generator<{ type: NativePointer; protocol: NativePointer }> {
-  const scanner = conformanceScanner();
-  if (scanner !== null) {
-    const section = getSwiftSection(module, "__swift5_proto");
-    if (section !== null) {
-      yield* scanner.pairsOf(section);
-    }
-    return;
-  }
-  for (const conformance of enumerateProtocolConformances(module)) {
-    const type = conformance.typeDescriptor;
-    const protocol = conformance.protocol;
-    if (type !== null && protocol !== null) {
-      yield { type, protocol: protocol.handle };
-    }
+function* conformancesMatching(query: string): Generator<ProtocolConformance> {
+  for (const match of swiftMatches(query)) {
+    yield new ProtocolConformance(match.address);
   }
 }
 
-function appendTo(map: Map<string, ContextDescriptor[]>, key: string, value: ContextDescriptor): void {
-  const list = map.get(key);
-  if (list === undefined) {
-    map.set(key, [value]);
-  } else {
-    list.push(value);
-  }
-}
-
-function collectAcrossModules(select: (index: ConformanceIndex) => ContextDescriptor[] | undefined): ContextDescriptor[] {
-  const result: ContextDescriptor[] = [];
+function distinct(descriptors: Iterable<ContextDescriptor>): ContextDescriptor[] {
   const seen = new Set<string>();
-  const add = (descriptor: ContextDescriptor): void => {
-    const handle = descriptor.handle.toString();
-    if (!seen.has(handle)) {
-      seen.add(handle);
+  const result: ContextDescriptor[] = [];
+  for (const descriptor of descriptors) {
+    const key = descriptor.handle.toString();
+    if (!seen.has(key)) {
+      seen.add(key);
       result.push(descriptor);
     }
-  };
-  for (const module of enumerateSwiftModules()) {
-    (select(conformanceIndexOf(module)) ?? []).forEach(add);
   }
   return result;
 }
 
 export function conformingProtocols(typeDescriptor: NativePointer): ContextDescriptor[] {
-  const key = typeDescriptor.toString();
-  return collectAcrossModules((index) => index.protocolsByType.get(key));
+  const descriptor = new ContextDescriptor(typeDescriptor);
+  const name = descriptor.fullTypeName;
+  if (name === null) {
+    return [];
+  }
+  // The resolver spells a type declared in another module's extension as the demangler does,
+  // `(extension in M):Outer<A>.Name`, so such a type is matched by its last component instead.
+  const query = declaredInExtension(descriptor) ? `conformances:*.${descriptor.name}!*` : `conformances:${name}!*`;
+  const protocols: ContextDescriptor[] = [];
+  for (const conformance of conformancesMatching(query)) {
+    const protocol = conformance.protocol;
+    if (protocol !== null && conformance.typeDescriptor?.equals(typeDescriptor)) {
+      protocols.push(protocol);
+    }
+  }
+  return distinct(protocols);
+}
+
+function declaredInExtension(descriptor: ContextDescriptor): boolean {
+  for (let context = descriptor.parent; context !== null; context = context.parent) {
+    if (context.kind === ContextDescriptorKind.Extension) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function conformingTypes(protocol: ContextDescriptor): ContextDescriptor[] {
-  const key = protocol.handle.toString();
-  return collectAcrossModules((index) => index.typesByProtocol.get(key));
+  const name = protocol.fullTypeName;
+  if (name === null) {
+    return [];
+  }
+  const types: ContextDescriptor[] = [];
+  for (const conformance of conformancesMatching(`conformances:*!${name}`)) {
+    const type = conformance.typeDescriptor;
+    if (type !== null) {
+      const descriptor = new ContextDescriptor(type);
+      if (descriptor.isType) {
+        types.push(descriptor);
+      }
+    }
+  }
+  return distinct(types);
 }
