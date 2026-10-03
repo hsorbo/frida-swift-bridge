@@ -62,8 +62,6 @@ const MAX_INSTRUCTIONS = 256;
 const MAX_CALL_DEPTH = 2;
 const MAX_PROBED = 8;
 
-// Frida crashes reading operands of lane-indexed SIMD instructions, so operands are only read for the
-// scalar mnemonics this scan interprets.
 const arm64: ArchProbe = {
   selfRegister: SWIFTCC.self,
   asyncContextRegister: SWIFTCC.asyncContext,
@@ -87,7 +85,7 @@ const arm64: ArchProbe = {
     if (insn.mnemonic === "movk") {
       return { read: [], written: (insn as Arm64Instruction).regsAccessed.written };
     }
-    return null;
+    return undetailedMoveAccess(insn as Arm64Instruction);
   },
   controlFlow(insn, constants) {
     if (insn.groups.includes("return")) {
@@ -435,4 +433,15 @@ function recordRegisterUses(arch: ArchProbe, insn: Instruction, uses: Map<string
 
 function registerOperands(insn: Instruction): string[] {
   return (insn as Arm64Instruction).operands.flatMap((o) => (o.type === "reg" ? [o.value] : []));
+}
+
+// Capstone attaches no register detail to some lane and half-precision moves (smov x8, v0.b[0];
+// fmov h0, w8); their destination is the first operand and the sources follow.
+function undetailedMoveAccess(insn: Arm64Instruction): RegisterAccess | null {
+  const { read, written } = insn.regsAccessed;
+  const operands = insn.operands;
+  if (read.length > 0 || written.length > 0 || operands.length < 2 || !operands.every((o) => o.type === "reg")) {
+    return null;
+  }
+  return { read: registerOperands(insn).slice(1), written: [operands[0].value] };
 }
