@@ -887,6 +887,25 @@ buffer-style `(UnsafeRawBufferPointer) -> …` closures are supported. To throw
 out of a closure body, return a `SwiftThrow` (exported from
 `frida-swift-bridge2/abi`).
 
+A method generic over its closure's result, `withUnsafeBytes<R>(_ body:
+(UnsafeRawBufferPointer) throws -> R) rethrows -> R` say, needs `R` as a type
+argument like any other generic method. `typeArguments: []` binds every
+parameter that appears only as a closure result to `Void`: the JS closure
+returns nothing and the method returns `undefined`. A buffer closure receives
+the `UnsafeRawBufferPointer` as an object with `base`, `count` and
+`readBytes()`; the bytes are valid only while the closure runs, so copy them
+out:
+
+```js
+let bytes = null;
+key.$method("withUnsafeBytes", { typeArguments: [] })
+    .call(Swift.closure(buf => { bytes = buf.readBytes(); }));   // ArrayBuffer
+```
+
+Pass the type explicitly for a closure that returns a value: `{ typeArguments:
+[Swift.type("Swift.Int")] }`. A parameter that is not a closure result cannot be
+inferred and must be given.
+
 > Closure synthesis is platform-specific — it requires an arm64 or x86-64 Swift
 > host. On other architectures `Swift.closure` is unavailable.
 
