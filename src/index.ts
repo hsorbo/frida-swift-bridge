@@ -9,7 +9,7 @@ import {
   swiftStructs,
   swiftEnums,
 } from "./reflection/registry.js";
-import { symbolicate } from "./runtime/symbolication.js";
+import { symbolicate, resolveTypeExpr } from "./runtime/symbolication.js";
 import { SwiftInterceptor } from "./runtime/interceptor.js";
 import {
   NominalType,
@@ -17,6 +17,7 @@ import {
   StructType,
   EnumType,
   typeFromDescriptor,
+  typeOf,
   swiftFunction,
 } from "./runtime/swift-type.js";
 import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum } from "./runtime/type-facade.js";
@@ -44,16 +45,26 @@ function* nameable(
   }
 }
 
+// "Module.Name" is a declaration; "Module.Name<Args>" is a specialization, with its metadata built.
+function nominalTypeNamed(name: string): NominalType | null {
+  if (name.includes("<")) {
+    const metadata = resolveTypeExpr(name, () => null);
+    const type = metadata === null ? null : typeOf(metadata);
+    return type instanceof NominalType ? type : null;
+  }
+  const descriptor = findType(name);
+  return descriptor === null ? null : typeFromDescriptor(descriptor);
+}
+
 function typeOfKind<T extends NominalType>(
   name: string,
   ctor: new (descriptor: ContextDescriptor) => T,
   kind: string
 ): T["facade"] | null {
-  const descriptor = findType(name);
-  if (descriptor === null) {
+  const type = nominalTypeNamed(name);
+  if (type === null) {
     return null;
   }
-  const type = typeFromDescriptor(descriptor);
   if (!(type instanceof ctor)) {
     throw new Error(`'${name}' is ${type.kind}, not ${kind}`);
   }
@@ -161,8 +172,7 @@ export const Swift = {
   },
 
   type(name: string): SwiftTypeFacade | null {
-    const descriptor = findType(name);
-    return descriptor === null ? null : typeFromDescriptor(descriptor).facade;
+    return nominalTypeNamed(name)?.facade ?? null;
   },
 
   *enumerateTypes(module?: Module): Generator<SwiftTypeFacade> {

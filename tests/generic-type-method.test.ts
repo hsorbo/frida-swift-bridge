@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
-import { ValueInstance, Metadata, ClassInstance, metadataFor } from "../src/abi.js";
+import { ValueInstance, Metadata, ClassInstance, metadataFor, typeOf } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
@@ -183,5 +183,71 @@ describe("generic members found through their type", () => {
       listener.detach();
     }
     expect(seen).toEqual([["Swift.Array<Swift.Int>"]]);
+  });
+});
+
+describe("a generic type named with its type arguments", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("Swift.type resolves the specialization to the same reflection its metadata yields", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const KeyedInt = Swift.type("fixture.Keyed<Swift.Int>")!;
+    expect(KeyedInt.$type.name).toBe("fixture.Keyed<Swift.Int>");
+    expect(KeyedInt).toBe(Swift.struct("fixture.Keyed<Swift.Int>"));
+    expect(KeyedInt.$type).toBe(typeOf(metadataFor("fixture.Keyed", [Int])!));
+    expect(KeyedInt).not.toBe(Swift.type("fixture.Keyed"));
+    expect(Swift.type("fixture.Keyed<Swift.String>")).not.toBe(KeyedInt);
+    expect(Swift.type("fixture.Keyed<fixture.NoSuchTypeQX>")).toBeNull();
+    expect(Swift.type("fixture.NoSuchTypeQX<Swift.Int>")).toBeNull();
+    expect(() => Swift.class("fixture.Keyed<Swift.Int>")).toThrow("'fixture.Keyed<Swift.Int>' is struct, not class");
+  });
+
+  test("a static of a generic struct is called with the type's arguments trailing", () => {
+    const KeyedInt = Swift.struct("fixture.Keyed<Swift.Int>")!;
+    expect(KeyedInt.label(11)).toEqual(int64(11));
+    expect(KeyedInt.echo(21)).toEqual(int64(21));
+    expect(KeyedInt.$typeMethod("echo(_:)").call(22)).toEqual(int64(22));
+    expect(Swift.struct("fixture.Keyed<Swift.String>")!.echo("a")).toBe("a");
+  });
+
+  test("the type's witness tables trail its arguments", () => {
+    expect(Swift.struct("fixture.ConstrainedBox<Swift.Int>")!.scale(3, 7)).toEqual(int64(21));
+    const wide = Swift.type("fixture.WideScalar")!.$new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
+    expect(Swift.struct("fixture.ConstrainedBox<fixture.WideScalar>")!.scale(wide, 7)).toEqual(int64(105));
+  });
+
+  test("a class func of a generic class takes the specialization's metadata as self", () => {
+    const HolderInt = Swift.class("fixture.KeyedHolder<Swift.Int>")!;
+    expect(HolderInt.label(12)).toEqual(int64(12));
+    const made = HolderInt.make(5);
+    expect(made.$type).toBe(HolderInt.$type);
+    expect(made.$fields).toEqual({ value: int64(5) });
+    expect(Swift.class("fixture.KeyedHolder<Swift.String>")!.make("e").$fields).toEqual({ value: "e" });
+  });
+
+  test("a struct's initializer builds the specialization in place", () => {
+    const KeyedInt = Swift.struct("fixture.Keyed<Swift.Int>")!;
+    const keyed = KeyedInt.init(5)!;
+    expect(keyed.$type).toBe(KeyedInt.$type);
+    expect(keyed.$fields).toEqual({ value: int64(5) });
+    expect(keyed.get()).toEqual(int64(5));
+    expect(KeyedInt.$initializer("init(_:)").call(6)!.$fields).toEqual({ value: int64(6) });
+    expect(Swift.struct("fixture.Keyed<Swift.String>")!.init("c")!.get()).toBe("c");
+  });
+
+  test("a class's initializer allocates through the specialization's metadata", () => {
+    const HolderInt = Swift.class("fixture.KeyedHolder<Swift.Int>")!;
+    const holder = HolderInt.init(7);
+    expect(holder.$type).toBe(HolderInt.$type);
+    expect(holder.$fields).toEqual({ value: int64(7) });
+    expect(Swift.class("fixture.KeyedHolder<Swift.String>")!.init("e").$fields).toEqual({ value: "e" });
+  });
+
+  test("a method-level generic static stays hookable but not callable, at the shared address", () => {
+    const KeyedInt = Swift.struct("fixture.Keyed<Swift.Int>")!;
+    const first = KeyedInt.$typeMethod("first");
+    expect(first.address.equals(Swift.struct("fixture.Keyed")!.$typeMethod("first").address)).toBe(true);
+    expect(() => first.call(1, 2)).toThrow(/fixture\.Keyed<Swift\.Int>\.first\(_:_:\) is generic/);
+    expect(KeyedInt.$typeMethod("label").address.equals(Swift.struct("fixture.Keyed")!.$typeMethod("label").address)).toBe(true);
   });
 });

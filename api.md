@@ -134,6 +134,19 @@ Swift.type("MyApp.Point");      // resolves
 Swift.type("Geometry.Point");   // resolves
 ```
 
+A generic type named with its type arguments, `Module.Name<Args>`, resolves
+to that specialization: its metadata is built, so type methods and `init` can
+be called. The type named without arguments is the declaration, whose members
+are found and hookable but not callable. Each argument is spelled the same way;
+an argument that doesn't resolve makes the whole lookup `null`.
+
+```js
+const Keyed = Swift.type("MyApp.Keyed");              // the declaration
+const KeyedInt = Swift.type("MyApp.Keyed<Swift.Int>"); // a specialization
+KeyedInt.echo(21);                                     // 21
+Keyed.echo(21);                                        // throws: needs MyApp.Keyed's type arguments
+```
+
 When you know the kind, the singular forms return it precisely typed:
 `Swift.class(name)` yields a `SwiftClass`, `Swift.struct(name)` a `SwiftStruct`,
 and `Swift.enum(name)` a `SwiftEnum`. Name resolution is identical to
@@ -949,7 +962,7 @@ A hook on a static member of a generic type doesn't need the mangled name. Every
 specialization shares the member's unspecialized code, so the type named without
 its arguments still hands out the address. The hook fires for every `H`, and
 `this.typeArguments` says which. Calling needs the type arguments, so `call`
-throws instead:
+throws; name the type with them to call it:
 
 ```js
 const deriveKey = Swift.struct("CryptoKit.HKDF")
@@ -957,6 +970,7 @@ const deriveKey = Swift.struct("CryptoKit.HKDF")
 
 Swift.Interceptor.attach(deriveKey.address, { /* ... */ });
 deriveKey.call(key, 32);   // throws: "... needs CryptoKit.HKDF's type arguments"
+Swift.struct("CryptoKit.HKDF<CryptoKit.SHA256>").deriveKey(key, 32);   // a SymmetricKey
 ```
 
 A generic member is found the same way, by `$typeMethod`, `$initializer` or

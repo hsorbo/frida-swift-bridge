@@ -17,6 +17,8 @@ import {
   MethodResolveOptions,
   MemberOrigin,
   bindStaticMethod,
+  bindGenericTypeStaticMethod,
+  bindGenericTypeInitializer,
   bindValueInitializer,
   enumerateMethods,
   ModuleScope,
@@ -106,6 +108,9 @@ export abstract class SwiftValueType extends SwiftTypeFacade {
     if (isUnboundGeneric(type)) {
       return needsTypeArguments(type, type.typeMethod(name, options));
     }
+    if (descriptorOf(type).isGeneric) {
+      return genericMember(type.name, name, lookup) ?? narrowBoundMethod(bindGenericTypeStaticMethod(metadataOf(type), name, raw));
+    }
     if (findMethod(type.name, name, lookup) === null) {
       const generic = genericMember(type.name, name, lookup);
       if (generic !== null) {
@@ -121,6 +126,9 @@ export abstract class SwiftValueType extends SwiftTypeFacade {
     const raw = lowerResolveOptions(options);
     if (isUnboundGeneric(type)) {
       return needsTypeArguments(type, type.initializer(options));
+    }
+    if (descriptorOf(type).isGeneric) {
+      return genericMember(type.name, "init", raw) ?? narrowBoundInitializer(bindGenericTypeInitializer(metadataOf(type), raw));
     }
     if (findMethod(type.name, "init", raw) === null) {
       const generic = genericMember(type.name, "init", raw);
@@ -261,6 +269,13 @@ export class SwiftClass extends SwiftTypeFacade {
 
   $initializer(selector?: string | MemberLookupOptions, selectorOptions: MemberLookupOptions = {}): SwiftClassBoundInitializer {
     const options = initializerLookup(selector, selectorOptions);
+    if (!isUnboundGeneric(this.$type) && descriptorOf(this.$type).isGeneric) {
+      const raw = lowerResolveOptions(options);
+      return (
+        genericMember(this.$type.name, "__allocating_init", raw) ??
+        (bindGenericTypeInitializer(metadataOf(this.$type), raw) as unknown as SwiftClassBoundInitializer)
+      );
+    }
     const own = matchInitializers(this.resolveInitializers("definingModule"), options);
     const chosen =
       own.length === 1 ? own[0] : selectInitializer(this.resolveInitializers("allLoadedModules"), options);
@@ -299,6 +314,9 @@ export class SwiftClass extends SwiftTypeFacade {
     const raw = lowerResolveOptions({ ...options, static: true });
     if (isUnboundGeneric(type)) {
       return needsTypeArguments(type, type.typeMethod(name, options));
+    }
+    if (descriptorOf(type).isGeneric) {
+      return genericMember(type.name, name, raw) ?? narrowBoundMethod(bindGenericTypeStaticMethod(metadataOf(type), name, raw));
     }
     const resolved = findMethod(type.name, name, raw);
     const selfMetadata = metadataOf(type).handle;

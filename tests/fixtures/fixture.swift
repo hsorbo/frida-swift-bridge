@@ -402,6 +402,7 @@ public struct ConstrainedBox<T: Scalable> {
     public func storedAsync() async -> T { value }
     public func pick() -> T { value }
     public func pick() -> Int { -1 }
+    public static func scale(_ x: T, by k: Int) -> Int { x.scaled(by: k) }
 }
 // No stored T, so the layout is fixed in the generic context: a borrowing self rides as a direct
 // trailing arg followed by T's metadata and Scalable witness; a mutating self is inout in x20.

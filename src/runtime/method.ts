@@ -2015,10 +2015,22 @@ function compoundIsAddressOnly(type: TypeExpr, genericParams: string[], classBou
     }
     throw new Error(`unsupported compound generic signature type ${type.text} (Optional payload must be a generic parameter)`);
   }
-  if (type.kind === "nominal" && REFERENCE_CONTAINERS.has(type.name)) {
-    return false;
+  if (type.kind === "nominal") {
+    if (REFERENCE_CONTAINERS.has(type.name)) {
+      return false;
+    }
+    const descriptor = findType(type.name);
+    if (descriptor?.kind === ContextDescriptorKind.Class) {
+      return false;
+    }
+    if (descriptor?.isGeneric === true && type.args.length > 0) {
+      return (
+        !hasFixedLayoutInGenericContext(descriptor) &&
+        hasOpaqueLayout(type, (name) => (genericParams.includes(name) && !classBoundParams.has(name) ? "opaque" : null))
+      );
+    }
   }
-  throw new Error(`unsupported compound generic signature type ${type.text} (only [T], [K: V] and T? are supported)`);
+  throw new Error(`unsupported compound generic signature type ${type.text} (only [T], [K: V], T? and a nominal type are supported)`);
 }
 
 // inout passes the caller's value by address whatever its layout.
@@ -2458,6 +2470,33 @@ export function bindGenericTypeClassMethod(
   options: RawMethodResolveOptions = {}
 ): BoundMethod {
   return new BoundMethod(planGenericTypeMethod(receiver, methodName, options, false), { self });
+}
+
+// A type method of a specialization. A class takes its metadata as the thick metatype self; a value
+// type's metatype is thin, so the specialization's key arguments trail the formal ones instead.
+export function bindGenericTypeStaticMethod(receiver: Metadata, methodName: string, options: RawMethodResolveOptions = {}): BoundMethod {
+  const plan = planGenericTypeMethod(receiver, methodName, { ...options, static: true }, false);
+  if (receiver.kind === MetadataKind.Class) {
+    return new BoundMethod(plan, { self: receiver.handle });
+  }
+  Object.assign(plan, keyGenericArguments(receiver));
+  return new BoundMethod(plan);
+}
+
+// An initializer of a specialization, self-less like its statics; a class allocates through its
+// metadata. The arguments are consumed and the +1 result adopted, as bindValueInitializer does.
+export function bindGenericTypeInitializer(receiver: Metadata, options: RawMethodResolveOptions = {}): SwiftBoundInitializer {
+  const isClass = receiver.kind === MetadataKind.Class;
+  const plan = planGenericTypeMethod(receiver, isClass ? "__allocating_init" : "init", options, false);
+  const argConventions = plan.argPlans.map((_, i): ParamConvention => (plan.argConventions?.[i] === "inout" ? "inout" : "owned"));
+  let bound: BoundMethod;
+  if (isClass) {
+    bound = new BoundMethod({ ...plan, argConventions }, { self: receiver.handle });
+  } else {
+    Object.assign(plan, keyGenericArguments(receiver));
+    bound = new BoundMethod({ ...plan, argConventions }, { adoptResult: true });
+  }
+  return { address: bound.address, call: (...args) => bound.call(...args) as SwiftValueObject | null };
 }
 
 interface ResolvedAccessor {
