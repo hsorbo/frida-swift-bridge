@@ -1057,6 +1057,20 @@ type arguments passes `self` by value ahead of them, where the bridge can't find
 them. Decoding its arguments throws at `attach`, and reading
 `this.typeArguments` throws.
 
+A call dispatched through a protocol, on an `any Greeter` or a generic
+`T: Greeter`, reaches the conformer's implementation through a witness thunk, so
+a hook on the implementation sees it like any other call. Nothing is patched in
+a witness table or a class vtable; every hook is on code. To see only the
+protocol-dispatched calls of one conformance, hook the thunk instead: its
+address is the conformance's witness-table slot, `requirement(witnessIndex)` on
+the `WitnessTable` that `Protocol.conformanceFor` returns under
+[`/abi`](#going-lower-the-abi-entry-point).
+
+```js
+const greet = Swift.class("MyApp.Person").$type.instanceMethod("greet");
+Swift.Interceptor.attach(greet.address, { /* direct, vtable and witness calls */ });
+```
+
 For async functions, `Swift.Interceptor.attachAsync(target, callbacks)` provides
 `onEnter(args, context)` (with `this.self` and `this.typeArguments`), `onFirstSuspend()`, and
 `onComplete(retval, error?)` (with `this.typeArguments`),
