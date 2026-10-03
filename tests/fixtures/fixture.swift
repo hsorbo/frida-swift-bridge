@@ -1109,6 +1109,14 @@ public final class Robot {
     }
 }
 
+// A type member and an instance member sharing a selector: a qualified selector alone names both.
+public struct Dial {
+    public var value: Int
+    public init(value: Int) { self.value = value }
+    public static func scaled(_ n: Int) -> Int { n * 100 }
+    public func scaled(_ n: Int) -> Int { value * n }
+}
+
 // Members named exactly like the facade's own raw spellings. The facade reserves its surface under
 // $-prefixes ($handle/$get/$call/$field), so these bare Swift members stay reachable, not shadowed.
 public final class Clash {

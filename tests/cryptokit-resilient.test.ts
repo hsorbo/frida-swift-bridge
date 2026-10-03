@@ -64,6 +64,7 @@ describe("resilience in Apple frameworks", () => {
       "$s9CryptoKit4HKDFV9deriveKey05inputE8Material15outputByteCountAA09SymmetricE0VAH_SitFZ"
     );
     expect(deriveKey.address.equals(exported.strip())).toBe(true);
+    expect(Swift.function("CryptoKit.HKDF.deriveKey(inputKeyMaterial:outputByteCount:)").address.equals(deriveKey.address)).toBe(true);
   });
 
   test("a generic framework initializer resolves by its labels", (ctx) => {

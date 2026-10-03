@@ -85,9 +85,12 @@ The default export is the whole facade. Its members:
 - `Swift.function(module, mangledName)`: wrap a Swift function, sync or
   `async`, resolved from its mangled symbol, with its types derived from the
   signature. See [Free functions](#free-functions).
-- `Swift.asyncFunction(module, mangledName)`: wrap an `async` Swift function,
-  resolved from its mangled symbol, as an awaitable callable. See
-  [Async and actors](#async-and-actors).
+- `Swift.function(qualifiedSelector, options?)`: resolve a type's member from
+  its qualified selector, `"Module.Type.member(labels:)"`. See
+  [Free functions](#free-functions).
+- `Swift.asyncFunction(module, mangledName)`,
+  `Swift.asyncFunction(qualifiedSelector, options?)`: the same for an `async`
+  function, as an awaitable callable. See [Async and actors](#async-and-actors).
 - `Swift.Interceptor`: attach to Swift functions. See
   [Intercepting](#intercepting).
 - `Swift.closure(body)`: build a Swift closure from a JS callback. See
@@ -826,6 +829,32 @@ await computeAsync.call(21);    // 42
 Generic functions and methods of generic types are rejected; reach for `/abi`
 for those. An initializer consumes its arguments, so it is rejected too:
 construct through `Swift.type(...).init`.
+
+A type's member can also be named by its qualified selector, the spelling a
+demangled symbol prints: `Swift.function("Module.Type.member(labels:)")`. The
+type is found by name and the member by the same lookup `$typeMethod` and
+`$method` use, so no symbol scan runs. The result follows Swift's own unapplied
+method references: a type method is called directly, and an instance method is
+an unbound function that takes `self` as its first argument. The second
+argument is the usual options object (`{ argTypes }`, `{ returnType }`,
+`{ self }`, `{ typeArguments }`); when a type declares a type member and an
+instance member with the same selector, `{ static: true }` or
+`{ static: false }` picks one. `.address` is hookable whether or not the type
+is generic; a call then needs what the member needs.
+
+```js
+const robot = Swift.type("MyApp.Robot").init("R2");
+Swift.function("MyApp.Robot.move(to:)").call(robot, 5);        // 5
+Swift.function("MyApp.Robot.make(name:)").call("R3");          // a Robot
+
+const deriveKey = Swift.function("CryptoKit.HKDF.deriveKey(inputKeyMaterial:outputByteCount:)");
+Swift.Interceptor.attach(deriveKey.address, { ... });
+
+await Swift.asyncFunction("MyApp.AsyncCalc.addAsync(_:)").call(calc, 5);   // 105
+```
+
+Free module-level functions are not reachable this way yet; use the mangled
+form for those.
 
 ## Closures
 

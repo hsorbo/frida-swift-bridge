@@ -1107,6 +1107,8 @@ export interface FoundMember {
   address: NativePointer;
   selector: string;
   generic: boolean;
+  isStatic: boolean;
+  async: boolean;
   origin: MemberOrigin;
 }
 
@@ -1127,9 +1129,16 @@ export function findMember(
       `ambiguous method ${methodName} on ${fullName}: ${describeOverloads(candidates)} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
     );
   }
-  const { signature } = candidates[0];
+  const { signature, isStatic } = candidates[0];
   const address = candidates[0].address.strip();
-  return { address, selector: signature.selector, generic: signature.genericParams.length > 0, origin: memberOrigin(address, fullName) };
+  return {
+    address,
+    selector: signature.selector,
+    generic: signature.genericParams.length > 0,
+    isStatic,
+    async: signature.async,
+    origin: memberOrigin(address, fullName),
+  };
 }
 
 function resolveMethodIn(

@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadResilient } from "./fixtures/load.js";
 import { SWIFTCORE_MODULE } from "./swift.js";
 
-import { Swift, SwiftError, ClassType } from "../src/index.js";
+import { Swift, SwiftError, ClassType, SwiftObject } from "../src/index.js";
 import { metadataFor, typeOf } from "../src/abi.js";
 
 const ADD_INTS = "$s7fixture7addIntsyS2i_SitF";
@@ -109,5 +109,64 @@ describe("Swift.function", () => {
   test("rejects a symbol the module does not define", () => {
     const swiftCore = Process.getModuleByName(SWIFTCORE_MODULE);
     expect(() => Swift.function(swiftCore, ADD_INTS)).toThrow(/no symbol \$s7fixture7addIntsyS2i_SitF in/);
+  });
+});
+
+describe("Swift.function from a qualified selector", () => {
+  beforeEach(() => {
+    loadFixture();
+  });
+
+  function robot(name: string) {
+    return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init(name);
+  }
+
+  test("an instance method takes self first: Robot.move(to:)(robot, 5) ⇒ 5, move(by:) ⇒ 50", () => {
+    const r2 = robot("R2");
+    expect(Swift.function("fixture.Robot.move(to:)").call(r2, 5)).toEqual(int64(5));
+    expect(Swift.function("fixture.Robot.move(by:)").call(r2, 5)).toEqual(int64(50));
+  });
+
+  test("a type method is called directly: Robot.make(name:)(\"R2\").name ⇒ R2", () => {
+    const made = Swift.function("fixture.Robot.make(name:)");
+    expect(made.isStatic).toBe(true);
+    expect((made.call("R2") as SwiftObject).name).toBe("R2");
+  });
+
+  test("resolves the same address as the type's member lookup", () => {
+    const type = Swift.class("fixture.Robot")!.$type;
+    expect(Swift.function("fixture.Robot.move(to:)").address.equals(type.instanceMethod("move(to:)").address)).toBe(true);
+    expect(Swift.function("fixture.Robot.make(name:)").address.equals(type.typeMethod("make(name:)").address)).toBe(true);
+  });
+
+  test("a selector shared by a type and an instance member needs { static }", () => {
+    expect(() => Swift.function("fixture.Dial.scaled(_:)")).toThrow(/pick one with \{ static: true \}/);
+    expect(Swift.function("fixture.Dial.scaled(_:)", { static: true }).call(2)).toEqual(int64(200));
+    const dial = Swift.struct("fixture.Dial")!.init({ value: 7 });
+    expect(Swift.function("fixture.Dial.scaled(_:)", { static: false }).call(dial, 3)).toEqual(int64(21));
+  });
+
+  test("a bare name resolves when it has one overload and reports ambiguity otherwise", () => {
+    expect(Swift.function("fixture.Robot.greet").call(robot("R2"), "X")).toBe("Hello X, I am R2");
+    expect(() => Swift.function("fixture.Robot.pick")).toThrow(/ambiguous method pick/);
+  });
+
+  test("calling an instance method without self throws", () => {
+    const move = Swift.function("fixture.Robot.move(to:)");
+    expect(() => move.call()).toThrow(/instance method; pass self/);
+    expect(() => move.call(5)).toThrow(/instance method; pass self/);
+  });
+
+  test("an async member returns a Promise from either entry point", async () => {
+    const calc = Swift.class("fixture.AsyncCalc")!.init(100);
+    expect(await Swift.function("fixture.AsyncCalc.addAsync(_:)").call(calc, 5)).toEqual(int64(105));
+    expect(await Swift.asyncFunction("fixture.AsyncCalc.addAsync(_:)").call(calc, 6)).toEqual(int64(106));
+    expect(() => Swift.asyncFunction("fixture.Robot.move(to:)")).toThrow("not async; use Swift.function");
+  });
+
+  test("rejects an unknown type, an unknown member and an unqualified selector", () => {
+    expect(() => Swift.function("fixture.Nobody.move(to:)")).toThrow(/unknown type: fixture\.Nobody/);
+    expect(() => Swift.function("fixture.Robot.teleport(to:)")).toThrow(/no member teleport\(to:\) on fixture\.Robot/);
+    expect(() => Swift.function("addInts(_:_:)")).toThrow(/not a qualified selector/);
   });
 });
