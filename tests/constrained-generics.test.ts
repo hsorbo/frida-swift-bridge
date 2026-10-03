@@ -7,6 +7,7 @@ import { MetadataKind, instantiateGenericMetadata } from "../src/abi/metadata.js
 import { buildGenericMetadata, genericRequirements } from "../src/abi/generic-instantiation.js";
 import { findProtocol, conformsToProtocol } from "../src/abi/protocol-conformance.js";
 import { getExistentialTypeMetadata } from "../src/abi/existential.js";
+import { getUnlabelledTupleTypeMetadata } from "../src/abi/tuple.js";
 
 import { metadataFor } from "../src/abi.js";
 import { typeName } from "../src/runtime/type-name.js";
@@ -79,6 +80,29 @@ describe("constrained generic auto-assembly", () => {
     expect(typeName(metadataFor("fixture.BaseBox", [baseGreeter])!)).toBe("fixture.BaseBox<fixture.Base & fixture.Greeter>");
     const greeter = getExistentialTypeMetadata([findProtocol("fixture.Greeter")!]);
     expect(() => metadataFor("fixture.BaseBox", [greeter])).toThrow(/superclass/);
+  });
+
+  test("an unsuppressed generic parameter rejects a noncopyable argument, also inside a tuple", () => {
+    loadFixture();
+    const noncopyable = metadataFor("fixture.NoncopyableStruct")!;
+    expect(() => metadataFor("fixture.Pair", [noncopyable])).toThrow(/Copyable requirement/);
+    const tuple = getUnlabelledTupleTypeMetadata([metadataFor("Swift.Int")!, noncopyable]);
+    expect(() => metadataFor("fixture.Pair", [tuple])).toThrow(/Copyable requirement/);
+  });
+
+  test("a ~Copyable parameter accepts a noncopyable argument; the conditional Copyable conformance of the result is checked", (ctx) => {
+    loadFixture();
+    if (findType("fixture.MaybeCopyableBox") === null) {
+      ctx.skip("fixture compiled without ~Copyable generic parameters (Swift < 6.0)");
+    }
+    const noncopyable = metadataFor("fixture.NoncopyableStruct")!;
+    const boxed = metadataFor("fixture.MaybeCopyableBox", [noncopyable])!;
+    expect(typeName(boxed)).toBe("fixture.MaybeCopyableBox<fixture.NoncopyableStruct>");
+    expect(() => metadataFor("fixture.Pair", [boxed])).toThrow(/Copyable requirement/);
+    const copyable = metadataFor("fixture.MaybeCopyableBox", [metadataFor("Swift.Int")!])!;
+    expect(typeName(metadataFor("fixture.Pair", [copyable])!)).toBe("fixture.Pair<fixture.MaybeCopyableBox<Swift.Int>>");
+    const optional = metadataFor("Swift.Optional", [noncopyable])!;
+    expect(() => metadataFor("fixture.Pair", [optional])).toThrow(/Copyable requirement/);
   });
 
   test("an AnyObject requirement rejects value types", () => {

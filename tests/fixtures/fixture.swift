@@ -537,6 +537,13 @@ public class Base { public let kind: Int; public init(kind: Int) { self.kind = k
 public final class Derived: Base { public init() { super.init(kind: 99) } }
 public func makeDerivedAsBase() -> Base { Derived() }
 public struct BaseBox<T: Base> { public var value: T }
+#if compiler(>=6.0)
+public struct MaybeCopyableBox<T: ~Copyable>: ~Copyable {
+    public var value: T
+    public init(value: consuming T) { self.value = value }
+}
+extension MaybeCopyableBox: Copyable where T: Copyable {}
+#endif
 public func baseGreeterType() -> UnsafeRawPointer { unsafeBitCast((any Base & Greeter).self as Any.Type, to: UnsafeRawPointer.self) }
 public struct ObjectBox<T: AnyObject> { public var value: T }
 public struct IntElements<C: Collection> where C.Element == Int { public var value: C }
