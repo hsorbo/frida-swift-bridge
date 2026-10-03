@@ -14,6 +14,7 @@ import {
   extendedExistentialGeneralizationArguments,
 } from "../src/abi.js";
 import { MetadataKind } from "../src/abi/metadata.js";
+import { MetatypeType, typeOf } from "../src/runtime/swift-type.js";
 import {
   extendedExistentialSpecialKind,
   ExtendedExistentialSpecialKind,
@@ -113,5 +114,23 @@ describe("extended existential shape", () => {
       GenericRequirementKind.Protocol,
       GenericRequirementKind.InvertedProtocols,
     ]);
+  });
+});
+
+describe("existential metatype (any P.Type)", () => {
+  test("names its protocol through the instance type", () => {
+    requireSwift();
+    const M = existentialMetadata("fixture.greeterMetatypeType");
+    expect(M.kind).toBe(MetadataKind.ExistentialMetatype);
+    expect(existentialProtocols(M).map((p) => p.fullTypeName)).toEqual(["fixture.Greeter"]);
+    const type = typeOf(M) as MetatypeType;
+    expect(type.kind).toBe("metatype");
+    expect(type.instanceType.kind).toBe("existential");
+  });
+
+  test("decodes the stored type", () => {
+    requireSwift();
+    const M = existentialMetadata("fixture.greeterMetatypeType");
+    expect(readValue(M, store("fixture.storeGreeterMetatype", M))).toBe("fixture.PoliteGreeter");
   });
 });

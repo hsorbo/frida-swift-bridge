@@ -6,6 +6,7 @@ import {
   readGenericRequirementDescriptors,
 } from "./generic-requirement-descriptor.js";
 import { dynamicTypeOf } from "./class-metadata.js";
+import { metatypeInstanceType } from "./metatype.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 
 const FLAGS_OFFSET = Process.pointerSize;
@@ -173,6 +174,9 @@ export function projectExistentialValue(metadata: Metadata, container: NativePoi
 export function existentialProtocols(metadata: Metadata): ContextDescriptor[] {
   if (metadata.kind === MetadataKind.ExtendedExistential) {
     return extendedExistentialProtocols(metadata);
+  }
+  if (metadata.kind === MetadataKind.ExistentialMetatype) {
+    return existentialProtocols(metatypeInstanceType(metadata));
   }
   const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
   const numProtocols = metadata.handle.add(NUM_PROTOCOLS_OFFSET).readU32();

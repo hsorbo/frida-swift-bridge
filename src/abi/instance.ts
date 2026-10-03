@@ -275,6 +275,8 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
       return readExistential(metadata, address);
     case MetadataKind.ExtendedExistential:
       return readExtendedExistential(metadata, address);
+    case MetadataKind.ExistentialMetatype:
+      return typeName(new Metadata(address.readPointer()));
     case MetadataKind.Tuple: {
       const elements: SwiftValue[] = [];
       for (const element of enumerateTupleElements(metadata)) {

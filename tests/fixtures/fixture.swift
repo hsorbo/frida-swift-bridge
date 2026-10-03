@@ -436,6 +436,13 @@ public struct PoliteGreeter: Greeter {
     public func greet() -> String { "Hello, \(name)" }
 }
 
+public func greeterMetatypeType() -> UnsafeRawPointer {
+    unsafeBitCast((any Greeter.Type).self as Any.Type, to: UnsafeRawPointer.self)
+}
+public func storeGreeterMetatype(_ p: UnsafeMutableRawPointer) {
+    let v: any Greeter = PoliteGreeter(name: "Ada")
+    p.assumingMemoryBound(to: (any Greeter.Type).self).initialize(to: type(of: v))
+}
 public func storeGreeter(_ p: UnsafeMutableRawPointer) {
     p.assumingMemoryBound(to: (any Greeter).self).initialize(to: PoliteGreeter(name: "Ada"))
 }

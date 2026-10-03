@@ -79,6 +79,7 @@ function typeKindName(metadata: Metadata): TypeKind {
     case MetadataKind.Tuple:
       return "tuple";
     case MetadataKind.Metatype:
+    case MetadataKind.ExistentialMetatype:
       return "metatype";
     case MetadataKind.Function:
       return "function";
@@ -494,6 +495,7 @@ function wrapperFromMetadata(metadata: Metadata): SwiftType {
     case MetadataKind.Tuple:
       return new TupleType(metadata);
     case MetadataKind.Metatype:
+    case MetadataKind.ExistentialMetatype:
       return new MetatypeType(metadata);
     case MetadataKind.Function:
       return new FunctionType(metadata);
