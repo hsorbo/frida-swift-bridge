@@ -1,5 +1,4 @@
-import { findType } from "../reflection/registry.js";
-import { typeFromDescriptor } from "./swift-type.js";
+import { nominalTypeNamed } from "./swift-type.js";
 import {
   CallArg,
   CallResult,
@@ -83,11 +82,10 @@ function findMemberOfKind(
 
 export function qualifiedFunction(qualified: string, options: ValueMethodResolveOptions = {}): SwiftMemberFunction {
   const { typeName, selector } = splitQualifiedSelector(qualified);
-  const descriptor = findType(typeName);
-  if (descriptor === null) {
+  const type = nominalTypeNamed(typeName);
+  if (type === null) {
     throw new Error(`unknown type: ${typeName}`);
   }
-  const type = typeFromDescriptor(descriptor);
   const found = findMemberOfKind(type.name, selector, options);
   const { static: _, ...lookup } = options;
   const call = found.isStatic

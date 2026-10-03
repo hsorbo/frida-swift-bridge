@@ -139,6 +139,14 @@ describe("Swift.function from a qualified selector", () => {
     expect(Swift.function("fixture.Robot.make(name:)").address.equals(type.typeMethod("make(name:)").address)).toBe(true);
   });
 
+  test("a specialization's type arguments select the metadata a static is called with", () => {
+    const scale = Swift.function("fixture.ConstrainedBox<Swift.Int>.scale(_:by:)");
+    expect(scale.isStatic).toBe(true);
+    expect(scale.address.equals(Swift.function("fixture.ConstrainedBox.scale(_:by:)").address)).toBe(true);
+    expect(scale.call(3, 7)).toEqual(int64(21));
+    expect(Swift.function("fixture.Keyed<Swift.String>.echo(_:)").call("a")).toBe("a");
+  });
+
   test("a selector shared by a type and an instance member needs { static }", () => {
     expect(() => Swift.function("fixture.Dial.scaled(_:)")).toThrow(/pick one with \{ static: true \}/);
     expect(Swift.function("fixture.Dial.scaled(_:)", { static: true }).call(2)).toEqual(int64(200));

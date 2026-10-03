@@ -2,7 +2,6 @@ import { getSwiftCoreApi, SwiftCoreApi } from "./runtime/api.js";
 import { SWIFT_HOST_SUPPORTED, LIBSWIFT_CORE_NAME } from "./runtime/platform.js";
 import { demangle } from "./runtime/demangle.js";
 import {
-  findType,
   swiftImages,
   swiftTypes,
   swiftClasses,
@@ -10,7 +9,7 @@ import {
   swiftEnums,
 } from "./reflection/registry.js";
 import type { NameFilter } from "./runtime/swift-resolver.js";
-import { symbolicate, resolveTypeExpr } from "./runtime/symbolication.js";
+import { symbolicate } from "./runtime/symbolication.js";
 import { SwiftInterceptor } from "./runtime/interceptor.js";
 import {
   NominalType,
@@ -18,7 +17,7 @@ import {
   StructType,
   EnumType,
   typeFromDescriptor,
-  typeOf,
+  nominalTypeNamed,
   swiftFunction,
 } from "./runtime/swift-type.js";
 import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum } from "./runtime/type-facade.js";
@@ -43,17 +42,6 @@ function* facadesOf<T extends NominalType>(descriptors: Generator<ContextDescrip
       yield (typeFromDescriptor(descriptor) as T).facade;
     }
   }
-}
-
-// "Module.Name" is a declaration; "Module.Name<Args>" is a specialization, with its metadata built.
-function nominalTypeNamed(name: string): NominalType | null {
-  if (name.includes("<")) {
-    const metadata = resolveTypeExpr(name, () => null);
-    const type = metadata === null ? null : typeOf(metadata);
-    return type instanceof NominalType ? type : null;
-  }
-  const descriptor = findType(name);
-  return descriptor === null ? null : typeFromDescriptor(descriptor);
 }
 
 function typeOfKind<T extends NominalType>(

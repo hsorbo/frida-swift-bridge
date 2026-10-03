@@ -5,7 +5,7 @@ import { isActor, isDefaultActor } from "../abi/class-descriptor.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
-import { parseSwiftSignature, symbolicate, resolveParsedType, ParamConvention } from "./symbolication.js";
+import { parseSwiftSignature, symbolicate, resolveParsedType, resolveTypeExpr, ParamConvention } from "./symbolication.js";
 import {
   SwiftBoundMethod,
   CallArg,
@@ -25,6 +25,7 @@ import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
 import { metatypeInstanceType } from "../abi/metatype.js";
 import { readFunctionType, ParameterOwnership } from "../abi/function-type.js";
 import { typeName } from "./type-name.js";
+import { findType } from "../reflection/registry.js";
 import { Protocol, protocolsForType } from "./protocol.js";
 import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum, typeFacade } from "./type-facade.js";
 
@@ -534,6 +535,17 @@ function nominalDescriptorOf(metadata: Metadata): ContextDescriptor | null {
     default:
       return null;
   }
+}
+
+// "Module.Name" is a declaration; "Module.Name<Args>" is a specialization, with its metadata built.
+export function nominalTypeNamed(name: string): NominalType | null {
+  if (name.includes("<")) {
+    const metadata = resolveTypeExpr(name, () => null);
+    const type = metadata === null ? null : typeOf(metadata);
+    return type instanceof NominalType ? type : null;
+  }
+  const descriptor = findType(name);
+  return descriptor === null ? null : typeFromDescriptor(descriptor);
 }
 
 // A non-generic nominal type has one wrapper, shared by its descriptor and its metadata; every
