@@ -51,7 +51,8 @@ type TypePlan =
   | { kind: "concrete"; metadata: Metadata }
   | { kind: "param"; paramIndex: number }
   | { kind: "use"; expr: TypeExpr; indirect: boolean } // param-referencing expression: A?, [A], Array<A>
-  | { kind: "metatype" }; // T.Type: one GP holding the metadata pointer directly (loadable POD)
+  | { kind: "metatype" } // T.Type: one GP holding the metadata pointer directly (loadable POD)
+  | { kind: "closure" }; // a thick function value: two GPs, the function then its context
 
 // A small loadable value's self trails the formal args unless the method mutates it; any other
 // self is in swiftself. trailing is null when neither the symbol nor the callee's code tells. A
@@ -82,6 +83,9 @@ function planType(type: TypeExpr, genericParams: string[]): TypePlan {
   if (type.kind === "metatype") {
     return { kind: "metatype" };
   }
+  if (type.kind === "function") {
+    return { kind: "closure" };
+  }
   if (mentionsParam(type, genericParams)) {
     const indirect = hasOpaqueLayout(type, (n) => (genericParams.includes(n) ? "opaque" : null));
     if (!indirect && !isSingleReference(type)) {
@@ -93,7 +97,7 @@ function planType(type: TypeExpr, genericParams: string[]): TypePlan {
 }
 
 function planMetadata(
-  plan: Exclude<TypePlan, { kind: "metatype" }>,
+  plan: Exclude<TypePlan, { kind: "metatype" } | { kind: "closure" }>,
   generics: Metadata[],
   genericParams: string[]
 ): Metadata {
@@ -382,7 +386,9 @@ function selfRegister(context: CpuContext): NativePointer {
 
 // Read before the hook patches the entry, as calls do (method.ts probedSelfOwnership).
 function probedOwnership(target: NativePointer, args: TypePlan[], signature: SwiftFunctionSignature, receiver: Metadata): SelfOwnership | null {
-  const argTypes = args.map((plan) => (plan.kind === "concrete" ? plan.metadata : { genericParam: 0 }));
+  const argTypes = args.map((plan) =>
+    plan.kind === "concrete" ? plan.metadata : plan.kind === "closure" ? { closure: true as const } : { genericParam: 0 }
+  );
   const implicitWords = signature.genericParams.length + witnessTableCount(signature);
   const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords);
   const inRegister = argumentRegisterUse(argTypes, implicitWords);
@@ -404,11 +410,15 @@ function decodeMetatype(metadataPointer: NativePointer): SwiftValue {
   return typeName(new Metadata(metadataPointer));
 }
 
+function decodeClosure(fn: NativePointer, context: NativePointer): SwiftValue {
+  return { function: fn.strip(), context };
+}
+
 function returnIsIndirect(ret: TypePlan | null): boolean {
   if (ret === null) {
     return false;
   }
-  if (ret.kind === "metatype") {
+  if (ret.kind === "metatype" || ret.kind === "closure") {
     return false;
   }
   if (ret.kind !== "concrete") {
@@ -560,6 +570,13 @@ function materializeArgs(
       slots.push({ plan, address: cursor.gp() }); // address IS the metadata pointer
       continue;
     }
+    if (plan.kind === "closure") {
+      const words = Memory.alloc(2 * Process.pointerSize);
+      words.writePointer(cursor.gp());
+      words.add(Process.pointerSize).writePointer(cursor.gp());
+      slots.push({ plan, address: words });
+      continue;
+    }
     if (isIndirectPlan(plan)) {
       slots.push({ plan, address: cursor.gp() });
       continue;
@@ -601,6 +618,9 @@ function materializeArgs(
     slots.map((s) => {
       if (s.plan.kind === "metatype") {
         return decodeMetatype(s.address);
+      }
+      if (s.plan.kind === "closure") {
+        return decodeClosure(s.address.readPointer(), s.address.add(Process.pointerSize).readPointer());
       }
       const metadata = planMetadata(s.plan, generics, environment.params);
       return metadata.kind === MetadataKind.Class
@@ -644,6 +664,9 @@ function materializeReturn(
   }
   if (ret.kind === "metatype") {
     return decodeMetatype(gpResult(context, 0));
+  }
+  if (ret.kind === "closure") {
+    return decodeClosure(gpResult(context, 0), gpResult(context, 1));
   }
   if (isIndirectPlan(ret)) {
     if (indirectReturn === null) {

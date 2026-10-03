@@ -6,7 +6,7 @@ import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { SwiftInterceptor, type SwiftInvocationContext } from "../src/runtime/interceptor.js";
 import { requireFpRegisterHooks } from "./swift.js";
 
-import { metadataFor, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject } from "../src/abi.js";
+import { metadataFor, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
 
 const MAKE_LINK = "$s7fixture8makeLinkyAA0C0VSSF";
 const LINK_ADDRESS = "$s7fixture11linkAddressySSAA4LinkVF";
@@ -615,6 +615,37 @@ describe("SwiftInterceptor.attach", () => {
     } finally {
       listener.detach();
     }
+  });
+});
+
+describe("SwiftInterceptor.attach on closure-taking methods", () => {
+  test("decodes a closure argument to its function and context; the generic result's metadata follows it", () => {
+    loadFixture();
+    const ByteSource = metadataFor("fixture.ByteSource")!;
+    const source = asSwiftObject(ValueInstance.borrow(ByteSource, Memory.alloc(ByteSource.valueWitnesses.stride)));
+    const produce = source.$method("produce", { typeArguments: [Swift.type("Swift.Int")!], self: "borrowing" });
+    let seen: { args: SwiftValue[]; count: unknown; typeArguments: string[] } | null = null;
+    let left: CallResult = null;
+    const listener = Swift.Interceptor.attach(produce.address, {
+      onEnter(args) {
+        seen = { args, count: (this.self as { count: unknown }).count, typeArguments: this.typeArguments! };
+      },
+      onLeave(retval) {
+        left = retval;
+      },
+    });
+    try {
+      expect(produce.call(3, Swift.closure((n) => Number(n) * 6))).toEqual(int64(18));
+    } finally {
+      listener.detach();
+    }
+    const [n, closure] = seen!.args as [SwiftValue, { function: NativePointer; context: NativePointer }];
+    expect(n).toEqual(int64(3));
+    expect(closure.function.isNull()).toBe(false);
+    expect(closure.context.isNull()).toBe(false);
+    expect(seen!.count).toEqual(int64(0));
+    expect(seen!.typeArguments).toEqual(["Swift.Int"]);
+    expect(left).toEqual(int64(18));
   });
 });
 

@@ -915,7 +915,7 @@ inferred and must be given.
 your callbacks the **decoded** Swift arguments and return value — structs
 exploded to objects, strings as JS strings, class returns and values holding
 references (an Array, say) as live facades, existentials projected to their
-dynamic value.
+dynamic value. A closure argument is its two words, `{ function, context }`.
 
 ```js
 const listener = Swift.Interceptor.attach(addr, {

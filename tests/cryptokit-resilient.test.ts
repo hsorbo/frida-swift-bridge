@@ -3,7 +3,7 @@ import { requireSwift, requireDarwin } from "./swift.js";
 
 import { isResilientValueType, metadataFor } from "../src/abi.js";
 
-import { Swift } from "../src/index.js";
+import { Swift, type SwiftObject } from "../src/index.js";
 
 function loadCryptoKit(): void {
   requireSwift();
@@ -76,6 +76,35 @@ describe("resilience in Apple frameworks", () => {
       "$s9CryptoKit12SymmetricKeyV4dataACx_tc10Foundation15ContiguousBytesRzlufC"
     );
     expect(init.address.equals(exported.strip())).toBe(true);
+  });
+
+  test("a hook on a closure-taking generic method of a resilient type sees the closure, self and the result type", (ctx) => {
+    requireDarwin(ctx);
+    loadCryptoKit();
+
+    const size = Swift.struct("CryptoKit.SymmetricKeySize")!.init({ bitCount: 128 })!;
+    const key = Swift.struct("CryptoKit.SymmetricKey")!.init({ size })!;
+    const withUnsafeBytes = key.$method("withUnsafeBytes", { typeArguments: [] });
+    let seen: { closure: { function: NativePointer; context: NativePointer }; bitCount: unknown; typeArguments: string[] } | null = null;
+    const listener = Swift.Interceptor.attach(withUnsafeBytes.address, {
+      onEnter(args) {
+        seen = {
+          closure: args[0] as { function: NativePointer; context: NativePointer },
+          bitCount: (this.self as SwiftObject).bitCount,
+          typeArguments: this.typeArguments!,
+        };
+      },
+    });
+    let count = -1;
+    try {
+      withUnsafeBytes.call(Swift.closure((buf) => { count = buf.count; }));
+    } finally {
+      listener.detach();
+    }
+    expect(count).toBe(16);
+    expect(seen!.closure.function.isNull()).toBe(false);
+    expect(seen!.bitCount).toEqual(int64(128));
+    expect(seen!.typeArguments.length).toBe(1);
   });
 
   test("a generic framework instance method resolves without an instance", (ctx) => {
