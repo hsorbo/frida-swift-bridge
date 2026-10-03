@@ -54,9 +54,11 @@ type TypePlan =
   | { kind: "metatype" }; // T.Type: one GP holding the metadata pointer directly (loadable POD)
 
 // A small loadable value's self trails the formal args unless the method mutates it; any other
-// self is in swiftself. trailing is null when neither the symbol nor the callee's code tells.
+// self is in swiftself. trailing is null when neither the symbol nor the callee's code tells. A
+// generic type's self is typed only at entry: a class by its isa, an address-only value by the
+// Self metadata word past the arguments.
 interface Receiver {
-  metadata: Metadata;
+  metadata: Metadata | "isa" | "selfMetadata";
   trailing: boolean | null;
 }
 
@@ -281,7 +283,7 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
       ret: parsed.result === null ? null : planType(parsed.result, gp),
       generics,
       throws: parsed.throws,
-      receiver: receiverOf(parsed.context, probe, parsed.name === "init"),
+      receiver: receiverOf(parsed.context, probe, parsed.name === "init", ownership),
     };
   }
 
@@ -303,10 +305,25 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
 
 // A class's initializing init takes the instance as self; a value type's init has none, its @thin
 // metatype being erased, so it lowers like a static.
-function receiverOf(context: string, ownership: (metadata: Metadata) => SelfOwnership | null, isInit = false): Receiver | null {
-  const metadata = /^(static |class )|^[^.]+$/.test(context) ? null : resolveType(context);
-  if (metadata === null) {
+function receiverOf(
+  context: string,
+  ownership: (metadata: Metadata) => SelfOwnership | null,
+  isInit = false,
+  statedOwnership?: SelfOwnership
+): Receiver | null {
+  if (/^(static |class )|^[^.]+$/.test(context)) {
     return null;
+  }
+  const metadata = resolveType(context);
+  if (metadata === null) {
+    const type = findType(context);
+    if (type === null || !type.isGeneric || (isInit && type.kind !== ContextDescriptorKind.Class)) {
+      return null;
+    }
+    if (type.kind === ContextDescriptorKind.Class) {
+      return { metadata: "isa", trailing: false };
+    }
+    return hasFixedLayoutInGenericContext(type) && statedOwnership !== "mutating" ? null : { metadata: "selfMetadata", trailing: false };
   }
   if (metadata.kind === MetadataKind.Class || metadata.kind === MetadataKind.ObjCClassWrapper) {
     return { metadata, trailing: false };
@@ -326,7 +343,7 @@ function unlocatableGenerics({ receiver, generics }: CallShape): string | null {
   if (generics.undecodable !== null) {
     return generics.undecodable;
   }
-  if (receiver?.trailing === null && generics.params.length > 0) {
+  if (receiver?.trailing === null && receiver.metadata instanceof Metadata && generics.params.length > 0) {
     return `cannot tell how a generic method of ${typeName(receiver.metadata)} takes self; pass { self: "borrowing" | "mutating" }`;
   }
   return null;
@@ -354,9 +371,9 @@ function exposeTypeArguments(invocation: object, generics: Metadata[] | string):
 }
 
 // Decoded only when read. A self in swiftself is still there on leave: the register is callee-saved.
-function exposeSelf(invocation: SwiftInvocationContext, receiver: Receiver, address: NativePointer): void {
+function exposeSelf(invocation: SwiftInvocationContext, receiver: Receiver, address: NativePointer, selfMetadata: Metadata | null): void {
   let decoded: CallResult | undefined;
-  Object.defineProperty(invocation, "self", { configurable: true, get: () => (decoded ??= decodeSelf(receiver, address)) });
+  Object.defineProperty(invocation, "self", { configurable: true, get: () => (decoded ??= decodeSelf(receiver, address, selfMetadata)) });
 }
 
 function selfRegister(context: CpuContext): NativePointer {
@@ -372,9 +389,12 @@ function probedOwnership(target: NativePointer, args: TypePlan[], signature: Swi
   return probeSelfOwnership(target, { gp: [inRegister.gp, trailing.gp], fp: [inRegister.fp, trailing.fp] });
 }
 
-function decodeSelf({ metadata }: Receiver, address: NativePointer): CallResult {
-  if (metadata.kind === MetadataKind.Class) {
+function decodeSelf({ metadata }: Receiver, address: NativePointer, selfMetadata: Metadata | null): CallResult {
+  if (metadata === "isa" || (metadata instanceof Metadata && metadata.kind === MetadataKind.Class)) {
     return asSwiftObject(new ClassInstance(address));
+  }
+  if (metadata === "selfMetadata") {
+    return decodeBorrowedValue(selfMetadata!, address);
   }
   return metadata.kind === MetadataKind.ObjCClassWrapper ? address : decodeBorrowedValue(metadata, address);
 }
@@ -520,6 +540,7 @@ interface MaterializedArgs {
   values(): SwiftValue[];
   generics: Metadata[];
   trailingSelf: NativePointer | null;
+  selfMetadata: Metadata | null;
 }
 
 // Generic metadata follows the formal args and a trailing self in the GP sequence, so decode after
@@ -562,7 +583,7 @@ function materializeArgs(
   }
 
   let trailingSelf: NativePointer | null = null;
-  if (receiver?.trailing) {
+  if (receiver?.trailing && receiver.metadata instanceof Metadata) {
     trailingSelf = Memory.alloc(Math.max(words(receiver.metadata), 1) * 8);
     for (const scalar of loweredScalars(receiver.metadata)) {
       cursor.readScalar(scalar, trailingSelf);
@@ -586,7 +607,7 @@ function materializeArgs(
         ? readValue(metadata, s.address)
         : decodeBorrowedValue(metadata, s.address);
     });
-  return { values, generics, trailingSelf };
+  return { values, generics, trailingSelf, selfMetadata };
 }
 
 // Mirrors method.ts decodeReturn, but borrows: an interceptor only observes the caller's +1, so it
@@ -672,6 +693,7 @@ interface SwiftInvocationState {
   indirectReturn?: NativePointer;
   generics?: Metadata[];
   trailingSelf?: NativePointer;
+  selfMetadata?: Metadata;
 }
 
 function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
@@ -684,7 +706,8 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
   const receiver = knownReceiver(shape, decodesArgs);
   const unlocatable = unlocatableGenerics(shape);
   const capturesGenerics = callbacks.onLeave !== undefined && genericParams.length > 0 && unlocatable === null;
-  const wantsArgs = decodesArgs || (receiver?.trailing === true && callbacks.onLeave !== undefined) || capturesGenerics;
+  const selfReadOnEnter = receiver?.trailing === true || receiver?.metadata === "selfMetadata";
+  const wantsArgs = decodesArgs || (selfReadOnEnter && callbacks.onLeave !== undefined) || capturesGenerics;
 
   const onEnter =
     wantsArgs || captureIndirect
@@ -695,14 +718,17 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
             state.indirectReturn = indirectResultRegister(context);
           }
           if (wantsArgs) {
-            const { values, generics, trailingSelf } = materializeArgs(context, args, environment, 0, receiver);
+            const { values, generics, trailingSelf, selfMetadata } = materializeArgs(context, args, environment, 0, receiver);
             state.generics = generics;
             exposeTypeArguments(this, generics);
             if (trailingSelf !== null) {
               state.trailingSelf = trailingSelf;
             }
+            if (selfMetadata !== null) {
+              state.selfMetadata = selfMetadata;
+            }
             if (receiver !== null) {
-              exposeSelf(this, receiver, trailingSelf ?? selfRegister(context));
+              exposeSelf(this, receiver, trailingSelf ?? selfRegister(context), selfMetadata);
             }
             if (callbacks.onEnter !== undefined) {
               callbacks.onEnter.call(this, values());
@@ -717,7 +743,7 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
           const context = this.context;
           const state = this as unknown as SwiftInvocationState;
           if (receiver !== null) {
-            exposeSelf(this, receiver, state.trailingSelf ?? selfRegister(context));
+            exposeSelf(this, receiver, state.trailingSelf ?? selfRegister(context), state.selfMetadata ?? null);
           }
           exposeTypeArguments(this, state.generics ?? unlocatable ?? []);
           const swiftErrorRegister = errorRegister(context); // swiftcc returns a thrown error here
@@ -976,7 +1002,7 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
             generics = materialized.generics;
             exposeTypeArguments(this, generics);
             if (receiver !== null) {
-              exposeSelf(this, receiver, materialized.trailingSelf ?? selfRegister(context));
+              exposeSelf(this, receiver, materialized.trailingSelf ?? selfRegister(context), materialized.selfMetadata);
             }
             if (callbacks.onEnter !== undefined) {
               callbacks.onEnter.call(this, materialized.values(), asyncContextRegister(context));

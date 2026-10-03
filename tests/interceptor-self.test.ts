@@ -1,7 +1,9 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture, loadOptimized, fixtureExport } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms, loadOptimized, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftObject, type CallResult, SwiftClass, SwiftStruct } from "../src/index.js";
+import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
+import { metadataFor } from "../src/abi.js";
 
 function robot(name: string): SwiftObject {
   return (Swift.type("fixture.Robot") as SwiftClass).init(name);
@@ -103,6 +105,53 @@ describe("Interceptor self", () => {
     expect(method.call(3, 7)).toEqual(int64(31));
     listener.detach();
     expect(seen).toEqual({ self: { base: int64(10) }, args: [int64(3), int64(7)] });
+  });
+
+  test("a generic struct's self is decoded against the Self metadata passed at entry, on enter and on leave", () => {
+    const keyed = Swift.struct("fixture.Keyed<Swift.Int>")!.init(21)!;
+    const method = keyed.$method("get");
+    const seen: CallResult[] = [];
+    const listener = Swift.Interceptor.attach(method.address, {
+      onEnter() {
+        seen.push(this.self!);
+      },
+      onLeave() {
+        seen.push(this.self!);
+      },
+    });
+    expect(method.call()).toEqual(int64(21));
+    listener.detach();
+    expect(seen).toEqual([{ value: int64(21) }, { value: int64(21) }]);
+  });
+
+  test("an onLeave-only hook reads a generic struct's Self metadata on enter for its self", () => {
+    loadFixtureSyms();
+    const keyed = Swift.struct("fixturesyms.Keyed<Swift.Int>")!.init(8)!;
+    const method = keyed.$method("get");
+    let seen: CallResult = null;
+    const listener = Swift.Interceptor.attach(method.address, {
+      onLeave() {
+        seen = this.self!;
+      },
+    });
+    expect(method.call()).toEqual(int64(8));
+    listener.detach();
+    expect(seen).toEqual({ value: int64(8) });
+  });
+
+  test("a generic class's self is a facade over the receiver", () => {
+    const seen: unknown[] = [];
+    const listener = Swift.Interceptor.attach(Swift.class("fixture.KeyedHolder")!.$type.instanceMethod("paired").address, {
+      onLeave() {
+        seen.push((this.self as SwiftObject).$fields, (this.self as SwiftObject).$type.name, this.typeArguments);
+      },
+    });
+    try {
+      makeSwiftNativeFunction(fixtureExport("fixture.driveKeyed"), metadataFor("Swift.Int")!, [])();
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual([{ value: "e" }, "fixture.KeyedHolder<Swift.String>", ["Swift.String", "Swift.Int"]]);
   });
 
   test("a generic method whose code doesn't reveal self's convention needs { self }", () => {
