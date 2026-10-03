@@ -1,7 +1,7 @@
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { AsyncTask } from "../abi/async-task.js";
 import { SwiftError } from "./thrown-error.js";
-import { LIBSWIFT_CORE_NAME, SWIFT_HOST_SUPPORTED } from "./platform.js";
+import { LIBSWIFT_CORE_NAME, ensureSwiftHost } from "./platform.js";
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
 import type { RegisterLocation, PlacedResultScalar } from "./calling-convention.js";
 import { FloatClass, SWIFTCC, GP_ARG_REGISTERS, GP_RESULT_REGISTERS, FP_RESULT_REGISTERS, putSseScalarMove } from "./swiftcc.js";
@@ -91,9 +91,7 @@ function concExport(name: string): NativePointer {
 // swift_task_getCurrent is SWIFT_CC(swift) with no formal args, so plain C ABI reaches it.
 let getCurrentTask: (() => NativePointer) | null = null;
 export function currentAsyncTask(): AsyncTask | null {
-  if (!SWIFT_HOST_SUPPORTED) {
-    throw new Error(`async introspection needs an arm64 Swift host, got ${Process.arch}/${Process.platform}`);
-  }
+  ensureSwiftHost();
   if (getCurrentTask === null) {
     getCurrentTask = new NativeFunction(concExport("swift_task_getCurrent"), "pointer", []) as unknown as () => NativePointer;
   }
@@ -451,9 +449,7 @@ function getDriveApi(): DriveApi {
   if (driveApi !== null) {
     return driveApi;
   }
-  if (!SWIFT_HOST_SUPPORTED) {
-    throw new Error(`async calls need an arm64 Swift host, got ${Process.arch}/${Process.platform}`);
-  }
+  ensureSwiftHost();
   const g = (name: string) => moduleExport(DISPATCH_MODULE, name);
   driveApi = {
     create: new NativeFunction(concExport("swift_task_create_common"), ["pointer", "pointer"], [
