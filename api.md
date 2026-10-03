@@ -507,9 +507,14 @@ made.greet("X");    // "Hello X, I am Zed"
 Robot.$call("make", "Zed");      // the same, by name
 
 const Int = Swift.type("Swift.Int");
-Int.$call("*", 6, 7);          // 42: operators are static methods; both operands are arguments
+Int["*"](6, 7);                // 42: operators are static methods; both operands are arguments
+Int.$call("*", 6, 7);          // the same, by name
 Int.$typeMethod("*").call(6, 7);
 ```
+
+An operator's name is not an identifier, so bracket access is its bare-name
+form. The call runs Swift's operator, so overflow traps and an app type's own
+operators behave as in Swift; a JS `*` on two results is JS arithmetic.
 
 `$type.instanceMethod(name, options)` finds an instance method through its
 type's reflection, without an instance. It has an `address` to hook, and

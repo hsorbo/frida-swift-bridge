@@ -19,6 +19,16 @@ describe("Swift type member sugar", () => {
     expect(Accumulator.$call("summing", 1, 2)).toEqual(Accumulator.summing(1, 2));
   });
 
+  test("calls an operator by bracket access, an app type's and the stdlib's", () => {
+    const Selectors = Swift.type("fixture.Selectors")!;
+    expect(Selectors["=="](Selectors.init(3), Selectors.init(3))).toBe(true);
+    expect(Selectors["=="](Selectors.init(3), Selectors.init(4))).toBe(false);
+    expect("==" in Selectors).toBe(true);
+    expect(Object.keys(Selectors)).toContain("==");
+    const Int = Swift.type("Swift.Int")!;
+    expect(Int["*"](6, 7)).toEqual(int64(42));
+  });
+
   test("an async type method returns a promise", async () => {
     expect(await Swift.type("fixture.Accumulator")!.sumStaticAsync(4, 5)).toEqual(int64(9));
   });
