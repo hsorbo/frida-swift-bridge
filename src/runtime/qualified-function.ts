@@ -5,7 +5,6 @@ import {
   FoundMember,
   FunctionResolveOptions,
   MemberOrigin,
-  SwiftAsyncFunction,
   SwiftFunction,
   SwiftMemberSignature,
   ValueMethodResolveOptions,
@@ -13,7 +12,6 @@ import {
   isSwiftObject,
   lowerResolveOptions,
   memberSignature,
-  resolveAsyncFunction,
   resolveFunction,
   splitSelector,
   withHookTarget,
@@ -30,10 +28,6 @@ export interface SwiftMemberFunction {
   readonly origin: MemberOrigin;
   readonly signature: SwiftMemberSignature;
   call(...args: CallArg[]): CallResult | Promise<CallResult>;
-}
-
-export interface SwiftAsyncMemberFunction extends SwiftMemberFunction {
-  call(...args: CallArg[]): Promise<CallResult>;
 }
 
 // The member is the last dot-separated segment outside brackets; nested types and generic
@@ -116,17 +110,6 @@ export function qualifiedFunction(qualified: string, options: ValueMethodResolve
   );
 }
 
-export function qualifiedAsyncFunction(
-  qualified: string,
-  options: ValueMethodResolveOptions = {}
-): SwiftAsyncMemberFunction {
-  const fn = qualifiedFunction(qualified, options);
-  if (!fn.isAsync) {
-    throw new Error(`${fn.selector} is not async; use Swift.function`);
-  }
-  return fn as SwiftAsyncMemberFunction;
-}
-
 export function resolveSwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]>(
   module: Module,
   mangled: string,
@@ -141,23 +124,4 @@ export function resolveSwiftFunction(
   return typeof target === "string"
     ? qualifiedFunction(target, spec as ValueMethodResolveOptions | undefined)
     : resolveFunction(target, spec as string, options);
-}
-
-export function resolveSwiftAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
-  module: Module,
-  mangled: string,
-  options?: FunctionResolveOptions
-): SwiftAsyncFunction<Ret, Args>;
-export function resolveSwiftAsyncFunction(
-  qualified: string,
-  options?: ValueMethodResolveOptions
-): SwiftAsyncMemberFunction;
-export function resolveSwiftAsyncFunction(
-  target: Module | string,
-  spec?: string | ValueMethodResolveOptions,
-  options?: FunctionResolveOptions
-): SwiftAsyncFunction | SwiftAsyncMemberFunction {
-  return typeof target === "string"
-    ? qualifiedAsyncFunction(target, spec as ValueMethodResolveOptions | undefined)
-    : resolveAsyncFunction(target, spec as string, options);
 }

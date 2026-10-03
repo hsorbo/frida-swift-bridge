@@ -104,26 +104,26 @@ describe("Swift.function", () => {
   });
 
   test("drives a generic async free function: echoGenericAsync<Int>(21) ⇒ 21", async () => {
-    expect(await Swift.asyncFunction(module, ECHO_GENERIC_ASYNC, { typeArguments: [Int] }).call(21)).toEqual(int64(21));
+    expect(await Swift.function(module, ECHO_GENERIC_ASYNC, { typeArguments: [Int] }).call(21)).toEqual(int64(21));
     expect(await Swift.function(module, ECHO_GENERIC_ASYNC, { typeArguments: [Str] }).call("hi")).toBe("hi");
   });
 
   test("binds a value receiver: Accumulator(total: 10).peek(5) ⇒ 15, peekAsync(5) ⇒ 15", async () => {
     const acc = (Swift.type("fixture.Accumulator") as SwiftStruct).$new({ total: 10 });
     expect(Swift.function(module, ACCUMULATOR_PEEK).bind(acc)(5)).toEqual(int64(15));
-    expect(await Swift.asyncFunction(module, ACCUMULATOR_PEEK_ASYNC).bind(acc)(5)).toEqual(int64(15));
+    expect(await Swift.function(module, ACCUMULATOR_PEEK_ASYNC).bind(acc)(5)).toEqual(int64(15));
   });
 
   test("binds a mutating async value method with { self: \"mutating\" }: depositAsync(5) adds to total", async () => {
     const acc = (Swift.type("fixture.Accumulator") as SwiftStruct).$new({ total: 10 });
-    await Swift.asyncFunction(module, ACCUMULATOR_DEPOSIT_ASYNC, { self: "mutating" }).bind(acc)(5);
+    await Swift.function(module, ACCUMULATOR_DEPOSIT_ASYNC, { self: "mutating" }).bind(acc)(5);
     expect(acc.total).toEqual(int64(15));
   });
 
   test("binds a value receiver for a generic method: SmallGenericBox.echo<Int>(7) ⇒ 7, scaledByAsync<Int>(3, 7) ⇒ 31", async () => {
     const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 10 });
     expect(Swift.function(module, SMALL_GENERIC_BOX_ECHO, { typeArguments: [Int] }).bind(box)(7)).toEqual(int64(7));
-    const scaledBy = Swift.asyncFunction(module, SMALL_GENERIC_BOX_SCALED_BY_ASYNC, { typeArguments: [Int], self: "borrowing" });
+    const scaledBy = Swift.function(module, SMALL_GENERIC_BOX_SCALED_BY_ASYNC, { typeArguments: [Int], self: "borrowing" });
     expect(await scaledBy.bind(box)(3, 7)).toEqual(int64(31));
   });
 
@@ -172,7 +172,7 @@ describe("Swift.function", () => {
       listener.detach();
     }
 
-    const computeAsync = Swift.asyncFunction(module, COMPUTE_ASYNC);
+    const computeAsync = Swift.function(module, COMPUTE_ASYNC);
     let seenAsync: unknown;
     const asyncListener = Swift.Interceptor.attachAsync(computeAsync, {
       onEnter(args) {
@@ -241,11 +241,9 @@ describe("Swift.function from a qualified selector", () => {
     expect(() => move.call(5)).toThrow(/instance method; pass self/);
   });
 
-  test("an async member returns a Promise from either entry point", async () => {
+  test("an async member returns a Promise", async () => {
     const calc = Swift.class("fixture.AsyncCalc")!.init(100);
     expect(await Swift.function("fixture.AsyncCalc.addAsync(_:)").call(calc, 5)).toEqual(int64(105));
-    expect(await Swift.asyncFunction("fixture.AsyncCalc.addAsync(_:)").call(calc, 6)).toEqual(int64(106));
-    expect(() => Swift.asyncFunction("fixture.Robot.move(to:)")).toThrow("not async; use Swift.function");
   });
 
   test("rejects an unknown type, an unknown member and an unqualified selector", () => {
@@ -271,7 +269,7 @@ describe("Swift.function from a qualified selector", () => {
       listener.detach();
     }
 
-    const addAsync = Swift.asyncFunction("fixture.AsyncCalc.addAsync(_:)");
+    const addAsync = Swift.function("fixture.AsyncCalc.addAsync(_:)");
     expect(addAsync.signature.isAsync).toBe(true);
     const calc = Swift.class("fixture.AsyncCalc")!.init(100);
     let seenAsync: unknown;

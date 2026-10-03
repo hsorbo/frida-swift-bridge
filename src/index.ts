@@ -30,7 +30,7 @@ import {
 } from "./runtime/protocol.js";
 import type { StableProtocol, StableProtocolComposition } from "./runtime/protocol.js";
 import { markResilientModule, markFrozenType } from "./runtime/calling-convention.js";
-import { resolveSwiftAsyncFunction, resolveSwiftFunction } from "./runtime/qualified-function.js";
+import { resolveSwiftFunction } from "./runtime/qualified-function.js";
 import { closure } from "./runtime/closure.js";
 import { choose, ChooseOptions } from "./runtime/choose.js";
 import { moduleRegistry, ModuleRegistry } from "./runtime/module-namespace.js";
@@ -118,7 +118,7 @@ export {
   HookableTarget,
 } from "./runtime/interceptor.js";
 export { isSwiftObject } from "./runtime/method.js";
-export type { SwiftMemberFunction, SwiftAsyncMemberFunction } from "./runtime/qualified-function.js";
+export type { SwiftMemberFunction } from "./runtime/qualified-function.js";
 export type { ModuleRegistry, ModuleNamespace, ModuleMember } from "./runtime/module-namespace.js";
 export type {
   SwiftBoundMethod,
@@ -127,7 +127,6 @@ export type {
   MemberOrigin,
   SwiftBoundInitializer,
   SwiftFunction,
-  SwiftAsyncFunction,
   AsyncReceiver,
   CallResult,
   CallArg,
@@ -218,7 +217,6 @@ export const Swift = {
 
   NativeFunction: swiftFunction,
   function: resolveSwiftFunction,
-  asyncFunction: resolveSwiftAsyncFunction,
   Protocol: {
     find: (name: string): StableProtocol | null => ProtocolClass.find(name),
   },

@@ -216,10 +216,8 @@ export {
   classifyWitnessOrigin,
   NamedRequirement,
   SwiftFunction,
-  SwiftAsyncFunction,
   AsyncReceiver,
   resolveFunction,
-  resolveAsyncFunction,
 } from "./runtime/method.js";
 
 // Companion types naming the parameters and returns of the raw exports above.

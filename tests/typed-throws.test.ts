@@ -112,10 +112,10 @@ describe("typed throws", () => {
 
   test("an async typed error rides the resume registers or the buffer", async (ctx) => {
     requireTypedThrows(ctx);
-    const coded = Swift.asyncFunction(loadFixture(), THROWS_CODED_ASYNC);
+    const coded = Swift.function<Promise<CallResult>>(loadFixture(), THROWS_CODED_ASYNC);
     expect(await coded.call(0)).toEqual(int64(1));
     expect((await rejectedWith(coded.call(6))).value).toEqual({ code: int64(6), flag: true });
-    const wide = Swift.asyncFunction(loadFixture(), THROWS_WIDE_ASYNC);
+    const wide = Swift.function<Promise<CallResult>>(loadFixture(), THROWS_WIDE_ASYNC);
     expect(await wide.call(0)).toEqual(int64(8));
     expect((await rejectedWith(wide.call(2))).value).toEqual({ a: int64(2), b: int64(3), c: int64(4), d: int64(5), e: int64(6) });
     const thrower = Swift.type("fixture.TypedThrower")!.init(5) as SwiftClassObject;
@@ -164,8 +164,8 @@ describe("typed throws", () => {
       })
     );
     try {
-      const coded = Swift.asyncFunction(module, THROWS_CODED_ASYNC);
-      const wide = Swift.asyncFunction(module, THROWS_WIDE_ASYNC);
+      const coded = Swift.function<Promise<CallResult>>(module, THROWS_CODED_ASYNC);
+      const wide = Swift.function<Promise<CallResult>>(module, THROWS_WIDE_ASYNC);
       await coded.call(0);
       await rejectedWith(coded.call(7));
       await wide.call(0);

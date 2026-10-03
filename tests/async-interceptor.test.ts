@@ -211,7 +211,7 @@ describe("async interceptor", () => {
       },
     });
     try {
-      const flipFramedInt128Async = Swift.asyncFunction(module, FLIP_FRAMED_INT128_ASYNC);
+      const flipFramedInt128Async = Swift.function(module, FLIP_FRAMED_INT128_ASYNC);
       await flipFramedInt128Async.call(ValueInstance.borrow(Framed!, framed));
       expect(result).toEqual({ head: int64(4), wide: (2n << 64n) | 4n, tail: int64(1) });
     } finally {
@@ -333,7 +333,7 @@ describe("async interceptor", () => {
       },
     });
     try {
-      const [, host] = (await Swift.asyncFunction(module, RESOLVE_LINK_ASYNC).call(link)) as SwiftObject[];
+      const [, host] = (await Swift.function(module, RESOLVE_LINK_ASYNC).call(link)) as SwiftObject[];
       expect(host.address).toBe("frida.re/resolved");
       await completed.fired;
       expect(seen).toEqual({ enter: "frida.re", link: "frida.re", host: "frida.re/resolved" });
@@ -356,7 +356,7 @@ describe("async interceptor", () => {
       },
     });
     try {
-      await Swift.asyncFunction(module, PAIR_LINK_ASYNC).call(link, object);
+      await Swift.function(module, PAIR_LINK_ASYNC).call(link, object);
       await completed.fired;
       expect(element instanceof NativePointer).toBe(true);
       expect((element as NativePointer).equals(object)).toBe(true);

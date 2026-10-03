@@ -1904,11 +1904,6 @@ function valueReceiverRouting(receiver: Metadata, plan: CallPlan, ownership: Sel
   return routing;
 }
 
-export class SwiftAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]> extends SwiftFunction<
-  Promise<Ret>,
-  Args
-> {}
-
 function parseFunctionSymbol(mangled: string): SwiftFunctionSignature {
   const demangled = demangle(mangled);
   if (demangled === null) {
@@ -1933,18 +1928,6 @@ export function resolveFunction<Ret = CallResult | Promise<CallResult>, Args ext
 ): SwiftFunction<Ret, Args> {
   const signature = parseFunctionSymbol(mangled);
   return hookableFunction(new SwiftFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self), signature);
-}
-
-export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
-  module: Module,
-  mangled: string,
-  options: FunctionResolveOptions = {}
-): SwiftAsyncFunction<Ret, Args> {
-  const signature = parseFunctionSymbol(mangled);
-  if (!signature.async) {
-    throw new Error(`${signature.selector} is not async; use Swift.function`);
-  }
-  return hookableFunction(new SwiftAsyncFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self), signature);
 }
 
 function hookableFunction<T extends SwiftFunction<any, any>>(fn: T, signature: SwiftFunctionSignature): T {

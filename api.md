@@ -88,9 +88,6 @@ The default export is the whole facade. Its members:
 - `Swift.function(qualifiedSelector, options?)`: resolve a type's member from
   its qualified selector, `"Module.Type.member(labels:)"`. See
   [Free functions](#free-functions).
-- `Swift.asyncFunction(module, mangledName)`,
-  `Swift.asyncFunction(qualifiedSelector, options?)`: the same for an `async`
-  function, as an awaitable callable. See [Async and actors](#async-and-actors).
 - `Swift.Interceptor`: attach to Swift functions. See
   [Intercepting](#intercepting).
 - `Swift.closure(body)`: build a Swift closure from a JS callback. See
@@ -681,44 +678,22 @@ Global-actor and custom-executor actors are handled the same way; the bridge
 observes completion regardless of which executor resumes the continuation.
 
 Facade methods are one route to async code. When you hold a **symbol** instead,
-`Swift.asyncFunction(module, mangledName)` builds an awaitable callable
-directly from it — argument and return types are derived from the demangled
-signature, so there is nothing to annotate. A free function is invoked with
-`.call(...)`:
+`Swift.function(module, mangledName)` accepts an `async` one and its calls
+return a `Promise`; see [Free functions](#free-functions).
 
 ```js
 const app = Process.getModuleByName("MyApp");
 
-const computeAsync = Swift.asyncFunction(app, "$s5MyApp12computeAsyncyS2iYaF");
+const computeAsync = Swift.function(app, "$s5MyApp12computeAsyncyS2iYaF");
 await computeAsync.call(21);    // 42
-```
 
-An instance method binds its receiver first: `.bind(self)` accepts a Swift
-object facade, a raw pointer, or an ObjC object, and returns a plain async
-function. A value receiver is routed as `$method` would route it, so a small
-loadable receiver of a mutating method states `{ self: "mutating" }`.
-
-```js
 const calc = Swift.type("MyApp.AsyncCalc").init(100);
-const addAsync = Swift.asyncFunction(app, "$s5MyApp9AsyncCalcC8addAsyncyS2iYaF").bind(calc);
+const addAsync = Swift.function(app, "$s5MyApp9AsyncCalcC8addAsyncyS2iYaF").bind(calc);
 await addAsync(5);    // 105
 ```
 
 An `async throws` function rejects its promise with a `SwiftError` (see
-[Errors](#errors)); a tuple return decodes to a destructurable array. Misuse
-fails fast: a non-async symbol is rejected (use `Swift.function`),
-calling an unbound instance method throws, as does binding a receiver to a
-free function. A generic symbol takes `{ typeArguments }` as a generic method
-does; methods of generic types are not supported.
-
-In TypeScript the wrapper is generic like `NativeFunction<Ret, Args>`: annotate
-the marshalled return (and optionally argument) types once and the call site is
-typed without casting.
-
-```ts
-const makeTuple = Swift.asyncFunction<[Int64, string], [number, number]>(app, MAKE_TUPLE);
-const [sum, label] = await makeTuple.call(3, 4);   // Promise<[Int64, string]>
-```
+[Errors](#errors)); a tuple return decodes to a destructurable array.
 
 The symbol may also be a cross-module extension method on an imported ObjC
 class — for example Foundation's `URLSession.data(from:)`. Bind the receiver
@@ -734,7 +709,7 @@ const foundation = Process.getModuleByName("Foundation");
 const url = Swift.struct("Foundation.URL").init({ string: "https://example.com/" });
 
 const dataFrom = Swift
-    .asyncFunction(foundation, DATA_FROM)
+    .function(foundation, DATA_FROM)
     .bind(ObjC.classes.NSURLSession.sharedSession());
 
 const [data, response] = await dataFrom(url, null);
@@ -915,12 +890,22 @@ const mightThrow = Swift.function(app, "$s5MyApp10mightThrowyS2iKF");
 mightThrow.call(1);       // throws SwiftError
 ```
 
-It has the same shape as `Swift.asyncFunction` (see
-[Async and actors](#async-and-actors)): an instance method binds its receiver
-with `.bind(self)` and returns a plain function, and the TypeScript wrapper is
-generic over the return and argument types. It also accepts an `async` symbol,
-whose calls return a `Promise`: sync and async share one call site, as with
-methods.
+An instance method binds its receiver with `.bind(self)`, which accepts a
+Swift object facade, a raw pointer or an ObjC object, and returns a plain
+function. A value receiver is routed as `$method` would route it, so a small
+loadable receiver of a mutating method states `{ self: "mutating" }`. An
+`async` symbol is accepted too, and its calls return a `Promise`: sync and
+async share one call site, as with methods. Misuse fails fast: calling an
+unbound instance method throws, as does binding a receiver to a free function.
+
+In TypeScript the wrapper is generic like `NativeFunction<Ret, Args>`: annotate
+the marshalled return (and optionally argument) types once and the call site is
+typed without casting.
+
+```ts
+const makeTuple = Swift.function<Promise<[Int64, string]>, [number, number]>(app, MAKE_TUPLE);
+const [sum, label] = await makeTuple.call(3, 4);   // Promise<[Int64, string]>
+```
 
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
@@ -965,7 +950,7 @@ Swift.function("MyApp.Robot.make(name:)").call("R3");          // a Robot
 const deriveKey = Swift.function("CryptoKit.HKDF.deriveKey(inputKeyMaterial:outputByteCount:)");
 Swift.Interceptor.attach(deriveKey, { ... });
 
-await Swift.asyncFunction("MyApp.AsyncCalc.addAsync(_:)").call(calc, 5);   // 105
+await Swift.function("MyApp.AsyncCalc.addAsync(_:)").call(calc, 5);        // 105
 ```
 
 Free module-level functions are not reachable this way yet; use the mangled
@@ -1021,7 +1006,7 @@ dynamic value. A closure argument is its two words, `{ function, context }`.
 
 `target` is an address, a member found through a type's reflection, a bound
 method (hooked as its member; the receiver it was bound to plays no part), or a
-function from `Swift.function` or `Swift.asyncFunction`. An address is
+function from `Swift.function`. An address is
 symbolicated to learn the signature; a member or function carries the signature
 it was found with, so it needs no symbol at its address. The arguments arrive
 positionally; the member's labels name them:
@@ -1221,9 +1206,8 @@ try {
 ```
 
 `Swift.function` reads `throws` from the symbol, so it raises the same
-`SwiftError` without the option. An `async throws` call — a facade method,
-`Swift.function` or `Swift.asyncFunction` — rejects its promise with the same
-`SwiftError`.
+`SwiftError` without the option. An `async throws` call — a facade method or
+`Swift.function` — rejects its promise with the same `SwiftError`.
 
 `e.value` decodes the thrown error. An untyped `throws` projects the error
 existential and reads its value; a typed `throws(E)` has no box, so `e.error`
@@ -1377,9 +1361,8 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
   parameter is refused too.
 - **Tuples with an opaque element.** A tuple parameter, result or async result
   with an element of generic, opaque layout is refused.
-- **Methods of generic types in `Swift.function`.** `Swift.function` and
-  `Swift.asyncFunction` plan a symbol's own generic parameters, not those of
-  its enclosing type.
+- **Methods of generic types in `Swift.function`.** `Swift.function` plans a
+  symbol's own generic parameters, not those of its enclosing type.
 - **Existential argument and result types in `Swift.swiftFunction`.** Both must
   be concrete.
 - **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan,
