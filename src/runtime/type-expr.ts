@@ -74,6 +74,7 @@ export interface SwiftFunctionSignature {
   simpleGenerics: boolean;
   async: boolean;
   throws: boolean;
+  thrownType: TypeExpr | null; // throws(E); null for an untyped throws or a non-throwing function
   params: TypeExprParam[];
   result: TypeExpr | null;
   argTypeNames: string[];
@@ -543,6 +544,10 @@ function parseFunction(s: string): SwiftFunctionSignature | null {
     return null;
   }
   const effects = tail.slice(0, arrow);
+  const thrownType = parseThrownType(effects);
+  if (thrownType === undefined) {
+    return null;
+  }
   const returnTypeName = tail.slice(arrow + 2).trim();
   const result = returnTypeName === "()" ? null : parseTypeExpr(returnTypeName);
   if (returnTypeName !== "()" && result === null) {
@@ -558,6 +563,7 @@ function parseFunction(s: string): SwiftFunctionSignature | null {
     simpleGenerics,
     async: /\basync\b/.test(effects),
     throws: /\b(?:re)?throws\b/.test(effects),
+    thrownType,
     params,
     result,
     argTypeNames: params.map((p) => p.text),
@@ -567,6 +573,18 @@ function parseFunction(s: string): SwiftFunctionSignature | null {
     conformanceRequirements,
     contextConstraints,
   };
+}
+
+// null when the throws is untyped; undefined when the spelled type does not parse.
+function parseThrownType(effects: string): TypeExpr | null | undefined {
+  const at = effects.search(/\bthrows\(/);
+  if (at === -1) {
+    return null;
+  }
+  const parser = new Parser(effects);
+  parser.pos = at + "throws".length;
+  const spelled = parser.balanced();
+  return parseTypeExpr(spelled.slice(1, -1)) ?? undefined;
 }
 
 function parseParamList(inner: string): TypeExprParam[] {

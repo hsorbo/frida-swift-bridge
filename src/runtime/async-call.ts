@@ -1,5 +1,6 @@
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { AsyncTask } from "../abi/async-task.js";
+import { Metadata } from "../abi/metadata.js";
 import { SwiftError } from "./thrown-error.js";
 import { LIBSWIFT_CORE_NAME, ensureSwiftHost } from "./platform.js";
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
@@ -53,9 +54,14 @@ export interface SerialExecutorRef {
   implementation: NativePointer;
 }
 
+// A typed error's value: read from the resume registers it shares with the result, or taken from
+// the buffer passed to the callee after the implicit arguments.
+export type AsyncTypedError = { type: Metadata } & ({ placed: PlacedResultScalar[] } | { slot: NativePointer });
+
 export interface AsyncCallOptions {
   receiver?: NativePointer;
   throws?: boolean;
+  typedError?: AsyncTypedError; // implies throws; a placed error needs a "scalars" result shape
   floatArgs?: AsyncFloatArg[];
   stackArgs?: NativePointer[]; // the stack argument area as words, from offset 0
   result?: AsyncResultShape;
@@ -147,6 +153,7 @@ interface SynthesizedCall {
   continuation: NativePointer;
   result: NativePointer;
   error: NativePointer;
+  typedError: AsyncTypedError | null;
   done: NativePointer;
   option: NativePointer | null;
 }
@@ -174,9 +181,13 @@ function synthesizeAsyncCall(afp: AsyncFunctionPointer, args: NativePointer[], o
   const error = Memory.alloc(Process.pointerSize).writePointer(NULL);
   const done = Memory.alloc(Process.pointerSize);
 
+  const typedError = options.typedError ?? null;
+  if (typedError !== null && "placed" in typedError && shape.kind !== "scalars") {
+    throw new Error("a typed error in the resume registers needs a scalars result shape");
+  }
   const continuationCtx: ContinuationCtx = {
     shape,
-    throws: options.throws === true,
+    throws: options.throws === true || typedError !== null,
     result,
     error,
     done,
@@ -221,7 +232,7 @@ function synthesizeAsyncCall(afp: AsyncFunctionPointer, args: NativePointer[], o
 
   const option = options.onActor !== undefined ? buildActorTaskOption(options.onActor) : null;
 
-  return { shape, operation, continuation, result, error, done, option };
+  return { shape, operation, continuation, result, error, typedError, done, option };
 }
 
 interface ContinuationCtx {
@@ -509,17 +520,31 @@ function getWaitSemaphore(api: DriveApi): NativePointer {
 function takeResult(call: SynthesizedCall): NativePointer {
   const thrown = call.error.readPointer();
   if (!thrown.isNull()) {
-    throw new SwiftError(thrown, true);
+    const typed = call.typedError;
+    if (typed === null) {
+      throw new SwiftError(thrown, true);
+    }
+    const value = Memory.alloc(Math.max(typed.type.typeLayout.stride, 1));
+    if ("placed" in typed) {
+      copyPlaced(typed.placed, call.result, value);
+    } else {
+      Memory.copy(value, typed.slot, typed.type.valueWitnesses.size);
+    }
+    throw SwiftError.typed(typed.type, value);
   }
   const { shape } = call;
   if (shape.kind !== "scalars") {
     return call.result;
   }
-  const value = Memory.alloc(shape.stride);
-  for (const { scalar, location } of shape.placed) {
-    Memory.copy(value.add(scalar.offset), call.result.add(resultRegisterSlot(location)), scalar.size);
-  }
+  const value = Memory.alloc(Math.max(shape.stride, 1));
+  copyPlaced(shape.placed, call.result, value);
   return value;
+}
+
+function copyPlaced(placed: PlacedResultScalar[], registers: NativePointer, value: NativePointer): void {
+  for (const { scalar, location } of placed) {
+    Memory.copy(value.add(scalar.offset), registers.add(resultRegisterSlot(location)), scalar.size);
+  }
 }
 
 // Block on a dispatch semaphore (not a plain sleep) so libdispatch keeps servicing the executor; the

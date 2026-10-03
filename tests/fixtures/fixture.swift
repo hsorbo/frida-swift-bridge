@@ -1903,3 +1903,75 @@ public struct WeakSlot {
 }
 public func makeWatcher(_ owner: Token) -> Watcher { Watcher(owner: owner) }
 public func makeWeakSlot(_ ref: Token?, _ n: Int) -> WeakSlot { WeakSlot(ref: ref, n: n) }
+
+// Typed throws: the error register carries a flag, and the error value rides the result registers
+// when both it and the result are loadable int/pointer scalars; otherwise the caller passes a
+// buffer for it after every other argument.
+#if compiler(>=6.0)
+public enum TypedFailure: Error { case bad, worse }
+public struct CodedFailure: Error {
+    public let code: Int
+    public let flag: Bool
+}
+public struct WideFailure: Error {
+    public let a: Int; public let b: Int; public let c: Int; public let d: Int; public let e: Int
+}
+public struct RatioFailure: Error { public let ratio: Double }
+public final class ClassFailure: Error {
+    public let id: Int
+    public init(id: Int) { self.id = id }
+}
+public func throwsTyped(_ code: Int) throws(TypedFailure) -> Int {
+    if code == 1 { throw .bad }
+    if code == 2 { throw .worse }
+    return code * 10
+}
+public func throwsCoded(_ code: Int) throws(CodedFailure) -> Double {
+    if code != 0 { throw CodedFailure(code: code, flag: code > 5) }
+    return 2.5
+}
+public func throwsWide(_ code: Int) throws(WideFailure) -> Int {
+    if code != 0 { throw WideFailure(a: code, b: code + 1, c: code + 2, d: code + 3, e: code + 4) }
+    return 7
+}
+public func throwsRatio(_ code: Int) throws(RatioFailure) {
+    if code != 0 { throw RatioFailure(ratio: Double(code) / 2) }
+}
+public func throwsClass(_ code: Int) throws(ClassFailure) -> Int {
+    if code != 0 { throw ClassFailure(id: code) }
+    return 3
+}
+public func throwsBigResult(_ code: Int) throws(TypedFailure) -> BigStruct {
+    if code != 0 { throw .bad }
+    return BigStruct(a: 1, b: 2, c: 3, d: 4, e: 5)
+}
+public func throwsCodedAsync(_ code: Int) async throws(CodedFailure) -> Int {
+    await Task.yield()
+    if code != 0 { throw CodedFailure(code: code, flag: code > 5) }
+    return code + 1
+}
+public func throwsWideAsync(_ code: Int) async throws(WideFailure) -> Int {
+    await Task.yield()
+    if code != 0 { throw WideFailure(a: code, b: code + 1, c: code + 2, d: code + 3, e: code + 4) }
+    return 8
+}
+public final class TypedThrower {
+    public let base: Int
+    public init(base: Int) { self.base = base }
+    public func scaled(_ code: Int) throws(CodedFailure) -> Int {
+        if code != 0 { throw CodedFailure(code: base + code, flag: false) }
+        return base * 2
+    }
+    public func scaledAsync(_ code: Int) async throws(CodedFailure) -> Int {
+        await Task.yield()
+        if code != 0 { throw CodedFailure(code: base + code, flag: true) }
+        return base * 3
+    }
+}
+public func driveThrowsCoded(_ code: Int) -> Int {
+    do { return Int(try throwsCoded(code)) } catch { return -error.code }
+}
+public func driveThrowsWide(_ code: Int) -> Int {
+    do { return try throwsWide(code) } catch { return -error.e }
+}
+#endif

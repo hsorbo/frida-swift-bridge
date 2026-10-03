@@ -130,6 +130,16 @@ describe("parseSwiftSignature", () => {
     expect(s.result!.text).toBe("Swift.String");
   });
 
+  test("keeps the thrown type of a typed throws", () => {
+    const typed = fn("fixture.throwsCoded(Swift.Int) throws(fixture.CodedFailure) -> Swift.Double");
+    expect(typed.throws).toBe(true);
+    expect(typed.thrownType!.text).toBe("fixture.CodedFailure");
+    expect(typed.result!.text).toBe("Swift.Double");
+    const asyncTyped = fn("fixture.TypedThrower.scaledAsync(Swift.Int) async throws(fixture.CodedFailure) -> Swift.Int");
+    expect(asyncTyped.async && asyncTyped.throws && asyncTyped.thrownType!.text === "fixture.CodedFailure").toBe(true);
+    expect(fn("fixture.mightThrow(Swift.Int) throws -> Swift.Int").thrownType).toBe(null);
+  });
+
   test("separates a constrained extension's where clause from its context", () => {
     const s = fn("(extension in Mod):Swift.Sequence< where A: Swift.Equatable, A.Element: Swift.Hashable>.tally(A) -> Swift.Int");
     expect(s.context).toBe("Swift.Sequence");

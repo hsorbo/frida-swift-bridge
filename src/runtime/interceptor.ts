@@ -17,6 +17,9 @@ import {
   argumentRegisterUse,
   placeResultScalars,
   placeAsyncResultScalars,
+  placeTypedErrorScalars,
+  typedErrorReturnsDirectly,
+  PlacedResultScalar,
 } from "./calling-convention.js";
 import { probeSelfOwnership } from "./value-convention.js";
 import { AsyncFunctionPointer, isAsyncFunctionPointerSymbol } from "../abi/async-function-pointer.js";
@@ -43,7 +46,7 @@ export type SwiftInvocationContext = InvocationContext & { self?: CallResult; ty
 
 export interface SwiftInvocationCallbacks {
   onEnter?: (this: SwiftInvocationContext, args: SwiftValue[]) => void;
-  onLeave?: (this: SwiftInvocationContext, retval: CallResult, error?: SwiftValue) => void;
+  onLeave?: (this: SwiftInvocationContext, retval: CallResult, error?: CallResult) => void;
 }
 
 export interface SwiftInterceptorOptions {
@@ -111,10 +114,47 @@ function typeKeyArgumentCount(type: ContextDescriptor): number {
 interface CallShape {
   args: TypePlan[];
   ret: TypePlan | null;
+  thrown: TypePlan | null; // throws(E)
   generics: GenericEnvironment;
   throws: boolean;
   receiver: Receiver | null;
   coroutine?: true;
+}
+
+// Where a typed error lands: the result registers it shares with the result, or the buffer the
+// caller passes after the generic arguments.
+interface ThrownLowering {
+  plan: Exclude<TypePlan, { kind: "metatype" } | { kind: "closure" }>;
+  placed: PlacedResultScalar[] | null;
+}
+
+function thrownLowering({ thrown, ret }: CallShape, onResume: boolean): ThrownLowering | null {
+  if (thrown === null) {
+    return null;
+  }
+  if (thrown.kind === "metatype" || thrown.kind === "closure") {
+    throw new Error(`unsupported thrown type: ${thrown.kind}`);
+  }
+  if (thrown.kind === "concrete" && !returnIsIndirect(ret) && typedErrorReturnsDirectly(thrown.metadata)) {
+    return { plan: thrown, placed: placeTypedErrorScalars(directResultScalars(ret), thrown.metadata, onResume) };
+  }
+  return { plan: thrown, placed: null };
+}
+
+// A direct result's scalars: a metatype or a single-reference generic use is one word, a thick
+// closure two.
+function directResultScalars(ret: TypePlan | null): LoweredScalar[] {
+  if (ret === null || (ret.kind === "concrete" && ret.metadata.valueWitnesses.size === 0)) {
+    return [];
+  }
+  if (ret.kind === "concrete") {
+    return loweredScalars(ret.metadata);
+  }
+  return Array.from({ length: ret.kind === "closure" ? 2 : 1 }, (_, i) => ({ offset: i * 8, size: 8, cls: "int" as const }));
+}
+
+function needsGenerics(plan: TypePlan | null): boolean {
+  return plan !== null && (plan.kind === "param" || plan.kind === "use");
 }
 
 function planType(type: TypeExpr, genericParams: string[]): TypePlan {
@@ -344,6 +384,7 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
     return {
       args,
       ret: parsed.result === null ? null : planType(parsed.result, gp),
+      thrown: parsed.thrownType === null ? null : planType(parsed.thrownType, gp),
       generics,
       throws: parsed.throws,
       receiver,
@@ -358,11 +399,11 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
   const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null };
   switch (parsed.kind) {
     case "getter":
-      return { args: [], ret: member, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
+      return { args: [], ret: member, thrown: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
     case "setter":
-      return { args: [member], ret: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
+      return { args: [member], ret: null, thrown: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
     default:
-      return { args: [], ret: member, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: true };
+      return { args: [], ret: member, thrown: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: true };
   }
 }
 
@@ -628,16 +669,18 @@ interface MaterializedArgs {
   generics: Metadata[];
   trailingSelf: NativePointer | null;
   selfMetadata: Metadata | null;
+  thrownSlot: NativePointer | null;
 }
 
 // Generic metadata follows the formal args and a trailing self in the GP sequence, so decode after
-// walking them.
+// walking them; a typed error's buffer follows the generic metadata.
 function materializeArgs(
   context: CpuContext,
   args: TypePlan[],
   environment: GenericEnvironment,
   startReg = 0,
-  receiver: Receiver | null = null
+  receiver: Receiver | null = null,
+  takesThrownSlot = false
 ): MaterializedArgs {
   const cursor = new ArgumentCursor(context, startReg);
   const slots: { plan: TypePlan; address: NativePointer }[] = [];
@@ -695,6 +738,7 @@ function materializeArgs(
     const { type } = receiver.metadata;
     selfMetadata = buildGenericMetadata(type, generics.slice(0, typeParams(type).names.length));
   }
+  const thrownSlot = takesThrownSlot ? cursor.gp() : null;
 
   const values = (): SwiftValue[] =>
     slots.map((s) => {
@@ -709,7 +753,35 @@ function materializeArgs(
         ? readValue(metadata, s.address)
         : decodeBorrowedValue(metadata, s.address);
     });
-  return { values, generics, trailingSelf, selfMetadata };
+  return { values, generics, trailingSelf, selfMetadata, thrownSlot };
+}
+
+function materializeThrown(
+  context: CpuContext,
+  lowering: ThrownLowering,
+  slot: NativePointer | null,
+  generics: Metadata[],
+  genericParams: string[],
+  onResume = false
+): CallResult {
+  const metadata = planMetadata(lowering.plan, generics, genericParams);
+  if (lowering.placed === null) {
+    if (slot === null) {
+      throw new Error("typed error buffer was not captured on enter");
+    }
+    return decodeBorrowedValue(metadata, slot);
+  }
+  const scratch = Memory.alloc(Math.max(words(metadata), 1) * 8);
+  for (const { scalar, location } of lowering.placed) {
+    writeRegisterScalar(
+      scratch,
+      scalar,
+      location,
+      (n) => (onResume ? resumeGp(context, n) : gpResult(context, n)),
+      (n, cls) => fpResult(context, n, cls)
+    );
+  }
+  return decodeBorrowedValue(metadata, scratch);
 }
 
 // Mirrors method.ts decodeReturn, but borrows: an interceptor only observes the caller's +1, so it
@@ -800,6 +872,7 @@ interface SwiftInvocationState {
   generics?: Metadata[];
   trailingSelf?: NativePointer;
   selfMetadata?: Metadata;
+  thrownSlot?: NativePointer;
 }
 
 function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
@@ -809,14 +882,16 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
   }
   const { args, ret, generics: environment, throws } = shape;
   const genericParams = environment.params;
+  const thrown = thrownLowering(shape, false);
   const captureIndirect = returnIsIndirect(ret);
-  const returnNeedsGenerics = ret !== null && (ret.kind === "param" || ret.kind === "use") && genericParams.length > 0;
+  const returnNeedsGenerics = (needsGenerics(ret) || needsGenerics(shape.thrown)) && genericParams.length > 0;
   const decodesArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
   const receiver = knownReceiver(shape, decodesArgs);
   const unlocatable = unlocatableGenerics(shape);
   const capturesGenerics = callbacks.onLeave !== undefined && genericParams.length > 0 && unlocatable === null;
   const selfReadOnEnter = receiver !== null && (receiver.trailing === true || !(receiver.metadata instanceof Metadata || receiver.metadata === "isa"));
-  const wantsArgs = decodesArgs || (selfReadOnEnter && callbacks.onLeave !== undefined) || capturesGenerics;
+  const takesThrownSlot = thrown !== null && thrown.placed === null;
+  const wantsArgs = decodesArgs || (selfReadOnEnter && callbacks.onLeave !== undefined) || capturesGenerics || (takesThrownSlot && callbacks.onLeave !== undefined);
 
   const onEnter =
     wantsArgs || captureIndirect
@@ -827,7 +902,7 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
             state.indirectReturn = indirectResultRegister(context);
           }
           if (wantsArgs) {
-            const { values, generics, trailingSelf, selfMetadata } = materializeArgs(context, args, environment, 0, receiver);
+            const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, environment, 0, receiver, takesThrownSlot);
             state.generics = generics;
             exposeTypeArguments(this, generics);
             if (trailingSelf !== null) {
@@ -835,6 +910,9 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
             }
             if (selfMetadata !== null) {
               state.selfMetadata = selfMetadata;
+            }
+            if (thrownSlot !== null) {
+              state.thrownSlot = thrownSlot;
             }
             if (receiver !== null) {
               exposeSelf(this, receiver, trailingSelf ?? selfRegister(context), selfMetadata);
@@ -855,9 +933,13 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
             exposeSelf(this, receiver, state.trailingSelf ?? selfRegister(context), state.selfMetadata ?? null);
           }
           exposeTypeArguments(this, state.generics ?? unlocatable ?? []);
-          const swiftErrorRegister = errorRegister(context); // swiftcc returns a thrown error here
+          const swiftErrorRegister = errorRegister(context); // swiftcc returns a thrown error here, or a flag for a typed one
           if (throws && !swiftErrorRegister.isNull()) {
-            callbacks.onLeave!.call(this, null, decodeThrownError(swiftErrorRegister));
+            const error =
+              thrown === null
+                ? decodeThrownError(swiftErrorRegister)
+                : materializeThrown(context, thrown, state.thrownSlot ?? null, state.generics ?? [], genericParams);
+            callbacks.onLeave!.call(this, null, error);
             return;
           }
           callbacks.onLeave!.call(
@@ -1044,7 +1126,7 @@ export interface SwiftAsyncCallbacks {
   onEnter?: (this: SwiftInvocationContext, args: SwiftValue[], context: NativePointer) => void;
   // The entry partial function returning: reached the first suspension, not logical completion.
   onFirstSuspend?: (this: InvocationContext) => void;
-  onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: CallResult, error?: SwiftValue) => void;
+  onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: CallResult, error?: CallResult) => void;
 }
 
 function resolveAsyncEntry(target: NativePointer): NativePointer {
@@ -1058,6 +1140,8 @@ function resolveAsyncEntry(target: NativePointer): NativePointer {
 interface CompletionEntry {
   callbacks: SwiftAsyncCallbacks;
   ret: TypePlan | null;
+  thrown: ThrownLowering | null;
+  thrownSlot: NativePointer | null;
   generics: Metadata[];
   genericParams: string[];
   typeArguments: Metadata[] | string;
@@ -1119,7 +1203,11 @@ function fireCompletion(entry: CompletionEntry, context: CpuContext, self: Invoc
   exposeTypeArguments(self, entry.typeArguments);
   const error = completionErrorValue(context);
   if (entry.throws && !error.isNull()) {
-    entry.callbacks.onComplete!.call(self, null, decodeThrownError(error));
+    const thrown =
+      entry.thrown === null
+        ? decodeThrownError(error)
+        : materializeThrown(context, entry.thrown, entry.thrownSlot, entry.generics, entry.genericParams, true);
+    entry.callbacks.onComplete!.call(self, null, thrown);
     return;
   }
   entry.callbacks.onComplete!.call(
@@ -1230,16 +1318,18 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
   const genericParams = environment.params;
 
   const wantsCompletion = callbacks.onComplete !== undefined;
+  const thrown = thrownLowering(shape, true);
+  const takesThrownSlot = thrown !== null && thrown.placed === null;
   const indirectReturn = returnIsIndirect(ret);
   const argRegBase = indirectReturn ? 1 : 0; // an @out result takes x0
-  const returnNeedsGenerics = wantsCompletion && ret !== null && (ret.kind === "param" || ret.kind === "use") && genericParams.length > 0;
-  const wantsArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
+  const returnNeedsGenerics = wantsCompletion && (needsGenerics(ret) || needsGenerics(shape.thrown)) && genericParams.length > 0;
+  const wantsArgs = callbacks.onEnter !== undefined || returnNeedsGenerics || (wantsCompletion && takesThrownSlot);
   const receiver = knownReceiver(shape, wantsArgs);
   const unlocatable = unlocatableGenerics(shape);
   const capturesGenerics = wantsCompletion && genericParams.length > 0 && unlocatable === null;
   const liveEntries = new Set<CompletionEntry>();
 
-  const armCompletion = (context: CpuContext, generics: Metadata[] | null): void => {
+  const armCompletion = (context: CpuContext, generics: Metadata[] | null, thrownSlot: NativePointer | null): void => {
     const trampoline = getCompletionTrampoline();
     const taskContext = asyncContextRegister(context);
     const ctx = new AsyncContext(taskContext);
@@ -1253,6 +1343,8 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
     const entry: CompletionEntry = {
       callbacks,
       ret,
+      thrown,
+      thrownSlot,
       generics: generics ?? [],
       genericParams,
       typeArguments: generics ?? unlocatable ?? [],
@@ -1270,9 +1362,11 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
       ? function (this: SwiftInvocationContext) {
           const context = this.context;
           let generics: Metadata[] | null = null;
+          let thrownSlot: NativePointer | null = null;
           if (wantsArgs || capturesGenerics) {
-            const materialized = materializeArgs(context, args, environment, argRegBase, receiver);
+            const materialized = materializeArgs(context, args, environment, argRegBase, receiver, takesThrownSlot);
             generics = materialized.generics;
+            thrownSlot = materialized.thrownSlot;
             exposeTypeArguments(this, generics);
             if (receiver !== null) {
               exposeSelf(this, receiver, materialized.trailingSelf ?? selfRegister(context), materialized.selfMetadata);
@@ -1282,7 +1376,7 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
             }
           }
           if (wantsCompletion) {
-            armCompletion(context, generics);
+            armCompletion(context, generics, thrownSlot);
           }
         }
       : undefined;

@@ -381,14 +381,17 @@ export interface PlacedResultScalar {
 const ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER = I128_STARTS_AT_EVEN_REGISTER;
 
 export function placeResultScalars(metadata: Metadata): PlacedResultScalar[] {
-  const allocator = new ArgumentAllocator(0, true);
-  return loweredScalars(metadata).map((scalar) => ({ scalar, location: allocator.scalar(scalar) as RegisterLocation }));
+  return placeScalars(loweredScalars(metadata), false);
 }
 
 export function placeAsyncResultScalars(metadata: Metadata): PlacedResultScalar[] {
+  return placeScalars(loweredScalars(metadata), true);
+}
+
+function placeScalars(scalars: LoweredScalar[], forAsync: boolean): PlacedResultScalar[] {
   const allocator = new ArgumentAllocator(0, true);
-  return loweredScalars(metadata).flatMap((scalar) => {
-    if (ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER && scalar.cls === "int" && scalar.size === 16) {
+  return scalars.flatMap((scalar) => {
+    if (forAsync && ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER && scalar.cls === "int" && scalar.size === 16) {
       return [0, 8].map((half) => ({
         scalar: { offset: scalar.offset + half, size: 8, cls: "int" as const },
         location: allocator.evenGp() as RegisterLocation,
@@ -396,6 +399,42 @@ export function placeAsyncResultScalars(metadata: Metadata): PlacedResultScalar[
     }
     return [{ scalar, location: allocator.scalar(scalar) as RegisterLocation }];
   });
+}
+
+// A typed error rides the result registers when it and the result are both direct and its scalars
+// are all integer or pointer: each of the result's integer scalars shares its register with the
+// error's next one, floating-point ones are passed over, and the error's remaining scalars follow.
+export function typedErrorReturnsDirectly(error: Metadata): boolean {
+  const scalars = loweredScalars(error);
+  return scalars.length === 0 || (!shouldPassIndirectly(error) && scalars.every((s) => s.cls === "int"));
+}
+
+export function placeTypedErrorScalars(resultScalars: LoweredScalar[], error: Metadata, forAsync: boolean): PlacedResultScalar[] {
+  const errorScalars = loweredScalars(error);
+  const combined: { scalar: LoweredScalar; error: number | null }[] = [];
+  let next = 0;
+  for (const scalar of resultScalars) {
+    if (scalar.cls !== "int" || next === errorScalars.length) {
+      combined.push({ scalar, error: null });
+      continue;
+    }
+    const shared = errorScalars[next];
+    combined.push({ scalar: { offset: 0, size: Math.max(scalar.size, shared.size), cls: "int" }, error: next++ });
+  }
+  for (; next < errorScalars.length; next++) {
+    combined.push({ scalar: errorScalars[next], error: next });
+  }
+  const placed = placeScalars(combined.map((c) => c.scalar), forAsync);
+  const byError = new Map<number, RegisterLocation>();
+  let at = 0;
+  combined.forEach((c) => {
+    const location = placed[at].location;
+    at += forAsync && ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER && c.scalar.cls === "int" && c.scalar.size === 16 ? 2 : 1;
+    if (c.error !== null) {
+      byError.set(c.error, location);
+    }
+  });
+  return errorScalars.map((scalar, i) => ({ scalar, location: byError.get(i)! }));
 }
 
 // A generic-typed value is always passed indirectly.
@@ -586,9 +625,32 @@ function resultRegisters(placed: PlacedScalar[]): RegisterLocation[] {
 export interface SwiftNativeFunctionOptions {
   hasSelf?: boolean;
   throws?: boolean;
+  // throws(E): the error register carries a flag and the error value itself is returned, in the
+  // result registers or through a buffer passed after the implicit arguments. An AbstractIndirect
+  // error is one the callee sees as a type parameter, which always takes the buffer.
+  errorType?: Metadata | AbstractIndirect;
   typeArguments?: Metadata[];
   witnessTables?: NativePointer[];
   consumedArgs?: number[];
+}
+
+interface TypedErrorLowering {
+  metadata: Metadata;
+  direct: PlacedScalar[] | null; // null: the callee initializes `slot`
+  slot: NativePointer | null;
+}
+
+function lowerTypedError(errorType: Metadata | AbstractIndirect, result: ResultLowering | null, returnType: SwiftArgType | null): TypedErrorLowering {
+  const metadata = errorType instanceof Metadata ? errorType : errorType.metadata;
+  const resultIsDirect = result === null || (result.sret === null && result.leading.length === 0);
+  if (errorType instanceof Metadata && resultIsDirect && typedErrorReturnsDirectly(metadata)) {
+    if (returnType !== null && isDestructuredTuple(returnType)) {
+      throw new Error("a typed throw beside a destructured tuple result is unsupported");
+    }
+    const resultScalars = returnType instanceof Metadata && result!.size > 0 ? loweredScalars(returnType) : [];
+    return { metadata, direct: placeTypedErrorScalars(resultScalars, metadata, false), slot: null };
+  }
+  return { metadata, direct: null, slot: Memory.alloc(Math.max(metadata.typeLayout.stride, 1)) };
 }
 
 export type SwiftNativeFunction = (...args: NativePointer[]) => NativePointer | null;
@@ -602,7 +664,7 @@ export function makeSwiftNativeFunction(
   options: SwiftNativeFunctionOptions = {}
 ): SwiftNativeFunction {
   const hasSelf = options.hasSelf === true;
-  const throws = options.throws === true;
+  const throws = options.throws === true || options.errorType !== undefined;
   const typeArguments = options.typeArguments ?? [];
   const witnessTables = options.witnessTables ?? [];
   const consumed = new Set(options.consumedArgs ?? []);
@@ -631,6 +693,8 @@ export function makeSwiftNativeFunction(
           : lowerResult(returnType, false);
   }
 
+  const typedError = options.errorType === undefined ? null : lowerTypedError(options.errorType, result, returnType);
+
   const loweredArgs = argTypes.map(lowerArg);
   // Only a concrete @in argument can be consumed: we hand the callee a private copy to destroy.
   // Direct, generic, and closure args have no such copy; inout is borrowed, never consumed here.
@@ -654,8 +718,9 @@ export function makeSwiftNativeFunction(
   const argLocations = loweredArgs.map((arg) =>
     arg.indirect ? [allocator.gp()] : arg.pieces.map((piece) => allocator.scalar(piece))
   );
-  // trailing implicit args after the formal ones: a type-metadata pointer per param, then witnesses
-  const implicitArgs = [...typeArguments.map((m) => m.handle), ...witnessTables];
+  // trailing implicit args after the formal ones: a type-metadata pointer per param, then witnesses,
+  // then the buffer a typed error is returned through
+  const implicitArgs = [...typeArguments.map((m) => m.handle), ...witnessTables, ...(typedError?.slot === null || typedError === null ? [] : [typedError.slot])];
   const implicitLocations = implicitArgs.map(() => allocator.gp());
   const stackWords = Math.ceil(allocator.stackSize / 8);
   const fridaArgTypes: NativeFunctionArgumentType[] = [
@@ -670,7 +735,8 @@ export function makeSwiftNativeFunction(
   const savesContext = hasSelf || throws;
   const code = Memory.alloc(Process.pageSize);
   const save = Memory.alloc(Process.pointerSize * (savesContext ? 4 : 2));
-  const registerDump = result !== null && result.direct.length > 0 ? Memory.alloc(REGISTER_FRAME_SIZE) : null;
+  const dumpedRegisters = resultRegisters([...(result?.direct ?? []), ...(typedError?.direct ?? [])]);
+  const registerDump = dumpedRegisters.length > 0 ? Memory.alloc(REGISTER_FRAME_SIZE) : null;
   const selfBuffer = hasSelf ? Memory.alloc(Process.pointerSize) : null;
   const errorBuffer = throws ? Memory.alloc(Process.pointerSize) : null;
   const consumedCopies = argMetadata.map((m, i) => (consumed.has(i) ? Memory.alloc(m!.typeLayout.stride) : null));
@@ -681,7 +747,7 @@ export function makeSwiftNativeFunction(
     errorBuffer,
     indirectResultBuffer: result?.sret ?? null,
     resultBuffer: registerDump,
-    resultRegisters: resultRegisters(result?.direct ?? []),
+    resultRegisters: dumpedRegisters,
   });
   const resources = {
     code,
@@ -742,7 +808,10 @@ export function makeSwiftNativeFunction(
     if (throws) {
       const error = resources.errorBuffer!.readPointer();
       if (!error.isNull()) {
-        throw new SwiftError(error, true);
+        if (typedError === null) {
+          throw new SwiftError(error, true);
+        }
+        throw SwiftError.typed(typedError.metadata, takeTypedError(typedError, resources.registerDump ?? NULL));
       }
     }
 
@@ -753,6 +822,17 @@ export function makeSwiftNativeFunction(
     result.assemble(out, resources.registerDump ?? NULL);
     return out;
   };
+}
+
+// The callee's +1 error value, taken into storage of its own so the trampoline's buffers are free.
+function takeTypedError({ metadata, direct, slot }: TypedErrorLowering, registerDump: NativePointer): NativePointer {
+  const value = Memory.alloc(Math.max(metadata.typeLayout.stride, 1));
+  if (direct !== null) {
+    copyDirect(direct, registerDump, value);
+  } else {
+    Memory.copy(value, slot!, metadata.valueWitnesses.size);
+  }
+  return value;
 }
 
 interface TrampolineConfig {

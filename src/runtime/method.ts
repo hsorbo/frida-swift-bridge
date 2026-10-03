@@ -15,6 +15,7 @@ import {
   parseTypeExpr,
   TypeExpr,
   TypeExprParam,
+  mentionsParam,
   voidMetadata,
   resolveType,
   resolveParsedType,
@@ -40,6 +41,9 @@ import {
   LoweredScalar,
   argumentRegisterUse,
   placeAsyncResultScalars,
+  placeTypedErrorScalars,
+  typedErrorReturnsDirectly,
+  indirect,
 } from "./calling-convention.js";
 import { probeSelfOwnership, RegisterRange } from "./value-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
@@ -160,11 +164,19 @@ export interface MethodInfo {
   mangled: string;
 }
 
+// A typed throw's error type; abstract when the callee sees it as a type parameter, which keeps
+// it out of the result registers whatever its concrete layout.
+export interface ThrownType {
+  metadata: Metadata;
+  abstract: boolean;
+}
+
 export interface ResolvedMethod {
   address: NativePointer;
   argTypes: Metadata[];
   returnType: Metadata | null;
   throws: boolean;
+  thrown?: ThrownType;
   isStatic: boolean;
   selector: string;
   async?: boolean;
@@ -347,7 +359,7 @@ function projectOptionalPayload(
 
 // Returns are +1: adopt a class; destroy a read non-POD temp; POD owns nothing. A value embedding a
 // managed reference would dangle on that destroy, so hand it back as an owned ValueInstance instead.
-function decodeReturn(returnType: Metadata | null, ret: NativePointer | null): CallResult {
+export function decodeReturn(returnType: Metadata | null, ret: NativePointer | null): CallResult {
   if (returnType === null || ret === null) {
     return null;
   }
@@ -481,8 +493,9 @@ function splitParams(params: TypeExprParam[]): { types: TypeExpr[]; conventions:
 
 function signatureMetadata(
   signature: SwiftFunctionSignature,
-  resolveParam: ResolveParam = () => null
-): { argTypes: Metadata[]; returnType: Metadata | null } {
+  resolveParam: ResolveParam = () => null,
+  thrownIsAbstract: (type: TypeExpr) => boolean = () => false
+): { argTypes: Metadata[]; returnType: Metadata | null; thrown?: ThrownType } {
   const argTypes = signature.params.map(({ type }) => {
     const metadata = resolveParsedType(type, resolveParam);
     if (metadata === null) {
@@ -497,7 +510,22 @@ function signatureMetadata(
       throw new Error(`cannot resolve return type ${signature.result.text} of ${signature.selector}`);
     }
   }
-  return { argTypes, returnType };
+  return { argTypes, returnType, thrown: resolveThrownType(signature, resolveParam, thrownIsAbstract) };
+}
+
+function resolveThrownType(
+  signature: SwiftFunctionSignature,
+  resolveParam: ResolveParam,
+  thrownIsAbstract: (type: TypeExpr) => boolean
+): ThrownType | undefined {
+  if (signature.thrownType === null) {
+    return undefined;
+  }
+  const metadata = resolveParsedType(signature.thrownType, resolveParam);
+  if (metadata === null) {
+    throw new Error(`cannot resolve thrown type ${signature.thrownType.text} of ${signature.selector}`);
+  }
+  return { metadata, abstract: thrownIsAbstract(signature.thrownType) };
 }
 
 function sequenceEqual<T>(actual: T[], wanted: T[]): boolean {
@@ -1171,7 +1199,7 @@ function resolveMethodIn(
     const { isStatic, signature, mangled } = candidates[0];
     const params = splitParams(signature.params);
     const address = candidates[0].address.strip();
-    const { argTypes, returnType } = signatureMetadata(signature);
+    const { argTypes, returnType, thrown } = signatureMetadata(signature);
     let asyncFunctionPointer: AsyncFunctionPointer | undefined;
     if (signature.async) {
       const module = Process.findModuleByAddress(address.strip());
@@ -1182,7 +1210,7 @@ function resolveMethodIn(
       asyncFunctionPointer = afp;
     }
     const origin = memberOrigin(address, className);
-    return { address, argTypes, returnType, throws: signature.throws, isStatic, selector: signature.selector, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin };
+    return { address, argTypes, returnType, throws: signature.throws, thrown, isStatic, selector: signature.selector, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin };
   }
   return null;
 }
@@ -1202,8 +1230,11 @@ function witnessSelfArgs(
 }
 
 function planOf(resolved: ResolvedMethod): CallPlan {
-  const { returnType } = resolved;
+  const { returnType, thrown } = resolved;
   const implicit = witnessSelfArgs(resolved.witnessSelf, resolved.witnessTables);
+  if (thrown !== undefined && resolved.witnessSelf !== undefined && !thrownRidesResultRegisters(thrown, returnType, resolved.abstractReturn === true)) {
+    throw new Error(`${resolved.selector}: a typed throw returned through a buffer is unsupported through a protocol witness`);
+  }
   return {
     address: resolved.address,
     selector: resolved.selector,
@@ -1219,6 +1250,7 @@ function planOf(resolved: ResolvedMethod): CallPlan {
             ? { kind: "abstractIndirect", metadata: returnType }
             : { kind: "concrete", metadata: returnType },
     throws: resolved.throws,
+    thrown,
     async: resolved.async === true,
     asyncFunctionPointer: resolved.asyncFunctionPointer,
     typeArguments: implicit.typeArguments ?? [],
@@ -1226,6 +1258,13 @@ function planOf(resolved: ResolvedMethod): CallPlan {
     argConventions: resolved.argConventions ?? resolved.argTypes.map(() => "borrowed"),
     origin: resolved.origin,
   };
+}
+
+// The buffer for a typed error trails the witness-method's own Self arguments, which the plan's
+// implicit arguments cannot express; the register form needs no buffer.
+function thrownRidesResultRegisters(thrown: ThrownType, returnType: Metadata | null, returnIsAbstract: boolean): boolean {
+  const returnDirect = returnType === null || (!returnIsAbstract && !shouldPassIndirectly(returnType));
+  return !thrown.abstract && returnDirect && typedErrorReturnsDirectly(thrown.metadata);
 }
 
 function argPlanKey(plan: ArgPlan): string {
@@ -1251,6 +1290,7 @@ function makeInvoker(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata | 
   return makeSwiftNativeFunction(plan.address, plan.returnPlan === null ? null : swiftArgType(plan.returnPlan), argTypes, {
     hasSelf,
     throws: plan.throws,
+    errorType: plan.thrown === undefined ? undefined : plan.thrown.abstract ? indirect(plan.thrown.metadata) : plan.thrown.metadata,
     typeArguments: plan.typeArguments,
     witnessTables: plan.witnessTables,
   });
@@ -1268,6 +1308,7 @@ function withInvoker<T>(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata
     plan.argPlans.map(argPlanKey).join(","),
     plan.returnPlan === null ? "v" : argPlanKey(plan.returnPlan),
     plan.throws ? "t" : "n",
+    plan.thrown === undefined ? "" : `${plan.thrown.abstract ? "@" : ""}${plan.thrown.metadata.handle}`,
     plan.typeArguments.map((m) => m.handle).join(","),
     plan.witnessTables.join(","),
   ].join("|");
@@ -1461,6 +1502,18 @@ export class BoundMethod {
     for (const witnessTable of plan.witnessTables) {
       lowered.pushWord(witnessTable);
     }
+    if (plan.thrown !== undefined) {
+      const { metadata } = plan.thrown;
+      if (thrownRidesResultRegisters(plan.thrown, this.result === null ? null : planMetadata(plan.returnPlan!), this.result?.kind === "indirect")) {
+        const resultScalars = this.result?.kind === "scalars" ? loweredScalars(planMetadata(plan.returnPlan!)) : [];
+        options.result = { kind: "scalars", placed: this.result?.kind === "scalars" ? this.result.placed : [], stride: this.result?.kind === "scalars" ? this.result.stride : 0 };
+        options.typedError = { type: metadata, placed: placeTypedErrorScalars(resultScalars, metadata, true) };
+      } else {
+        const slot = Memory.alloc(Math.max(metadata.typeLayout.stride, 1));
+        lowered.pushWord(slot);
+        options.typedError = { type: metadata, slot };
+      }
+    }
     const { gp, fp } = lowered;
     if (fp.length > 0) {
       options.floatArgs = fp;
@@ -1468,7 +1521,7 @@ export class BoundMethod {
     if (lowered.stackSize > 0) {
       options.stackArgs = lowered.stackWords();
     }
-    if (this.result !== null) {
+    if (this.result !== null && options.result === undefined) {
       options.result = this.result;
     }
     return callAsync(this.asyncFunctionPointer, gp, options).then(
@@ -1740,15 +1793,15 @@ function resolveAsyncSymbol(module: Module, mangled: string, signature: SwiftFun
 
 function resolveSignatureTypes(
   signature: SwiftFunctionSignature
-): { argTypes: Metadata[]; returnType: Metadata | null; argConventions: ParamConvention[] } {
+): { argTypes: Metadata[]; returnType: Metadata | null; thrown?: ThrownType; argConventions: ParamConvention[] } {
   if (methodKind(signature.name) === "init") {
     throw new Error(
       `${signature.selector} is an initializer, which consumes its arguments; construct through Swift.type(...).init`
     );
   }
   const params = splitParams(signature.params);
-  const { argTypes, returnType } = signatureMetadata(signature);
-  return { argTypes, returnType, argConventions: params.conventions };
+  const { argTypes, returnType, thrown } = signatureMetadata(signature);
+  return { argTypes, returnType, thrown, argConventions: params.conventions };
 }
 
 // Thin metatype: no self passed.
@@ -2137,6 +2190,7 @@ export interface CallPlan {
   argPlans: ArgPlan[];
   returnPlan: ArgPlan | null;
   throws: boolean;
+  thrown?: ThrownType;
   async: boolean;
   asyncFunctionPointer?: AsyncFunctionPointer;
   typeArguments: Metadata[];
@@ -2282,6 +2336,7 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     signature.result === null
       ? null
       : planGenericType(signature.result, signature.genericParams, resolvedTypeArguments, classBoundParams);
+  const thrown = planThrownType(signature, signature.genericParams, resolvedTypeArguments);
   const witnessTables = options.witnessTables ?? autoWitnessTables(signature, resolvedTypeArguments);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (signature.async) {
@@ -2292,7 +2347,15 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     }
   }
   const origin = memberOrigin(address, fullName);
-  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin };
+  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, thrown, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin };
+}
+
+function planThrownType(signature: SwiftFunctionSignature, typeParams: string[], typeArguments: Metadata[]): ThrownType | undefined {
+  const resolveParam = (name: string): Metadata | null => {
+    const i = typeParams.indexOf(name);
+    return i === -1 ? null : typeArguments[i] ?? null;
+  };
+  return resolveThrownType(signature, resolveParam, (type) => mentionsParam(type, typeParams));
 }
 
 export function bindGenericMethod(
@@ -2434,6 +2497,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     signature.result === null
       ? null
       : planTypeMemberArg(signature.result, typeParams, typeArguments, classBound);
+  const thrown = planThrownType(signature, typeParams, typeArguments);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (signature.async) {
     const module = Process.findModuleByAddress(address.strip());
@@ -2448,6 +2512,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     argPlans,
     returnPlan,
     throws: signature.throws,
+    thrown,
     async: signature.async,
     asyncFunctionPointer,
     typeArguments: trailsSelfMetadata ? [receiver] : [],
@@ -3140,14 +3205,19 @@ function resolveWitnessSignature(
   table: WitnessTable,
   signature: SwiftFunctionSignature,
   classBound: Set<string>
-): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector" | "abstractArgs" | "abstractReturn" | "argConventions"> {
+): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "thrown" | "selector" | "abstractArgs" | "abstractReturn" | "argConventions"> {
   const params = splitParams(signature.params);
-  const { argTypes, returnType } = signatureMetadata(signature, (n) => resolveWitnessSelfOrAssociatedType(table, n));
   const layout = protocolLevelParamLayout(table, classBound);
+  const { argTypes, returnType, thrown } = signatureMetadata(
+    signature,
+    (n) => resolveWitnessSelfOrAssociatedType(table, n),
+    (type) => hasOpaqueLayout(type, layout)
+  );
   return {
     argTypes,
     returnType,
     throws: signature.throws,
+    thrown,
     selector: signature.selector,
     abstractArgs: params.types.map((t) => hasOpaqueLayout(t, layout)),
     abstractReturn:

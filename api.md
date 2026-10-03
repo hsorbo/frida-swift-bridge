@@ -1134,6 +1134,16 @@ try {
 `Swift.function` or `Swift.asyncFunction` — rejects its promise with the same
 `SwiftError`.
 
+`e.value` decodes the thrown error. An untyped `throws` projects the error
+existential and reads its value; a typed `throws(E)` has no box, so `e.error`
+is the thrown value's own storage and `e.value` decodes it by `E`: a payload-less
+enum reads as its case name, a struct as its fields, a class as an object. A
+hook's `onLeave` / `onComplete` error argument is decoded the same way.
+`Swift.NativeFunction` reads `throws(E)` off the symbol too; a stripped address
+needs `/abi`'s `makeSwiftNativeFunction` with `{ errorType }`. A typed throw
+through a protocol witness is supported only when the error rides the result
+registers (a loadable integer/pointer error beside a direct result).
+
 Inside an [interceptor](#intercepting), a thrown error surfaces as the second
 argument to `onLeave` (sync) or `onComplete` (async) instead of a return value.
 To throw from a JS-provided [closure](#closures) body, return a `SwiftThrow`

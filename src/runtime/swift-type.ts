@@ -5,7 +5,7 @@ import { isActor, isDefaultActor } from "../abi/class-descriptor.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
-import { parseSwiftSignature, symbolicate, ParamConvention } from "./symbolication.js";
+import { parseSwiftSignature, symbolicate, resolveParsedType, ParamConvention } from "./symbolication.js";
 import {
   SwiftBoundMethod,
   CallArg,
@@ -432,11 +432,19 @@ function concreteMetadataOf(type: NativeFunctionType, role: string): Metadata {
   return metadata;
 }
 
-// Best-effort: an address with no exported symbol (stripped/private) is assumed to borrow its arguments.
-function paramConventionsAt(address: NativePointer): ParamConvention[] {
+// Best-effort: an address with no exported symbol (stripped/private) is assumed to borrow its
+// arguments and, if it throws, to throw an untyped error.
+function symbolSignatureAt(address: NativePointer): { conventions: ParamConvention[]; thrown: Metadata | undefined } {
   const symbol = symbolicate(address);
   const parsed = symbol === null ? null : parseSwiftSignature(symbol.demangled);
-  return parsed !== null && parsed.kind === "function" ? parsed.params.map((p) => p.convention) : [];
+  if (parsed === null || parsed.kind !== "function") {
+    return { conventions: [], thrown: undefined };
+  }
+  const thrown = parsed.thrownType === null ? null : resolveParsedType(parsed.thrownType, () => null);
+  if (parsed.thrownType !== null && thrown === null) {
+    throw new Error(`swiftFunction: cannot resolve thrown type ${parsed.thrownType.text}`);
+  }
+  return { conventions: parsed.params.map((p) => p.convention), thrown: thrown ?? undefined };
 }
 
 export function swiftFunction(
@@ -445,11 +453,11 @@ export function swiftFunction(
   argTypes: NativeFunctionType[],
   options: MarshalledFunctionOptions = {}
 ): (...args: CallArg[]) => CallResult {
-  const conventions = paramConventionsAt(address);
+  const { conventions, thrown } = symbolSignatureAt(address);
   const argMetadata = argTypes.map((t, i) => concreteMetadataOf(t, `argument type ${i}`));
   const returnMetadata = returnType === null ? null : concreteMetadataOf(returnType, "return type");
   const lowered = argMetadata.map((m, i) => (conventions[i] === "inout" ? indirect(m) : m));
-  const raw = makeSwiftNativeFunction(address, returnMetadata, lowered, { throws: options.throws });
+  const raw = makeSwiftNativeFunction(address, returnMetadata, lowered, { throws: options.throws, errorType: thrown });
   return (...args: CallArg[]): CallResult =>
     callMarshalled(argMetadata, args, returnMetadata, (argPtrs) => raw(...argPtrs), conventions);
 }
