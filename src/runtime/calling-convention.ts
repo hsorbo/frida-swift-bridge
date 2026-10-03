@@ -1,7 +1,7 @@
 import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { existentialRepresentation } from "../abi/existential.js";
-import { enumerateTupleElements } from "../abi/tuple.js";
+import { enumerateTupleElements, getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
 import { SwiftError } from "./thrown-error.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { ContextDescriptorKind } from "../abi/context-descriptor.js";
@@ -415,7 +415,18 @@ export interface ClosureRef {
 
 const CLOSURE_WORDS = 2;
 
-export type SwiftArgType = Metadata | GenericRef | AbstractIndirect | ClosureRef;
+// A tuple returned by a function whose signature spells it with an opaque element (a witness or
+// protocol extension): each element is its own result, those by address through a buffer.
+export interface DestructuredTuple {
+  tuple: Metadata;
+  byAddress: boolean[];
+}
+
+export type SwiftArgType = Metadata | GenericRef | AbstractIndirect | ClosureRef | DestructuredTuple;
+
+function isDestructuredTuple(arg: SwiftArgType): arg is DestructuredTuple {
+  return !(arg instanceof Metadata) && "byAddress" in arg;
+}
 
 function isGenericRef(arg: SwiftArgType): arg is GenericRef {
   return !(arg instanceof Metadata) && "genericParam" in arg;
@@ -439,6 +450,9 @@ interface LoweredArg {
 }
 
 function lowerArg(arg: SwiftArgType): LoweredArg {
+  if (isDestructuredTuple(arg)) {
+    throw new Error("a tuple parameter with an opaque element is unsupported");
+  }
   if (isClosureRef(arg)) {
     return { indirect: false, pieces: wordPieces(CLOSURE_WORDS) };
   }
@@ -485,6 +499,76 @@ interface PlacedScalar {
   location: ArgLocation;
 }
 
+interface ResultLowering {
+  size: number;
+  stride: number;
+  sret: NativePointer | null; // filled by the callee through the indirect-result register
+  leading: NativePointer[]; // indirect results past sret, passed as the first arguments
+  direct: PlacedScalar[]; // register results, dumped by the trampoline at their frame offsets
+  assemble: (out: NativePointer, registerDump: NativePointer) => void;
+}
+
+function placeDirect(metadata: Metadata): PlacedScalar[] {
+  const allocator = new ArgumentAllocator(0, true);
+  return loweredScalars(metadata).map((scalar) => ({ scalar, location: allocator.scalar(scalar) }));
+}
+
+function copyDirect(direct: PlacedScalar[], registerDump: NativePointer, out: NativePointer): void {
+  for (const { scalar, location } of direct) {
+    Memory.copy(out.add(scalar.offset), registerDump.add(frameOffset(location)), scalar.size);
+  }
+}
+
+function lowerResult(metadata: Metadata, forcedIndirect: boolean): ResultLowering {
+  const { size, stride } = metadata.valueWitnesses;
+  if (size === 0) {
+    return { size, stride, sret: null, leading: [], direct: [], assemble: () => {} };
+  }
+  // indirect before HFA, as in lowerArg
+  if (forcedIndirect || shouldPassIndirectly(metadata)) {
+    const sret = Memory.alloc(stride);
+    return { size, stride, sret, leading: [], direct: [], assemble: (out) => Memory.copy(out, sret, size) };
+  }
+  const direct = placeDirect(metadata);
+  return { size, stride, sret: null, leading: [], direct, assemble: (out, dump) => copyDirect(direct, dump, out) };
+}
+
+// The elements by address each fill a buffer; the rest form one direct value. sret serves a lone
+// indirect result, but beside a direct value or a second indirect result the buffers are passed
+// as the first arguments instead (IRGen's SignatureExpansion drops sret in both cases).
+function lowerDestructuredResult({ tuple, byAddress }: DestructuredTuple): ResultLowering {
+  const { size, stride } = tuple.valueWitnesses;
+  const elements = [...enumerateTupleElements(tuple)]
+    .map((e, i) => ({ ...e, size: e.type.valueWitnesses.size, byAddress: byAddress[i] || shouldPassIndirectly(e.type) }))
+    .filter((e) => e.size > 0);
+  const indirect = elements.filter((e) => e.byAddress).map((element) => ({ element, buffer: Memory.alloc(element.type.valueWitnesses.stride) }));
+  const directElements = elements.filter((e) => !e.byAddress);
+  const directType =
+    directElements.length === 0
+      ? null
+      : directElements.length === 1
+        ? directElements[0].type
+        : getUnlabelledTupleTypeMetadata(directElements.map((e) => e.type));
+  const directOffsets = directElements.length === 1 ? [0] : directType === null ? [] : [...enumerateTupleElements(directType)].map((e) => e.offset);
+  const directIndirect = directType !== null && shouldPassIndirectly(directType);
+  const direct = directType !== null && !directIndirect ? placeDirect(directType) : [];
+  const sret = directIndirect ? Memory.alloc(directType!.valueWitnesses.stride) : directType === null && indirect.length === 1 ? indirect[0].buffer : null;
+  const leading = indirect.map((i) => i.buffer).filter((b) => b !== sret);
+  const assemble = (out: NativePointer, registerDump: NativePointer): void => {
+    for (const { element, buffer } of indirect) {
+      Memory.copy(out.add(element.offset), buffer, element.size);
+    }
+    if (directType !== null) {
+      const value = directIndirect ? sret! : Memory.alloc(directType.valueWitnesses.stride);
+      if (!directIndirect) {
+        copyDirect(direct, registerDump, value);
+      }
+      directElements.forEach((e, k) => Memory.copy(out.add(e.offset), value.add(directOffsets[k]), e.size));
+    }
+  };
+  return { size, stride, sret, leading, direct, assemble };
+}
+
 // Each result register a direct result uses, stored by the trampoline at its frame offset.
 function resultRegisters(placed: PlacedScalar[]): RegisterLocation[] {
   return placed.flatMap(({ scalar, location }) => {
@@ -528,6 +612,20 @@ export function makeSwiftNativeFunction(
     return metadata;
   };
 
+  let result: ResultLowering | null = null;
+  if (returnType !== null) {
+    if (isClosureRef(returnType)) {
+      throw new Error("closure return types are not supported");
+    }
+    result = isDestructuredTuple(returnType)
+      ? lowerDestructuredResult(returnType)
+      : isGenericRef(returnType)
+        ? lowerResult(typeArgumentFor(returnType), true)
+        : isAbstractIndirect(returnType)
+          ? lowerResult(returnType.metadata, true)
+          : lowerResult(returnType, false);
+  }
+
   const loweredArgs = argTypes.map(lowerArg);
   // Only a concrete @in argument can be consumed: we hand the callee a private copy to destroy.
   // Direct, generic, and closure args have no such copy; inout is borrowed, never consumed here.
@@ -547,6 +645,7 @@ export function makeSwiftNativeFunction(
     }
   }
   const allocator = new ArgumentAllocator();
+  const leadingResultLocations = (result?.leading ?? []).map(() => allocator.gp());
   const argLocations = loweredArgs.map((arg) =>
     arg.indirect ? [allocator.gp()] : arg.pieces.map((piece) => allocator.scalar(piece))
   );
@@ -560,43 +659,13 @@ export function makeSwiftNativeFunction(
     ...new Array<NativeFunctionArgumentType>(stackWords).fill("uint64"),
   ];
 
-  let indirectResult = false;
-  let directResult: PlacedScalar[] = [];
-  let resultSize = 0;
-  let resultStride = 0;
-  if (returnType !== null) {
-    if (isClosureRef(returnType)) {
-      throw new Error("closure return types are not supported");
-    }
-    const forcedIndirect = isGenericRef(returnType) || isAbstractIndirect(returnType);
-    const returnMetadata = isGenericRef(returnType)
-      ? typeArgumentFor(returnType)
-      : isAbstractIndirect(returnType)
-        ? returnType.metadata
-        : returnType;
-    resultSize = returnMetadata.valueWitnesses.size;
-    resultStride = returnMetadata.valueWitnesses.stride;
-    if (resultSize > 0) {
-      // indirect before HFA, as in lowerArg
-      if (forcedIndirect || shouldPassIndirectly(returnMetadata)) {
-        indirectResult = true;
-      } else {
-        const resultAllocator = new ArgumentAllocator(0, true);
-        directResult = loweredScalars(returnMetadata).map((scalar) => ({
-          scalar,
-          location: resultAllocator.scalar(scalar),
-        }));
-      }
-    }
-  }
-
   // The returned closure captures `resources`, keeping the trampoline's baked buffers alive
-  // (Frida frees a Memory.alloc when its NativePointer is collected). self/error/scratch and the
+  // (Frida frees a Memory.alloc when its NativePointer is collected). self/error/result and the
   // consumed-argument copies are single shared buffers per function, so the trampoline is not re-entrant.
   const savesContext = hasSelf || throws;
   const code = Memory.alloc(Process.pageSize);
   const save = Memory.alloc(Process.pointerSize * (savesContext ? 4 : 2));
-  const scratch = resultSize > 0 ? Memory.alloc(Math.max(resultStride, REGISTER_FRAME_SIZE)) : ptr(0);
+  const registerDump = result !== null && result.direct.length > 0 ? Memory.alloc(REGISTER_FRAME_SIZE) : null;
   const selfBuffer = hasSelf ? Memory.alloc(Process.pointerSize) : null;
   const errorBuffer = throws ? Memory.alloc(Process.pointerSize) : null;
   const consumedCopies = argMetadata.map((m, i) => (consumed.has(i) ? Memory.alloc(m!.typeLayout.stride) : null));
@@ -605,14 +674,15 @@ export function makeSwiftNativeFunction(
     target: address.strip(),
     selfBuffer,
     errorBuffer,
-    indirectResultBuffer: indirectResult ? scratch : null,
-    resultBuffer: directResult.length > 0 ? scratch : null,
-    resultRegisters: resultRegisters(directResult),
+    indirectResultBuffer: result?.sret ?? null,
+    resultBuffer: registerDump,
+    resultRegisters: resultRegisters(result?.direct ?? []),
   });
   const resources = {
     code,
     save,
-    scratch,
+    result,
+    registerDump,
     selfBuffer,
     errorBuffer,
     consumedCopies,
@@ -655,6 +725,7 @@ export function makeSwiftNativeFunction(
       }
     }
     implicitArgs.forEach((arg, k) => frame.add(frameOffset(implicitLocations[k])).writePointer(arg));
+    result?.leading.forEach((buffer, k) => frame.add(frameOffset(leadingResultLocations[k])).writePointer(buffer));
 
     const physical: NativeFunctionArgumentValue[] = [];
     for (let i = 0; i < fridaArgTypes.length; i++) {
@@ -670,17 +741,11 @@ export function makeSwiftNativeFunction(
       }
     }
 
-    if (resultSize === 0) {
+    if (result === null || result.size === 0) {
       return null;
     }
-    const out = Memory.alloc(resultStride);
-    if (directResult.length === 0) {
-      Memory.copy(out, resources.scratch, resultSize);
-    } else {
-      for (const { scalar, location } of directResult) {
-        Memory.copy(out.add(scalar.offset), resources.scratch.add(frameOffset(location)), scalar.size);
-      }
-    }
+    const out = Memory.alloc(result.stride);
+    result.assemble(out, resources.registerDump ?? NULL);
     return out;
   };
 }

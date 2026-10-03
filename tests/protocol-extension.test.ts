@@ -90,6 +90,13 @@ describe("protocol-extension members on a conforming type", () => {
     expect(source.echo(9)).toEqual(int64(9));
   });
 
+  test("an extension method returning a tuple with an associated-type element gets that element by address", () => {
+    const source = (Swift.type("fixture.IntSource") as SwiftStruct).$new({ value: 5 });
+    expect(source.paired(9)).toEqual([int64(9), int64(7)]);
+    expect(source.twice(4)).toEqual([int64(4), int64(4)]);
+    expect(source.bracketed(6)).toEqual([1, int64(6), 2]);
+  });
+
   test("an extension method still ambiguous after filtering lists its overloads", () => {
     const n = (Swift.type("fixture.NarrowScalar") as SwiftStruct).$new({ n: 11 });
     expect(() => n.scaledTwice(3)).toThrow(

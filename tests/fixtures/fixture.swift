@@ -1064,6 +1064,9 @@ public protocol ItemSource {
 extension ItemSource {
     public func me() -> Self { self }
     public func echo(_ x: Item) -> Item { x }
+    public func paired(_ x: Item) -> (Item, Int) { (x, 7) }
+    public func twice(_ x: Item) -> (Item, Item) { (x, x) }
+    public func bracketed(_ x: Item) -> (Int8, Item, Int8) { (1, x, 2) }
 }
 public struct IntSource: ItemSource {
     public var value: Int

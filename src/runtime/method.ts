@@ -20,6 +20,7 @@ import {
   resolveParsedType,
   ResolveParam,
   hasOpaqueLayout,
+  destructuredTupleLayout,
   ParamLayout,
   REFERENCE_CONTAINERS,
   SwiftFunctionSignature,
@@ -171,10 +172,13 @@ export interface ResolvedMethod {
   witnessSelf?: WitnessTable;
   witnessTables?: NativePointer[];
   abstractArgs?: boolean[];
-  abstractReturn?: boolean;
+  abstractReturn?: Abstraction;
   argConventions?: ParamConvention[];
   origin?: MemberOrigin;
 }
+
+// true: passed by address; an array: a tuple destructured per element, each by address or direct.
+export type Abstraction = boolean | boolean[];
 
 interface BaseResolveOptions {
   arity?: number;
@@ -1209,9 +1213,11 @@ function planOf(resolved: ResolvedMethod): CallPlan {
     returnPlan:
       returnType === null
         ? null
-        : resolved.abstractReturn === true
-          ? { kind: "abstractIndirect", metadata: returnType }
-          : { kind: "concrete", metadata: returnType },
+        : Array.isArray(resolved.abstractReturn)
+          ? { kind: "destructuredTuple", metadata: returnType, byAddress: resolved.abstractReturn }
+          : resolved.abstractReturn === true
+            ? { kind: "abstractIndirect", metadata: returnType }
+            : { kind: "concrete", metadata: returnType },
     throws: resolved.throws,
     async: resolved.async === true,
     asyncFunctionPointer: resolved.asyncFunctionPointer,
@@ -1232,6 +1238,8 @@ function argPlanKey(plan: ArgPlan): string {
       return plan.metadata.handle.toString();
     case "abstractIndirect":
       return `@${plan.metadata.handle}`;
+    case "destructuredTuple":
+      return `(${plan.metadata.handle}:${plan.byAddress.map(Number).join("")})`;
   }
 }
 
@@ -1332,6 +1340,9 @@ export class BoundMethod {
     if (plan.async) {
       if (plan.asyncFunctionPointer === undefined) {
         throw new Error(`${plan.selector} is not async`);
+      }
+      if (plan.returnPlan?.kind === "destructuredTuple") {
+        throw new Error(`${plan.selector}: an async tuple result with an opaque element is unsupported`);
       }
       this.result = resultShapeOf(plan);
     } else {
@@ -1843,6 +1854,7 @@ export type ArgPlan =
   | { kind: "generic"; index: number; metadata: Metadata }
   | { kind: "concrete"; metadata: Metadata }
   | { kind: "abstractIndirect"; metadata: Metadata }
+  | { kind: "destructuredTuple"; metadata: Metadata; byAddress: boolean[] }
   | { kind: "closure"; discriminator: number; shape: ClosureShape };
 
 const RAW_BUFFER_PARAM = "Swift.UnsafeRawBufferPointer";
@@ -2053,6 +2065,8 @@ function swiftArgType(plan: ArgPlan): SwiftArgType {
       return plan.metadata;
     case "abstractIndirect":
       return { metadata: plan.metadata, addressOnly: true };
+    case "destructuredTuple":
+      return { tuple: plan.metadata, byAddress: plan.byAddress };
     case "closure":
       return { closure: true };
   }
@@ -3129,14 +3143,15 @@ function resolveWitnessSignature(
 ): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "selector" | "abstractArgs" | "abstractReturn" | "argConventions"> {
   const params = splitParams(signature.params);
   const { argTypes, returnType } = signatureMetadata(signature, (n) => resolveWitnessSelfOrAssociatedType(table, n));
-  const isAbstract = protocolLevelOpaque(table, classBound);
+  const layout = protocolLevelParamLayout(table, classBound);
   return {
     argTypes,
     returnType,
     throws: signature.throws,
     selector: signature.selector,
-    abstractArgs: params.types.map(isAbstract),
-    abstractReturn: signature.result !== null && isAbstract(signature.result),
+    abstractArgs: params.types.map((t) => hasOpaqueLayout(t, layout)),
+    abstractReturn:
+      signature.result === null ? false : destructuredTupleLayout(signature.result, layout) ?? hasOpaqueLayout(signature.result, layout),
     argConventions: params.conventions,
   };
 }
@@ -3243,17 +3258,21 @@ function witnessAccessor(
 }
 
 function protocolLevelOpaque(table: WitnessTable, signatureClassBound: Set<string>): (type: TypeExpr) => boolean {
+  const layout = protocolLevelParamLayout(table, signatureClassBound);
+  return (type) => hasOpaqueLayout(type, layout);
+}
+
+function protocolLevelParamLayout(table: WitnessTable, signatureClassBound: Set<string>): (name: string) => ParamLayout | null {
   const classBound = classBoundSubjects(protocolOf(table));
   for (const subject of signatureClassBound) {
     classBound.add(subject);
   }
-  return (type) =>
-    hasOpaqueLayout(type, (name): ParamLayout | null => {
-      if (name !== "A" && !name.startsWith("A.")) {
-        return null;
-      }
-      return classBound.has(name) ? "reference" : "opaque";
-    });
+  return (name) => {
+    if (name !== "A" && !name.startsWith("A.")) {
+      return null;
+    }
+    return classBound.has(name) ? "reference" : "opaque";
+  };
 }
 
 function classBoundSubjects(protocol: ContextDescriptor): Set<string> {
