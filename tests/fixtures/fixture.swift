@@ -1986,3 +1986,34 @@ extension Robot {
 extension Box {
     public func lastOf<T>(_ xs: T...) -> T { xs[xs.count - 1] }
 }
+
+// Subscripts: the getter takes the indices, the setter the element it stores ahead of them.
+public struct Grid {
+    public var cells: [Int]
+    public init(cells: [Int]) { self.cells = cells }
+    public subscript(i: Int) -> Int {
+        get { cells[i] }
+        set { cells[i] = newValue }
+    }
+    public subscript(row r: Int, column c: Int) -> Int { cells[r * 2 + c] }
+    public subscript<T: BinaryInteger>(scaled k: T) -> Int { cells[0] * Int(k) }
+    public static subscript(unit n: Int) -> Int { n * 100 }
+    public subscript(tracked i: Int) -> Int {
+        get { cells[i] }
+        _modify { yield &cells[i] }
+    }
+}
+public final class Board {
+    public var cells: [String]
+    public init(cells: [String]) { self.cells = cells }
+    public subscript(i: Int) -> String {
+        get { cells[i] }
+        set { cells[i] = newValue }
+    }
+}
+public func driveGrid() -> Int {
+    var g = Grid(cells: [1, 2, 3, 4])
+    g[1] = 9
+    g[tracked: 2] += 1
+    return g[1] + g[row: 1, column: 0] + g[scaled: 3] + Grid[unit: 1]
+}

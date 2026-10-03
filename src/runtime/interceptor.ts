@@ -398,9 +398,16 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     if (parsed.genericParams.length > 0 && !parsed.simpleGenerics) {
       throw new Error(`unsupported generic signature: ${parsed.context}.${parsed.selector}`);
     }
+    // A subscript getter borrows self and a setter or modify mutates it; the setter takes the
+    // element it stores ahead of the indices and the modify yields it.
+    const accessor = parsed.accessor;
+    const accessorOwnership: SelfOwnership | undefined = accessor === undefined ? undefined : accessor === "getter" ? "borrowing" : "mutating";
+    ownership ??= accessorOwnership;
     let generics = genericEnvironment(parsed, ownership);
     const gp = generics.params;
-    const args = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, gp), p.text) : planType(p.type, gp)));
+    const indices = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, gp), p.text) : planType(p.type, gp)));
+    const element = parsed.result === null ? null : planType(parsed.result, gp);
+    const args = accessor === "setter" ? [element!, ...indices] : indices;
     const ownWords = parsed.genericParams.length + witnessTableCount(parsed);
     const probe = (metadata: Metadata, typeKeyArguments = 0): SelfOwnership | null =>
       ownership ??
@@ -414,14 +421,15 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     if (receiver !== null && isFixedLayoutReceiver(receiver.metadata) && receiver.trailing !== null) {
       generics = genericEnvironment(parsed, receiver.trailing ? "borrowing" : "mutating", true);
     }
-    return {
+    const shape: CallShape = {
       args,
-      ret: parsed.result === null ? null : planType(parsed.result, gp),
+      ret: accessor === "setter" ? null : element,
       thrown: parsed.thrownType === null ? null : planType(parsed.thrownType, gp),
       generics,
       throws: parsed.throws,
       receiver,
     };
+    return accessor === "modify" ? { ...shape, coroutine: true } : shape;
   }
 
   const memberType = resolveParsedType(parsed.type, () => null);

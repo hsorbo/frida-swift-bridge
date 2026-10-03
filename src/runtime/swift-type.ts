@@ -208,6 +208,15 @@ export abstract class NominalType extends SwiftType {
     return this.member(this.initializerSymbolName(), initializerLookup(selector, options), "initializer");
   }
 
+  // A subscript's getter unless { accessor: "setter" }; the selector names its labels.
+  subscript(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftMember {
+    return this.member(...subscriptLookup(selector, options, false), "subscript");
+  }
+
+  typeSubscript(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftMember {
+    return this.member(...subscriptLookup(selector, options, true), "type subscript");
+  }
+
   protected initializerSymbolName(): string {
     return "init";
   }
@@ -373,6 +382,15 @@ export class FunctionType extends SwiftType {
       isEscaping: raw.isEscaping,
     };
   }
+}
+
+function subscriptLookup(
+  selector: string | MemberLookupOptions | undefined,
+  options: MemberLookupOptions,
+  isStatic: boolean
+): [string, ValueMethodResolveOptions] {
+  const lookup = typeof selector === "string" ? { selector, options } : { selector: "subscript", options: selector ?? options };
+  return [lookup.selector, { accessor: "getter", ...lookup.options, static: isStatic }];
 }
 
 function facadeOf<T extends SwiftTypeFacade>(type: NominalType, make: () => T): T {

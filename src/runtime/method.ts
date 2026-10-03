@@ -88,7 +88,7 @@ import type { SwiftType } from "./swift-type.js";
 import type { SwiftTypeFacade } from "./type-facade.js";
 import { metadataOf, typeOf } from "./swift-type.js";
 
-export type MethodKind = "method" | "init";
+export type MethodKind = "method" | "init" | "subscript";
 
 export type CallResult = SwiftValue | SwiftObject;
 
@@ -271,6 +271,7 @@ interface BaseResolveOptions {
   argTypes?: string[]; // exact match against the signature's demangled argument-type names
   returnType?: string | null; // exact match against the demangled return-type name; null = Void
   static?: boolean;
+  accessor?: AccessorKind; // a subscript's getter or setter; a method lookup names neither
 }
 
 export interface MethodResolveOptions extends BaseResolveOptions {
@@ -324,8 +325,8 @@ export function initializerLookup<T extends BaseResolveOptions>(selector: string
 }
 
 export function lowerResolveOptions(stable: ValueMethodResolveOptions): RawValueMethodResolveOptions {
-  const { arity, labels, argTypes, returnType, static: isStatic, self, typeArguments } = stable;
-  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, self };
+  const { arity, labels, argTypes, returnType, static: isStatic, accessor, self, typeArguments } = stable;
+  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, accessor, self };
   if (typeArguments !== undefined) {
     raw.typeArguments = typeArguments.map((t) => metadataOf(t));
   }
@@ -609,6 +610,7 @@ function applyOverloadFilters<T extends { isStatic: boolean; signature: SwiftFun
   candidates: T[],
   options: RawMethodResolveOptions
 ): T[] {
+  candidates = candidates.filter((c) => (c.signature.accessor ?? null) === (options.accessor ?? null));
   if (options.static !== undefined) {
     candidates = candidates.filter((c) => c.isStatic === options.static);
   }
@@ -818,7 +820,7 @@ export function memberKindsInOtherModules(typeName: string, name: string, isStat
     found.property ||= members.accessors.some((a) => a.member === name && a.isStatic === isStatic);
     found.writable ||= members.accessors.some((a) => a.member === name && a.isStatic === isStatic && a.kind === "setter");
   };
-  const isMethod = (c: MethodCandidate): boolean => c.isStatic === isStatic && methodKind(c.name) === "method";
+  const isMethod = (c: MethodCandidate): boolean => c.isStatic === isStatic && c.signature.accessor === undefined && methodKind(c.name) === "method";
   for (const className of classChainNames(fullName)) {
     consider(foreignMembers(className, mayName), isMethod);
   }
@@ -1026,7 +1028,7 @@ function parseMember(
     return null;
   }
   if (signature.kind === "function") {
-    if (initsOnly && signature.name !== "init") {
+    if ((initsOnly && signature.name !== "init") || signature.accessor === "modify") {
       return null;
     }
     const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
@@ -1088,7 +1090,7 @@ export function enumerateMethods(
     seen.add(key);
     methods.push({
       name: c.name,
-      kind: methodKind(c.name),
+      kind: c.signature.accessor === undefined ? methodKind(c.name) : "subscript",
       isStatic: c.isStatic,
       address: c.address,
       argTypeNames: c.signature.argTypeNames,
@@ -1285,9 +1287,29 @@ function resolveMethodIn(
       asyncFunctionPointer = afp;
     }
     const origin = memberOrigin(address, className);
-    return { address, argTypes, returnType, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin };
+    return setterShape({ address, argTypes, returnType, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
   }
   return null;
+}
+
+// A subscript setter stores the element it is handed, +1, ahead of the indices and returns nothing.
+function setterShape(resolved: ResolvedMethod): ResolvedMethod {
+  if (resolved.signature?.accessor !== "setter") {
+    return resolved;
+  }
+  return {
+    ...resolved,
+    argTypes: [resolved.returnType!, ...resolved.argTypes],
+    returnType: null,
+    argConventions: ["owned", ...(resolved.argConventions ?? resolved.argTypes.map(() => "borrowed" as const))],
+  };
+}
+
+function setterPlan(plan: CallPlan): CallPlan {
+  if (plan.signature?.accessor !== "setter") {
+    return plan;
+  }
+  return { ...plan, argPlans: [plan.returnPlan!, ...plan.argPlans], returnPlan: null, argConventions: ["owned", ...plan.argConventions] };
 }
 
 function passedByAddress(resolved: ResolvedMethod, i: number): boolean {
@@ -1479,7 +1501,10 @@ export class BoundMethod {
       throw new Error(`${this.selector} was bound without a signature`);
     }
     const metadataOrNull = (argPlan: ArgPlan | null): Metadata | null => (argPlan === null || argPlan.kind === "closure" ? null : argPlan.metadata);
-    return boundSignature(plan.signature, plan.argPlans.map(metadataOrNull), metadataOrNull(plan.returnPlan));
+    const [element, ...indices] = plan.argPlans;
+    return plan.signature.accessor === "setter"
+      ? boundSignature(plan.signature, indices.map(metadataOrNull), metadataOrNull(element))
+      : boundSignature(plan.signature, plan.argPlans.map(metadataOrNull), metadataOrNull(plan.returnPlan));
   }
 
   get hookTarget(): HookTarget | null {
@@ -2445,7 +2470,7 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     }
   }
   const origin = memberOrigin(address, fullName);
-  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, thrown, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin, signature };
+  return setterPlan({ address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, thrown, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin, signature });
 }
 
 function planThrownType(signature: SwiftFunctionSignature, typeParams: string[], typeArguments: Metadata[]): ThrownType | undefined {
@@ -2604,7 +2629,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
       throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
     }
   }
-  return {
+  return setterPlan({
     address: address.strip(),
     selector: signature.selector,
     argPlans,
@@ -2618,7 +2643,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     argConventions: params.conventions,
     origin: memberOrigin(address, unboundName),
     signature,
-  };
+  });
 }
 
 export function bindGenericTypeValueMethod(

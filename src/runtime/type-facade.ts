@@ -4,7 +4,7 @@ import { SwiftValue } from "../abi/instance.js";
 import { enumerateFields } from "../abi/field-descriptor.js";
 import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, RAW } from "./object-facade.js";
 import { makeSwiftNativeFunction } from "./calling-convention.js";
-import { resolveType, parseTypeExpr } from "./symbolication.js";
+import { resolveTypeExpr, parseTypeExpr } from "./symbolication.js";
 import {
   bindResolved,
   SwiftBoundMethod,
@@ -37,7 +37,7 @@ import {
   unboundSignature,
 } from "./method.js";
 import { findNestedType, nestedTypeNamesOf } from "../reflection/registry.js";
-import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
+import { POISON, isBridgeMember, invokeOptions, splitSubscriptArgs, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 import {
   NominalType,
   ClassType,
@@ -85,6 +85,17 @@ export abstract class SwiftTypeFacade {
   }
 
   abstract $typeMethod(name: string, options?: MemberLookupOptions): SwiftBoundMethod;
+
+  $subscript(...indicesThenOptions: unknown[]): CallResult {
+    const { indices, selector, options } = splitSubscriptArgs(indicesThenOptions);
+    return this.$typeMethod(selector, { ...options, arity: options.arity ?? indices.length, accessor: "getter" }).call(...indices) as CallResult;
+  }
+
+  $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void {
+    const { indices, selector, options } = splitSubscriptArgs(indicesThenOptions);
+    this.$typeMethod(selector, { ...options, arity: options.arity ?? indices.length, accessor: "setter" }).call(value, ...indices);
+  }
+
   abstract $initializer(
     selector?: string | MemberLookupOptions,
     options?: MemberLookupOptions
@@ -286,7 +297,7 @@ export class SwiftClass extends SwiftTypeFacade {
     const metadata = metadataOf(this.$type);
     const fullName = this.$type.name;
     const argTypes = chosen.argTypeNames.map((n) => {
-      const argType = resolveType(n);
+      const argType = resolveTypeExpr(n, () => null);
       if (argType === null) {
         throw new Error(`cannot resolve init argument type ${n}`);
       }

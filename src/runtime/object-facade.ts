@@ -12,7 +12,7 @@ import {
   splitSelector,
 } from "./method.js";
 import { SwiftType, NominalType, ClassType, StructType, EnumType } from "./swift-type.js";
-import { POISON, invokeOptions, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
+import { POISON, invokeOptions, splitSubscriptArgs, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 
 const RESERVED = new Set([
   "toString",
@@ -28,6 +28,8 @@ const RESERVED = new Set([
   "$owned",
   "$call",
   "$method",
+  "$subscript",
+  "$setSubscript",
   "$get",
   "$set",
   "$field",
@@ -78,6 +80,8 @@ export interface SwiftClassObject extends SwiftObjectBase {
   readonly $kind: "object";
   readonly $type: ClassType;
   $method(name: string, options?: MethodResolveOptions): SwiftClassBoundMethod;
+  $subscript(...indicesThenOptions: unknown[]): CallResult;
+  $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void;
   $container?: never;
 }
 
@@ -85,6 +89,8 @@ export interface SwiftValueObject extends SwiftObjectBase {
   readonly $kind: "value";
   readonly $type: StructType | EnumType;
   $method(name: string, options?: ValueMethodResolveOptions): SwiftValueBoundMethod;
+  $subscript(...indicesThenOptions: unknown[]): CallResult;
+  $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void;
   $container(): SwiftValue;
 }
 
@@ -125,6 +131,16 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   };
   const invoke = (name: string, args: CallArg[]): CallResult | Promise<CallResult> =>
     method(name, invokeOptions(args)).call(...args);
+  const subscript = (accessor: "getter" | "setter", args: unknown[], stored: CallArg[]): CallResult => {
+    const { indices, selector, options } = splitSubscriptArgs(args);
+    const { name, options: split } = splitSelector(selector, { ...options, arity: options.arity ?? indices.length });
+    if (name !== "subscript") {
+      throw new Error(`${selector} is not a subscript selector`);
+    }
+    const raw = { ...lowerResolveOptions(split), accessor };
+    const bound = isValue ? value.method("subscript", raw) : object.method("subscript", raw);
+    return bound.call(...stored, ...indices) as CallResult;
+  };
 
   const members = facadeMembers(fullName, false);
 
@@ -176,6 +192,12 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
         case "$method":
           return (name: string, options: ValueMethodResolveOptions = {}) =>
             narrowBoundMethod(method(name, options), target);
+        case "$subscript":
+          return (...args: unknown[]) => subscript("getter", args, []);
+        case "$setSubscript":
+          return (v: CallArg, ...args: unknown[]) => {
+            subscript("setter", args, [v]);
+          };
         case "$get":
           return (name: string) => readProperty(name);
         case "$set":

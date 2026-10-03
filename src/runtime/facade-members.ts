@@ -9,6 +9,29 @@ export function isBridgeMember(key: string, reserved: Set<string>): boolean {
   return key.startsWith("$") || reserved.has(key);
 }
 
+const SUBSCRIPT_OPTION_KEYS = new Set(["arity", "labels", "argTypes", "returnType", "typeArguments", "self"]);
+
+// $subscript(...indices, options?): the options are a selector ("subscript(row:column:)") or the
+// $method object; an index is never a string or a plain object made only of option keys.
+export function splitSubscriptArgs(args: unknown[]): { indices: CallArg[]; selector: string; options: ValueMethodResolveOptions } {
+  const last = args[args.length - 1];
+  if (typeof last === "string") {
+    return { indices: args.slice(0, -1) as CallArg[], selector: last, options: {} };
+  }
+  const isOptions =
+    typeof last === "object" &&
+    last !== null &&
+    !Array.isArray(last) &&
+    !(last instanceof NativePointer) &&
+    !(last instanceof ClosureSpec) &&
+    Object.getPrototypeOf(last) === Object.prototype &&
+    Object.keys(last).length > 0 &&
+    Object.keys(last).every((k) => SUBSCRIPT_OPTION_KEYS.has(k));
+  return isOptions
+    ? { indices: args.slice(0, -1) as CallArg[], selector: "subscript", options: last as ValueMethodResolveOptions }
+    : { indices: args as CallArg[], selector: "subscript", options: {} };
+}
+
 export function invokeOptions(args: CallArg[]): ValueMethodResolveOptions {
   const options: ValueMethodResolveOptions = { arity: args.length };
   if (args.some((a) => a instanceof ClosureSpec)) {

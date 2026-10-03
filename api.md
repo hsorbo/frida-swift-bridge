@@ -293,6 +293,8 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
   `signature`: `{ labels, argTypeNames, returnTypeName, throws, thrownTypeName,
   isAsync, genericParams }`, the types spelled as the symbol spells them, so a
   generic member's read `"A"` and the names paste into `{ argTypes }`.
+- `info.subscript(selector?, options?)` / `info.typeSubscript(...)`: a subscript
+  accessor, the getter unless `{ accessor: "setter" }`. See [Properties](#properties).
 - `info.properties`: the properties as `{ name, typeName, isStatic, writable }`.
 - `info.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
 
@@ -760,6 +762,27 @@ Robot.$get("fleetSize");      // the same, by name
 Robot.fleetSize = 13;
 Robot.$set("fleetSize", 13);  // the same, by name
 ```
+
+Subscripts have no bracket form, since a facade's bracket keys are its members
+and a subscript's labels and indices cannot be spelled there. `$subscript(...indices)`
+calls the getter and `$setSubscript(value, ...indices)` the setter, each taking
+as a last argument the selector or the `$method` options that pick one
+subscript when the indices alone are ambiguous; a static subscript lives on the
+type facade:
+
+```js
+grid.$subscript(1, "subscript(_:)");                     // the getter of subscript(_ i: Int)
+grid.$setSubscript(9, 1, "subscript(_:)");               // its setter
+grid.$subscript(1, 0, { labels: ["row", "column"] });    // subscript(row:column:)
+grid.$subscript(3, { labels: ["scaled"], typeArguments: [Int] });   // subscript<T>(scaled:)
+Swift.type("MyApp.Grid").$subscript(1, { labels: ["unit"] });       // static subscript(unit:)
+```
+
+`$type.subscript(selector?, options?)` and `$type.typeSubscript(...)` find an
+accessor through reflection, the getter unless `{ accessor: "setter" }`, to
+describe or hook it; a `modify` accessor is hooked by its address like a
+property's. The hook sees the indices as arguments, a setter's stored element
+ahead of them, and the element as the getter's return or the modify's yield.
 
 For direct access to a stored field's storage, `$field(name)` returns a live
 borrowed view with `.read()`, `.write(value)`, and `.handle`. Reads and writes
@@ -1323,8 +1346,6 @@ corrupts memory instead of failing cleanly.
 
 Each of these throws on purpose: the bridge has no lowering for the shape yet.
 
-- **Subscripts.** A subscript's getter and setter cannot be read, written or
-  hooked by name; the member resolver knows only properties and methods.
 - **Closures as results.** A function returning a closure is refused
   (`closure return types are not supported`). Closure parameters take only the
   shapes listed under [Closures](#closures); a consuming or `inout` closure

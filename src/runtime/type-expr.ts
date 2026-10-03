@@ -75,6 +75,7 @@ export interface SwiftFunctionSignature {
   async: boolean;
   throws: boolean;
   thrownType: TypeExpr | null; // throws(E); null for an untyped throws or a non-throwing function
+  accessor?: SubscriptAccessor; // a subscript accessor: params are the indices, result the element
   params: TypeExprParam[];
   result: TypeExpr | null;
   argTypeNames: string[];
@@ -85,6 +86,8 @@ export interface SwiftFunctionSignature {
   // A constrained extension's context demangles as `P< where A: Q>`; the clauses, context bare.
   contextConstraints: string[];
 }
+
+export type SubscriptAccessor = "getter" | "setter" | "modify";
 
 export interface SwiftAccessorSignature {
   kind: "getter" | "setter" | "modify";
@@ -505,7 +508,7 @@ function parseEntityPath(parser: Parser): EntityPath {
   return { context: parser.s.slice(0, contextEnd), name: last.name, clause: last.clause, contextConstraints };
 }
 
-function parseAccessor(s: string): SwiftAccessorSignature | null {
+function parseAccessor(s: string): ParsedSwiftSignature | null {
   for (const kind of ["getter", "setter", "modify"] as const) {
     const marker = `.${kind} : `;
     const at = s.indexOf(marker);
@@ -514,17 +517,59 @@ function parseAccessor(s: string): SwiftAccessorSignature | null {
     }
     const parser = new Parser(s.slice(0, at));
     const { context, name, clause, contextConstraints } = parseEntityPath(parser);
-    if (!parser.atEnd() || clause !== null || context === "") {
+    if (!parser.atEnd() || context === "") {
       return null;
     }
-    const typeName = s.slice(at + marker.length).trim();
+    let typeName = s.slice(at + marker.length).trim();
+    // A generic subscript's clause leads its type: `subscript.getter : <A where A: P>(A) -> Int`.
+    let typeClause: string | null = null;
+    if (name === "subscript" && typeName.startsWith("<")) {
+      const clauseParser = new Parser(typeName);
+      typeClause = clauseParser.balanced();
+      typeName = typeName.slice(typeClause.length);
+    }
     const type = parseTypeExpr(typeName);
     if (type === null) {
       return null;
     }
-    return { kind, context, member: name, type, typeName, contextConstraints };
+    if (name === "subscript") {
+      return type.kind === "function" ? subscriptSignature(kind, context, clause ?? typeClause, contextConstraints, type) : null;
+    }
+    return clause === null ? { kind, context, member: name, type, typeName, contextConstraints } : null;
   }
   return null;
+}
+
+// `Type.subscript.getter : (row: Int, column: Int) -> Int` reads as a method named subscript taking
+// the indices; its generic clause sits on the entity like a method's.
+function subscriptSignature(
+  accessor: SubscriptAccessor,
+  context: string,
+  clause: string | null,
+  contextConstraints: string[],
+  type: Extract<TypeExpr, { kind: "function" }>
+): SwiftFunctionSignature {
+  const { genericParams, simpleGenerics, conformanceRequirements } = parseGenericClause(clause);
+  const argLabels = type.params.map((p) => p.label);
+  return {
+    kind: "function",
+    context,
+    name: "subscript",
+    genericParams,
+    simpleGenerics,
+    async: type.async,
+    throws: type.throws,
+    thrownType: null,
+    accessor,
+    params: type.params,
+    result: type.result,
+    argTypeNames: type.params.map((p) => p.text),
+    argLabels,
+    returnTypeName: type.result.text,
+    selector: `subscript(${argLabels.map((l) => `${l ?? "_"}:`).join("")})`,
+    conformanceRequirements,
+    contextConstraints,
+  };
 }
 
 function parseFunction(s: string): SwiftFunctionSignature | null {
