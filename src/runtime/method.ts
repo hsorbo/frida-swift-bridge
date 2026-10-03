@@ -8,7 +8,7 @@ import { ValueInstance } from "../abi/value.js";
 import { readValue, writeValue, embedsManagedReference, SwiftValue } from "../abi/instance.js";
 import { readEnumCase, projectEnumData, projectBox } from "../abi/enum.js";
 import { enumerateTupleElements } from "../abi/tuple.js";
-import { findType } from "../reflection/registry.js";
+import { findType, withoutTypeArguments } from "../reflection/registry.js";
 import { demangle } from "./demangle.js";
 import {
   parseSwiftSignature,
@@ -550,7 +550,7 @@ const RUNTIME_ANONYMOUS_CONTEXT = /\(unknown context at \$[0-9a-f]+\)\./g;
 const PRIVATE_DECL_NAME = /\(([^()\s]+) in _[0-9A-F]+\)/g;
 
 function canonicalTypeName(typeName: string): string {
-  const descriptor = findType(typeName.replace(RUNTIME_ANONYMOUS_CONTEXT, ""));
+  const descriptor = findType(withoutTypeArguments(typeName).replace(RUNTIME_ANONYMOUS_CONTEXT, ""));
   if (descriptor === null) {
     throw new Error(`unknown type: ${typeName}`);
   }

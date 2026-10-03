@@ -21,6 +21,26 @@ export function* enumerateSwiftModules(): Generator<Module> {
   }
 }
 
+// A specialization is spelled with its type arguments, "Module.Name<Args>"; its members and nested
+// types are declared on "Module.Name".
+export function withoutTypeArguments(name: string): string {
+  if (!name.includes("<")) {
+    return name;
+  }
+  let declared = "";
+  let depth = 0;
+  for (const c of name) {
+    if (c === "<") {
+      depth++;
+    } else if (c === ">") {
+      depth--;
+    } else if (depth === 0) {
+      declared += c;
+    }
+  }
+  return declared;
+}
+
 // Hits only: a qualified name's descriptor never changes, while a miss can be answered by a module
 // loaded later.
 const resolved = new Map<string, ContextDescriptor>();
@@ -61,10 +81,11 @@ function* nestedTypes(parentName: string, name: string): Generator<ContextDescri
 }
 
 export function nestedTypeNamesOf(parentName: string): string[] {
-  return [...nestedTypes(parentName, "*")].map((descriptor) => descriptor.name!);
+  return [...nestedTypes(withoutTypeArguments(parentName), "*")].map((descriptor) => descriptor.name!);
 }
 
 export function findNestedType(parentName: string, name: string): ContextDescriptor | null {
+  parentName = withoutTypeArguments(parentName);
   const fullName = `${parentName}.${name}`;
   const hit = resolved.get(fullName);
   if (hit !== undefined) {

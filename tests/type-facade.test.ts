@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, SwiftClass, SwiftStruct, SwiftEnum } from "../src/index.js";
+import { EnumType, StructType, metadataFor, typeOf } from "../src/abi.js";
 
 describe("Swift type member sugar", () => {
   beforeEach(() => { loadFixture(); });
@@ -58,6 +59,24 @@ describe("Swift type member sugar", () => {
     expect(Pick.empty.$fields).toBe("empty");
     expect(Pick.value(7).$fields).toEqual({ value: int64(7) });
     expect(Pick.empty.$type).toBe(Pick.$type);
+  });
+
+  test("a generic specialization's facade finds members by its declaration name", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const OptionalInt = (typeOf(metadataFor("Swift.Optional", [Int])!) as EnumType).facade;
+    expect(OptionalInt.none.$fields).toBe("none");
+    expect(OptionalInt.some(7).$fields).toEqual({ some: int64(7) });
+    expect(OptionalInt.some(7).$type).toBe(OptionalInt.$type);
+    expect("none" in OptionalInt).toBe(true);
+    expect(Object.keys(OptionalInt)).toContain("some");
+    expect(Object.keys(OptionalInt)).toContain("ExtensionProbe");
+    expect(OptionalInt.ExtensionProbe).toBe(Swift.type("Swift.Optional.ExtensionProbe"));
+
+    const KeyedInt = (typeOf(metadataFor("fixture.Keyed", [Int])!) as StructType).facade;
+    expect(Object.keys(KeyedInt)).toContain("label");
+    expect("label" in KeyedInt).toBe(true);
+    expect(KeyedInt.$type.typeMethods()).toContain("label(_:)");
+    expect(KeyedInt.$type.typeMethod("label").address.equals(Swift.type("fixture.Keyed")!.$typeMethod("label").address)).toBe(true);
   });
 
   test("reaches a nested type, from Swift.modules too", () => {
