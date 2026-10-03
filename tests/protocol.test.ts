@@ -58,6 +58,15 @@ describe("Swift.enumerateProtocols", () => {
     const greeter = [...Swift.enumerateProtocols()].find((p) => p.fullName === "fixture.Greeter")!;
     expect(greeter.requirements.length).toBeGreaterThan(0);
   });
+
+  test("a glob filter matches qualified protocol names", () => {
+    const greeters = [...Swift.enumerateProtocols("*.Greeter")].map((p) => p.fullName);
+    expect(greeters).toContain("fixture.Greeter");
+    expect(greeters.every((name) => name.endsWith(".Greeter"))).toBeTruthy();
+    const scoped = [...Swift.enumerateProtocols("fixture.*")].map((p) => p.fullName);
+    expect(scoped).toContain("fixture.Scalable");
+    expect(scoped.every((name) => name.startsWith("fixture."))).toBeTruthy();
+  });
 });
 
 describe("Protocol.conformingTypes", () => {

@@ -15,6 +15,16 @@ export function swiftMatches(query: string): ApiResolverMatch[] {
   return resolver.enumerateMatches(query);
 }
 
+export type NameFilter = Module | string;
+
+// A string filter is a glob over the qualified name, matched by the resolver.
+export function nameQuery(kind: "types" | "protocols", filter?: NameFilter): string {
+  if (filter === undefined) {
+    return `${kind}:*!*`;
+  }
+  return typeof filter === "string" ? `${kind}:*!${filter}` : `${kind}:${filter.path}!*`;
+}
+
 function requireFrida(minimum: number[]): void {
   const running = Frida.version.split(".").map((part) => parseInt(part, 10));
   for (let i = 0; i < minimum.length; i++) {

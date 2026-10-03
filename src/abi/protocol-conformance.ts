@@ -5,7 +5,7 @@ import {
   RelativeIndirectablePointer,
 } from "../basic/relative-pointer.js";
 import { getSwiftSection } from "../image/sections.js";
-import { swiftMatches } from "../runtime/swift-resolver.js";
+import { swiftMatches, NameFilter, nameQuery } from "../runtime/swift-resolver.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import {
   GenericRequirementDescriptor,
@@ -121,8 +121,8 @@ function* protocolsMatching(query: string): Generator<ContextDescriptor> {
   }
 }
 
-export function* protocolDescriptors(module?: Module): Generator<ContextDescriptor> {
-  yield* protocolsMatching(module === undefined ? "protocols:*!*" : `protocols:${module.path}!*`);
+export function* protocolDescriptors(filter?: NameFilter): Generator<ContextDescriptor> {
+  yield* protocolsMatching(nameQuery("protocols", filter));
 }
 
 export function* protocolsNamedUnder(moduleName: string): Generator<ContextDescriptor> {

@@ -1,7 +1,7 @@
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { getSwiftSection } from "../image/sections.js";
 import { moduleKey } from "../runtime/symbol-index.js";
-import { swiftMatches } from "../runtime/swift-resolver.js";
+import { swiftMatches, NameFilter, nameQuery } from "../runtime/swift-resolver.js";
 
 const SWIFT_SECTIONS = ["__swift5_types", "__swift5_proto", "__swift5_protos", "__swift5_types2"];
 
@@ -98,28 +98,28 @@ export function findNestedType(parentName: string, name: string): ContextDescrip
   return null;
 }
 
-export function* swiftTypes(module?: Module): Generator<ContextDescriptor> {
-  yield* module === undefined ? typeDescriptors("types:*!*") : enumerateTypes(module);
+export function* swiftTypes(filter?: NameFilter): Generator<ContextDescriptor> {
+  yield* typeDescriptors(nameQuery("types", filter));
 }
 
-function* typesByKind(kind: ContextDescriptorKind, module?: Module): Generator<ContextDescriptor> {
-  for (const descriptor of swiftTypes(module)) {
+function* typesByKind(kind: ContextDescriptorKind, filter?: NameFilter): Generator<ContextDescriptor> {
+  for (const descriptor of swiftTypes(filter)) {
     if (descriptor.kind === kind) {
       yield descriptor;
     }
   }
 }
 
-export function* swiftClasses(module?: Module): Generator<ContextDescriptor> {
-  yield* typesByKind(ContextDescriptorKind.Class, module);
+export function* swiftClasses(filter?: NameFilter): Generator<ContextDescriptor> {
+  yield* typesByKind(ContextDescriptorKind.Class, filter);
 }
 
-export function* swiftStructs(module?: Module): Generator<ContextDescriptor> {
-  yield* typesByKind(ContextDescriptorKind.Struct, module);
+export function* swiftStructs(filter?: NameFilter): Generator<ContextDescriptor> {
+  yield* typesByKind(ContextDescriptorKind.Struct, filter);
 }
 
-export function* swiftEnums(module?: Module): Generator<ContextDescriptor> {
-  yield* typesByKind(ContextDescriptorKind.Enum, module);
+export function* swiftEnums(filter?: NameFilter): Generator<ContextDescriptor> {
+  yield* typesByKind(ContextDescriptorKind.Enum, filter);
 }
 
 export function findType(name: string): ContextDescriptor | null {

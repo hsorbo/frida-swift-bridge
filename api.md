@@ -73,11 +73,11 @@ The default export is the whole facade. Its members:
 - `Swift.modules`: a lazy namespace per Swift module, so
   `Swift.modules.MyApp.Robot` reaches a type or protocol without a
   module-qualified string. See [Finding types](#finding-types).
-- `Swift.enumerateTypes(module?)`, `Swift.enumerateClasses(module?)`,
-  `Swift.enumerateStructs(module?)`, `Swift.enumerateEnums(module?)`: lazy
-  generators over the types in a module (or every loaded module). Enumerating
-  does not realize metadata for types you skip.
-- `Swift.enumerateProtocols(module?)`: a generator of [`Protocol`](#protocols)s.
+- `Swift.enumerateTypes(filter?)`, `Swift.enumerateClasses(filter?)`,
+  `Swift.enumerateStructs(filter?)`, `Swift.enumerateEnums(filter?)`: lazy
+  generators over the types in a module, matching a name glob, or in every
+  loaded module. Enumerating does not realize metadata for types you skip.
+- `Swift.enumerateProtocols(filter?)`: a generator of [`Protocol`](#protocols)s.
 - `Swift.Protocol.find(name)`, `Swift.ProtocolComposition.fromSignature(signature)`:
   look up protocols. See [Protocols](#protocols).
 - `Swift.NativeFunction(address, returnType, argTypes, options?)`: wrap a free
@@ -195,9 +195,17 @@ for (const cls of Swift.enumerateClasses(app))
     console.log(cls.$type.name);
 ```
 
-`Swift.enumerateTypes`, `Swift.enumerateClasses`, `Swift.enumerateStructs`, and
-`Swift.enumerateEnums` all accept an optional `Module`; with no argument they
-span every loaded Swift image and reflect modules loaded later.
+`Swift.enumerateTypes`, `Swift.enumerateClasses`, `Swift.enumerateStructs`,
+`Swift.enumerateEnums`, and `Swift.enumerateProtocols` all accept an optional
+`Module` or a glob over the qualified name; with no argument they span every
+loaded Swift image and reflect modules loaded later. A glob is matched by
+Frida's resolver, so only the hits are realized:
+
+```js
+[...Swift.enumerateClasses("*Robot*")];        // across every module
+[...Swift.enumerateTypes("MyApp.*Robot*")];    // scoped to one module
+[...Swift.enumerateProtocols("MyApp.*")];
+```
 
 ## Types
 

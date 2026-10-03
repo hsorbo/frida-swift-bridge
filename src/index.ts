@@ -9,6 +9,7 @@ import {
   swiftStructs,
   swiftEnums,
 } from "./reflection/registry.js";
+import type { NameFilter } from "./runtime/swift-resolver.js";
 import { symbolicate, resolveTypeExpr } from "./runtime/symbolication.js";
 import { SwiftInterceptor } from "./runtime/interceptor.js";
 import {
@@ -177,8 +178,8 @@ export const Swift = {
     return nominalTypeNamed(name)?.facade ?? null;
   },
 
-  *enumerateTypes(module?: Module): Generator<SwiftTypeFacade> {
-    for (const descriptor of nameable(swiftTypes(module))) {
+  *enumerateTypes(filter?: NameFilter): Generator<SwiftTypeFacade> {
+    for (const descriptor of nameable(swiftTypes(filter))) {
       yield typeFromDescriptor(descriptor).facade;
     }
   },
@@ -187,8 +188,8 @@ export const Swift = {
     return typeOfKind(name, ClassType, "class");
   },
 
-  *enumerateClasses(module?: Module): Generator<SwiftClass> {
-    for (const descriptor of nameable(swiftClasses(module))) {
+  *enumerateClasses(filter?: NameFilter): Generator<SwiftClass> {
+    for (const descriptor of nameable(swiftClasses(filter))) {
       yield (typeFromDescriptor(descriptor) as ClassType).facade;
     }
   },
@@ -197,8 +198,8 @@ export const Swift = {
     return typeOfKind(name, StructType, "struct");
   },
 
-  *enumerateStructs(module?: Module): Generator<SwiftStruct> {
-    for (const descriptor of nameable(swiftStructs(module))) {
+  *enumerateStructs(filter?: NameFilter): Generator<SwiftStruct> {
+    for (const descriptor of nameable(swiftStructs(filter))) {
       yield (typeFromDescriptor(descriptor) as StructType).facade;
     }
   },
@@ -207,8 +208,8 @@ export const Swift = {
     return typeOfKind(name, EnumType, "enum");
   },
 
-  *enumerateEnums(module?: Module): Generator<SwiftEnum> {
-    for (const descriptor of nameable(swiftEnums(module))) {
+  *enumerateEnums(filter?: NameFilter): Generator<SwiftEnum> {
+    for (const descriptor of nameable(swiftEnums(filter))) {
       yield (typeFromDescriptor(descriptor) as EnumType).facade;
     }
   },

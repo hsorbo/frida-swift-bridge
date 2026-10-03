@@ -163,6 +163,20 @@ describe("registry", () => {
     expect(enums.every((t) => t instanceof SwiftEnum)).toBeTruthy();
   });
 
+  test("a glob filter matches qualified names across modules or within one", () => {
+    loadFixture();
+    const names = (types: Iterable<SwiftTypeFacade>) => [...types].map((t) => t.$type.name);
+    const gadgets = names(Swift.enumerateClasses("*.Gadget"));
+    expect(gadgets).toContain("fixture.Gadget");
+    expect(gadgets.every((name) => name.endsWith(".Gadget"))).toBeTruthy();
+    expect(names(Swift.enumerateStructs("fixture.*Scalar")).sort()).toEqual(["fixture.NarrowScalar", "fixture.WideScalar"]);
+    expect(names(Swift.enumerateEnums("fixture.Fixture*"))).toEqual(["fixture.FixtureError"]);
+    const scoped = names(Swift.enumerateTypes("fixture.*"));
+    expect(scoped).toContain("fixture.Gadget");
+    expect(scoped.every((name) => name.startsWith("fixture."))).toBeTruthy();
+    expect(names(Swift.enumerateTypes("*.NoSuchTypeQX"))).toEqual([]);
+  });
+
   test("enumeration names generic types without realizing metadata", () => {
     loadFixture();
     const fixture = Process.getModuleByName(FIXTURE_MODULE);

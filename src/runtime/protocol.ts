@@ -7,6 +7,7 @@ import {
   conformingTypes,
   protocolDescriptors,
 } from "../abi/protocol-conformance.js";
+import type { NameFilter } from "./swift-resolver.js";
 import {
   getExistentialTypeMetadata,
   protocolClassConstraint,
@@ -106,8 +107,8 @@ export class Protocol implements StableProtocol {
   }
 }
 
-export function* swiftProtocols(module?: Module): Generator<Protocol> {
-  for (const descriptor of protocolDescriptors(module)) {
+export function* swiftProtocols(filter?: NameFilter): Generator<Protocol> {
+  for (const descriptor of protocolDescriptors(filter)) {
     if (descriptor.fullTypeName !== null) {
       yield new Protocol(descriptor);
     }
