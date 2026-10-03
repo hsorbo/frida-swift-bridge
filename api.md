@@ -1217,6 +1217,11 @@ corrupts memory instead of failing cleanly.
 - **Code that was never emitted as a function.** Inlined, specialized or
   dead-stripped code has no entry point to call. Hooking a function doesn't see
   call sites where it was inlined.
+- **Default argument values.** Every argument must be passed. A parameter's
+  default expression is compiled into each call site: the compiler emits the
+  generator for a public function into its clients and keeps an internal
+  function's generator private, so no library exports one and a stripped
+  binary has no trace of the value.
 - **Protocol requirement or extension method.** To decide whether a
   protocol-extension member is a requirement (dispatched through the witness
   table) or an extension method (called directly), the bridge symbolicates the
