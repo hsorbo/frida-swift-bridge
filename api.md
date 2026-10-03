@@ -1109,7 +1109,9 @@ decoding preserves precision on 64-bit hosts:
 Readers always return the same representation for a given type — never a number
 for small values and a wrapper for large ones.
 
-Where Swift expects an `Optional`, JS `null` marshals to `.none`.
+Where Swift expects an `Optional`, JS `null` marshals to `.none`. Where it
+expects an `Array`, a JS array marshals to one, each element written as the
+element type; a variadic parameter (`Int...`) is such an array.
 
 ```js
 addInts(20, 22);    // int64(42), not 42
@@ -1292,8 +1294,6 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
 
 - **Subscripts.** A subscript's getter and setter cannot be read, written or
   hooked by name; the member resolver knows only properties and methods.
-- **Variadic parameters.** A method with a `T...` parameter does not resolve:
-  `could not resolve type`.
 - **Closures as results.** A function returning a closure is refused
   (`closure return types are not supported`). Closure parameters take only the
   shapes listed under [Closures](#closures); a consuming or `inout` closure

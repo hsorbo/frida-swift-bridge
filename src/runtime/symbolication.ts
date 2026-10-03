@@ -228,6 +228,8 @@ export function resolveParsedType(type: TypeExpr, resolveParam: ResolveParam): M
     }
     case "existential":
       return existentialOf(type.members);
+    case "variadic":
+      return instantiate("Swift.Array", [resolveParsedType(type.element, resolveParam)]);
     default:
       return null;
   }
@@ -291,6 +293,9 @@ function embedsOpaqueParam(type: TypeExpr, paramLayout: (name: string) => ParamL
 export function isSingleReference(type: TypeExpr): boolean {
   if (type.kind === "optional") {
     return isSingleReference(type.wrapped);
+  }
+  if (type.kind === "variadic") {
+    return true;
   }
   return type.kind === "nominal" && (REFERENCE_CONTAINERS.has(type.name) || findType(type.name)?.kind === ContextDescriptorKind.Class);
 }

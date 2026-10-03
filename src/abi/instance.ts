@@ -14,6 +14,7 @@ import {
 import { ClassMetadata, classMetadataOf, enumerateClassFields } from "./class-metadata.js";
 import { typeName } from "../runtime/type-name.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
+import { createArray } from "./array.js";
 
 const STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET = 0x18;
 
@@ -180,6 +181,15 @@ function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
       if (writer !== undefined) {
         const normalized = normalizePrimitive(name, value);
         return (address) => writer(address, normalized);
+      }
+      if (name === "Swift.Array" && Array.isArray(value)) {
+        const element = new Metadata(metadata.genericArguments.readPointer());
+        const elementPlans = value.map((v) => planWrite(element, v));
+        const stride = element.typeLayout.stride;
+        return (address) => {
+          const array = createArray(metadata, elementPlans.length, (first) => elementPlans.forEach((plan, i) => plan(first.add(i * stride))));
+          address.writePointer(array.readPointer());
+        };
       }
       if (value === null || typeof value !== "object") {
         throw new Error(`writeValue: expected a field object for ${typeName(metadata)}`);

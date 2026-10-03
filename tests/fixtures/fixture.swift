@@ -1975,3 +1975,14 @@ public func driveThrowsWide(_ code: Int) -> Int {
     do { return try throwsWide(code) } catch { return -error.e }
 }
 #endif
+
+// A variadic parameter lowers as an Array of its element type.
+public func sumVariadic(_ xs: Int...) -> Int { xs.reduce(0, +) }
+public func joinVariadic(_ parts: String..., separator: String) -> String { parts.joined(separator: separator) }
+public func driveSumVariadic() -> Int { sumVariadic(1, 2, 3) }
+extension Robot {
+    public func greetAll(_ names: String...) -> String { names.map { greet($0) }.joined(separator: "; ") }
+}
+extension Box {
+    public func lastOf<T>(_ xs: T...) -> T { xs[xs.count - 1] }
+}

@@ -2074,6 +2074,9 @@ function planCompoundType(
 // Array/Set/Dictionary are a fixed-layout buffer (direct); Optional<param> embeds the abstract param
 // (indirect) unless the param is class-bound, which makes it a nullable reference.
 function compoundIsAddressOnly(type: TypeExpr, genericParams: string[], classBoundParams: Set<string>): boolean {
+  if (type.kind === "variadic") {
+    return false;
+  }
   if (type.kind === "optional") {
     const payload = type.wrapped;
     if (payload.kind === "param" && genericParams.includes(payload.name)) {
