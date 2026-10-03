@@ -1165,6 +1165,9 @@ corrupts memory instead of failing cleanly.
   descriptor. Escaping closures wrapped in a reabstraction thunk are unwrapped
   by their structure. When a capture's type can't be resolved, the bridge
   doesn't expose the captures.
+- **Module unloading.** A type found by name and its wrapper are kept for the
+  life of the script, since a descriptor never changes. If a module is unloaded
+  and another mapped at the same address, the old wrapper is stale.
 
 ## Going lower: the `/abi` entry point
 
