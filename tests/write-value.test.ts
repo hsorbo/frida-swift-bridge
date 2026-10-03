@@ -26,6 +26,19 @@ describe("writeValue", () => {
     expect(roundTrip(metadataFor("Swift.Double")).write(3.5)).toBe(3.5);
   });
 
+  test("round-trips Int128 and UInt128 as BigInt", (ctx) => {
+    const Int128 = metadataFor("Swift.Int128");
+    if (Int128 === null) ctx.skip("stdlib without Int128 (Swift < 6.0)");
+    const UInt128 = metadataFor("Swift.UInt128");
+    expect(roundTrip(Int128).write(-(1n << 100n) - 7n)).toBe(-(1n << 100n) - 7n);
+    expect(roundTrip(Int128).write(-42)).toBe(-42n);
+    expect(roundTrip(Int128).write(int64(-43))).toBe(-43n);
+    expect(roundTrip(UInt128).write((1n << 127n) | 9n)).toBe((1n << 127n) | 9n);
+    expect(() => roundTrip(Int128).write(1n << 127n)).toThrow(/in range/);
+    expect(() => roundTrip(UInt128).write(-1n)).toThrow(/in range/);
+    expect(() => roundTrip(Int128).write(1.5)).toThrow(/in range/);
+  });
+
   test("marshals JS null as Optional .none", () => {
     const opt = roundTrip(metadataFor("Swift.Optional", [metadataFor("Swift.Int")!]));
     expect(opt.write(null)).toBe("none");

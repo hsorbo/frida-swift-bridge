@@ -81,7 +81,7 @@ describe("Swift.asyncFunction", () => {
     const flipFramedInt128Async = Swift.asyncFunction(module, FLIP_FRAMED_INT128_ASYNC);
     expect(await flipFramedInt128Async.call(ValueInstance.borrow(Framed!, framed))).toEqual({
       head: int64(4),
-      wide: { _value: null },
+      wide: (2n << 64n) | 4n,
       tail: int64(1),
     });
   });

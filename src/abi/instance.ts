@@ -26,6 +26,7 @@ export type SwiftValue =
   | number
   | Int64
   | UInt64
+  | bigint
   | boolean
   | string
   | NativePointer
@@ -33,11 +34,24 @@ export type SwiftValue =
   | SwiftValue[]
   | null;
 
+const U64_MASK = (1n << 64n) - 1n;
+
+function readU128(p: NativePointer): bigint {
+  return (BigInt(p.add(8).readU64().toString()) << 64n) | BigInt(p.readU64().toString());
+}
+
+function writeU128(p: NativePointer, v: bigint): void {
+  p.writeU64(uint64((v & U64_MASK).toString()));
+  p.add(8).writeU64(uint64((v >> 64n).toString()));
+}
+
 const PRIMITIVE_READERS: { [typeName: string]: (p: NativePointer) => SwiftValue } = {
   "Swift.Int": (p) => p.readS64(),
   "Swift.UInt": (p) => p.readU64(),
   "Swift.Int64": (p) => p.readS64(),
   "Swift.UInt64": (p) => p.readU64(),
+  "Swift.Int128": (p) => BigInt.asIntN(128, readU128(p)),
+  "Swift.UInt128": (p) => readU128(p),
   "Swift.Int32": (p) => p.readS32(),
   "Swift.UInt32": (p) => p.readU32(),
   "Swift.Int16": (p) => p.readS16(),
@@ -58,6 +72,8 @@ const PRIMITIVE_WRITERS: { [typeName: string]: (p: NativePointer, v: SwiftValue)
   "Swift.UInt": (p, v) => p.writeU64(v as number | UInt64),
   "Swift.Int64": (p, v) => p.writeS64(v as number | Int64),
   "Swift.UInt64": (p, v) => p.writeU64(v as number | UInt64),
+  "Swift.Int128": (p, v) => writeU128(p, BigInt.asUintN(128, v as bigint)),
+  "Swift.UInt128": (p, v) => writeU128(p, v as bigint),
   "Swift.Int32": (p, v) => p.writeS32(v as number),
   "Swift.UInt32": (p, v) => p.writeU32(v as number),
   "Swift.Int16": (p, v) => p.writeS16(v as number),
@@ -86,9 +102,13 @@ const INT_RANGES: { [typeName: string]: { min: number; max: number } } = {
 };
 const WIDE_SIGNED = new Set(["Swift.Int", "Swift.Int64"]);
 const WIDE_UNSIGNED = new Set(["Swift.UInt", "Swift.UInt64"]);
+const WIDE_128 = new Map([
+  ["Swift.Int128", (v: bigint) => BigInt.asIntN(128, v) === v],
+  ["Swift.UInt128", (v: bigint) => BigInt.asUintN(128, v) === v],
+]);
 
 const describeRejected = (v: SwiftValue): string =>
-  typeof v === "number" || v instanceof Int64 || v instanceof UInt64 ? String(v) : typeof v;
+  typeof v === "number" || typeof v === "bigint" || v instanceof Int64 || v instanceof UInt64 ? String(v) : typeof v;
 
 function normalizePrimitive(name: string, value: SwiftValue): SwiftValue {
   const range = INT_RANGES[name];
@@ -108,6 +128,15 @@ function normalizePrimitive(name: string, value: SwiftValue): SwiftValue {
     if (value instanceof UInt64) return value;
     if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
     throw new Error(`writeValue: cannot write ${describeRejected(value)} as ${name}; pass a non-negative safe integer or UInt64`);
+  }
+  const fits128 = WIDE_128.get(name);
+  if (fits128 !== undefined) {
+    const wide =
+      typeof value === "bigint" ? value
+      : (typeof value === "number" && Number.isSafeInteger(value)) || value instanceof Int64 || value instanceof UInt64 ? BigInt(value.toString())
+      : null;
+    if (wide !== null && fits128(wide)) return wide;
+    throw new Error(`writeValue: cannot write ${describeRejected(value)} as ${name}; pass a BigInt in range`);
   }
   if (!PRIMITIVE_VALIDATORS[name](value)) {
     throw new Error(`writeValue: cannot write ${typeof value} as ${name}`);

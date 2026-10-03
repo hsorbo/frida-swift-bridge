@@ -444,11 +444,11 @@ describe("SwiftInterceptor.attach", () => {
     makeSwiftNativeFunction(fixtureExport("fixture.driveSpillInt128("), Int, [])();
     listener.detach();
     expect(seenArgs).toEqual([
-      { head: int64(1), wide: { _value: null } },
+      { head: int64(1), wide: (2n << 64n) | 3n },
       int64(4), int64(5), int64(6), int64(7),
-      { _value: null },
+      (8n << 64n) | 9n,
       true,
-      { _value: null },
+      (10n << 64n) | 11n,
       int64(12),
     ]);
     expect(seenRet).toEqual(int64(40));
@@ -494,8 +494,8 @@ describe("SwiftInterceptor.attach", () => {
     const driven = makeSwiftNativeFunction(fixtureExport("fixture.driveFlipFramedInt128("), Int, [])()!;
     listener.detach();
     expect(driven.readS64().toNumber()).toBe(441);
-    expect(seenArgs).toEqual([{ head: int64(1), wide: { _value: null }, tail: int64(4) }]);
-    expect(seenRet).toEqual({ head: int64(4), wide: { _value: null }, tail: int64(1) });
+    expect(seenArgs).toEqual([{ head: int64(1), wide: (2n << 64n) | 3n, tail: int64(4) }]);
+    expect(seenRet).toEqual({ head: int64(4), wide: (2n << 64n) | 4n, tail: int64(1) });
   });
 
   test("surfaces a thrown error on leave instead of decoding a bogus return", () => {
