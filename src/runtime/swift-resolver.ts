@@ -18,7 +18,7 @@ export function swiftMatches(query: string): ApiResolverMatch[] {
 export type NameFilter = Module | string;
 
 // A string filter is a glob over the qualified name, matched by the resolver.
-export function nameQuery(kind: "types" | "protocols", filter?: NameFilter): string {
+export function nameQuery(kind: "types" | "protocols" | "functions", filter?: NameFilter): string {
   if (filter === undefined) {
     return `${kind}:*!*`;
   }

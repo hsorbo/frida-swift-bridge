@@ -5,6 +5,7 @@ import { enumerateFields } from "../abi/field-descriptor.js";
 import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, RAW } from "./object-facade.js";
 import { makeSwiftNativeFunction } from "./calling-convention.js";
 import { resolveTypeExpr, parseTypeExpr } from "./symbolication.js";
+import type { SwiftFunctionSignature } from "./type-expr.js";
 import {
   bindResolved,
   SwiftBoundMethod,
@@ -413,7 +414,7 @@ interface SwiftAddressOnly {
 }
 
 function addressOnly(member: SwiftMember | FoundMember, refusal: string): SwiftAddressOnly {
-  const parsed = "generic" in member ? member.signature : hookTargetOf(member)!.signature;
+  const parsed = "generic" in member ? member.signature : (hookTargetOf(member)!.signature as SwiftFunctionSignature);
   return {
     address: member.address,
     origin: member.origin,

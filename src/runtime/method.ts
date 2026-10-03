@@ -154,7 +154,7 @@ export function unboundSignature(signature: SwiftFunctionSignature): SwiftBoundS
 // What a hook plans from when it is handed a member instead of an address.
 export interface HookTarget {
   address: NativePointer;
-  signature: SwiftFunctionSignature;
+  signature: ParsedSwiftSignature;
   witnessDispatched: boolean;
 }
 

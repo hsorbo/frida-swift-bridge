@@ -78,6 +78,9 @@ The default export is the whole facade. Its members:
   generators over the types in a module, matching a name glob, or in every
   loaded module. Enumerating does not realize metadata for types you skip.
 - `Swift.enumerateProtocols(filter?)`: a generator of [`Protocol`](#protocols)s.
+- `Swift.enumerateFunctions(filter?)`: a generator over the functions and
+  accessors with a Swift symbol, by demangled-name glob, each hookable as it
+  is. See [Finding types](#finding-types).
 - `Swift.Protocol.find(name)`, `Swift.ProtocolComposition.fromSignature(signature)`:
   look up protocols. See [Protocols](#protocols).
 - `Swift.NativeFunction(address, returnType, argTypes, options?)`: wrap a free
@@ -202,6 +205,25 @@ Frida's resolver, so only the hits are realized:
 [...Swift.enumerateClasses("*Robot*")];        // across every module
 [...Swift.enumerateTypes("MyApp.*Robot*")];    // scoped to one module
 [...Swift.enumerateProtocols("MyApp.*")];
+```
+
+`Swift.enumerateFunctions(filter?)` takes the same `Module` or glob, matched
+against the demangled name of every function and accessor that has a Swift
+symbol. Each match has an `address`, its `module`, the demangled `name`, a
+`kind` (`function`, `getter`, `setter` or `modify`) and, for a function, the
+`signature` a member carries. A match goes straight into
+`Swift.Interceptor.attach`. Methods and free functions alike are listed;
+metadata accessors, deinitializers and thunks are not. With no module in the
+filter the query walks every loaded module's symbols, so scope it when you can:
+
+```js
+for (const fn of Swift.enumerateFunctions("MyApp.*open*"))
+    console.log(fn.kind, fn.name);
+// function MyApp.Door.open() -> Swift.Bool
+// getter   MyApp.Door.isOpen.getter : Swift.Bool
+
+const [open] = Swift.enumerateFunctions("MyApp.Door.open(*");
+Swift.Interceptor.attach(open, { onLeave(ret) { console.log(ret); } });
 ```
 
 ## Types
