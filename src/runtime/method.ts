@@ -1932,7 +1932,7 @@ export function resolveFunction<Ret = CallResult | Promise<CallResult>, Args ext
   options: FunctionResolveOptions = {}
 ): SwiftFunction<Ret, Args> {
   const signature = parseFunctionSymbol(mangled);
-  return new SwiftFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self);
+  return hookableFunction(new SwiftFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self), signature);
 }
 
 export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
@@ -1944,7 +1944,11 @@ export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = 
   if (!signature.async) {
     throw new Error(`${signature.selector} is not async; use Swift.function`);
   }
-  return new SwiftAsyncFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self);
+  return hookableFunction(new SwiftAsyncFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self), signature);
+}
+
+function hookableFunction<T extends SwiftFunction<any, any>>(fn: T, signature: SwiftFunctionSignature): T {
+  return withHookTarget(fn, { address: fn.address, signature, witnessDispatched: false });
 }
 
 // A generic symbol is planned as a generic method is: its type arguments and witness tables trail

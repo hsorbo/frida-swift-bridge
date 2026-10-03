@@ -157,6 +157,35 @@ describe("Swift.function", () => {
     const swiftCore = Process.getModuleByName(SWIFTCORE_MODULE);
     expect(() => Swift.function(swiftCore, ADD_INTS)).toThrow(/no symbol \$s7fixture7addIntsyS2i_SitF in/);
   });
+  test("hooks directly: a function and an async function carry their signature to the interceptor", async () => {
+    const addInts = Swift.function(module, ADD_INTS);
+    let seen: unknown;
+    const listener = Swift.Interceptor.attach(addInts, {
+      onEnter(args) {
+        seen = args;
+      },
+    });
+    try {
+      expect(addInts.call(20, 22)).toEqual(int64(42));
+      expect(seen).toEqual([int64(20), int64(22)]);
+    } finally {
+      listener.detach();
+    }
+
+    const computeAsync = Swift.asyncFunction(module, COMPUTE_ASYNC);
+    let seenAsync: unknown;
+    const asyncListener = Swift.Interceptor.attachAsync(computeAsync, {
+      onEnter(args) {
+        seenAsync = args;
+      },
+    });
+    try {
+      expect(await computeAsync.call(21)).toEqual(int64(42));
+      expect(seenAsync).toEqual([int64(21)]);
+    } finally {
+      asyncListener.detach();
+    }
+  });
 });
 
 describe("Swift.function from a qualified selector", () => {
@@ -223,5 +252,39 @@ describe("Swift.function from a qualified selector", () => {
     expect(() => Swift.function("fixture.Nobody.move(to:)")).toThrow(/unknown type: fixture\.Nobody/);
     expect(() => Swift.function("fixture.Robot.teleport(to:)")).toThrow(/no member teleport\(to:\) on fixture\.Robot/);
     expect(() => Swift.function("addInts(_:_:)")).toThrow(/not a qualified selector/);
+  });
+  test("exposes the member's signature and hooks directly, sync and async", async () => {
+    const greet = Swift.function("fixture.Robot.greet");
+    expect(greet.signature.labels).toEqual([null]);
+    expect(greet.signature.argTypeNames).toEqual(["Swift.String"]);
+    expect(greet.signature.returnTypeName).toBe("Swift.String");
+    let seen: unknown;
+    const listener = Swift.Interceptor.attach(greet, {
+      onEnter(args) {
+        seen = args;
+      },
+    });
+    try {
+      expect(greet.call(robot("R2"), "X")).toBe("Hello X, I am R2");
+      expect(seen).toEqual(["X"]);
+    } finally {
+      listener.detach();
+    }
+
+    const addAsync = Swift.asyncFunction("fixture.AsyncCalc.addAsync(_:)");
+    expect(addAsync.signature.isAsync).toBe(true);
+    const calc = Swift.class("fixture.AsyncCalc")!.init(100);
+    let seenAsync: unknown;
+    const asyncListener = Swift.Interceptor.attachAsync(addAsync, {
+      onEnter(args) {
+        seenAsync = args;
+      },
+    });
+    try {
+      expect(await addAsync.call(calc, 5)).toEqual(int64(105));
+      expect(seenAsync).toEqual([int64(5)]);
+    } finally {
+      asyncListener.detach();
+    }
   });
 });

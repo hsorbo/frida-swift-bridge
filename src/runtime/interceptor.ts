@@ -39,8 +39,9 @@ import { findType } from "../reflection/registry.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject } from "./object-facade.js";
-import { CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod } from "./method.js";
+import { CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod, SwiftFunction } from "./method.js";
 import type { SwiftMember } from "./swift-type.js";
+import type { SwiftMemberFunction } from "./qualified-function.js";
 import type { ParsedSwiftSignature } from "./symbolication.js";
 import { SWIFTCC, FP_ARG_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
@@ -382,21 +383,21 @@ function carriedMetadata(
   return new Metadata(handle);
 }
 
-export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod;
+export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod | SwiftFunction | SwiftMemberFunction;
 
 interface HookEntry {
   address: NativePointer;
   parsed: ParsedSwiftSignature | null; // null: read off the symbol at the address
 }
 
-// A member carries the signature it was found with, so hooking it never symbolicates its address.
+// A member or function carries the signature it was found with, so hooking it never symbolicates its address.
 function hookEntry(target: HookableTarget): HookEntry {
   if (target instanceof NativePointer) {
     return { address: target, parsed: null };
   }
   const member = typeof target === "object" && target !== null ? hookTargetOf(target) : undefined;
   if (member === undefined) {
-    throw new Error("hook target must be an address, a member found through a type's reflection, or a bound method");
+    throw new Error("hook target must be an address, a member found through a type's reflection, a bound method, or a Swift.function");
   }
   if (member.witnessDispatched) {
     throw new Error(`${member.signature.kind === "function" ? member.signature.selector : "member"} is dispatched through a protocol witness; hook its address`);

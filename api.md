@@ -953,8 +953,9 @@ an unbound function that takes `self` as its first argument. The second
 argument is the usual options object (`{ argTypes }`, `{ returnType }`,
 `{ self }`, `{ typeArguments }`); when a type declares a type member and an
 instance member with the same selector, `{ static: true }` or
-`{ static: false }` picks one. `.address` is hookable whether or not the type
-is generic; a call then needs what the member needs.
+`{ static: false }` picks one. The result carries the member's `signature`
+and `origin`, and `Swift.Interceptor.attach` takes it directly whether or not
+the type is generic; a call then needs what the member needs.
 
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
@@ -962,7 +963,7 @@ Swift.function("MyApp.Robot.move(to:)").call(robot, 5);        // 5
 Swift.function("MyApp.Robot.make(name:)").call("R3");          // a Robot
 
 const deriveKey = Swift.function("CryptoKit.HKDF.deriveKey(inputKeyMaterial:outputByteCount:)");
-Swift.Interceptor.attach(deriveKey.address, { ... });
+Swift.Interceptor.attach(deriveKey, { ... });
 
 await Swift.asyncFunction("MyApp.AsyncCalc.addAsync(_:)").call(calc, 5);   // 105
 ```
@@ -1018,9 +1019,10 @@ exploded to objects, strings as JS strings, class returns and values holding
 references (an Array, say) as live facades, existentials projected to their
 dynamic value. A closure argument is its two words, `{ function, context }`.
 
-`target` is an address, a member found through a type's reflection, or a bound
-method (hooked as its member; the receiver it was bound to plays no part). An
-address is symbolicated to learn the signature; a member carries the signature
+`target` is an address, a member found through a type's reflection, a bound
+method (hooked as its member; the receiver it was bound to plays no part), or a
+function from `Swift.function` or `Swift.asyncFunction`. An address is
+symbolicated to learn the signature; a member or function carries the signature
 it was found with, so it needs no symbol at its address. The arguments arrive
 positionally; the member's labels name them:
 

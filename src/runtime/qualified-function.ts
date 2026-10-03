@@ -7,13 +7,16 @@ import {
   MemberOrigin,
   SwiftAsyncFunction,
   SwiftFunction,
+  SwiftMemberSignature,
   ValueMethodResolveOptions,
   findMember,
   isSwiftObject,
   lowerResolveOptions,
+  memberSignature,
   resolveAsyncFunction,
   resolveFunction,
   splitSelector,
+  withHookTarget,
 } from "./method.js";
 
 // A member named by its qualified selector, as a demangled symbol spells it. Like Swift's own
@@ -25,6 +28,7 @@ export interface SwiftMemberFunction {
   readonly isStatic: boolean;
   readonly isAsync: boolean;
   readonly origin: MemberOrigin;
+  readonly signature: SwiftMemberSignature;
   call(...args: CallArg[]): CallResult | Promise<CallResult>;
 }
 
@@ -98,14 +102,18 @@ export function qualifiedFunction(qualified: string, options: ValueMethodResolve
         }
         return self.$method(selector, { ...lookup, static: false }).call(...args);
       };
-  return {
-    address: found.address,
-    selector: found.selector,
-    isStatic: found.isStatic,
-    isAsync: found.async,
-    origin: found.origin,
-    call,
-  };
+  return withHookTarget(
+    {
+      address: found.address,
+      selector: found.selector,
+      isStatic: found.isStatic,
+      isAsync: found.async,
+      origin: found.origin,
+      signature: memberSignature(found.signature),
+      call,
+    },
+    { address: found.address, signature: found.signature, witnessDispatched: false }
+  );
 }
 
 export function qualifiedAsyncFunction(
