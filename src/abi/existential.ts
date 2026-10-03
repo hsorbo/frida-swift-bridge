@@ -285,6 +285,39 @@ export function projectErrorExistential(container: NativePointer): OpaqueExisten
   };
 }
 
+// Fills a container with a copy of a value of a conforming type: inline or boxed with its type for
+// the opaque representation, the retained reference for the class one, then the witness tables in
+// the metadata's protocol order. The container's own value witnesses destroy it.
+export function initializeExistentialWithCopy(
+  metadata: Metadata,
+  container: NativePointer,
+  type: Metadata,
+  src: NativePointer,
+  witnessTables: NativePointer[]
+): void {
+  const representation = existentialRepresentation(metadata);
+  if (representation === "error") {
+    throw new Error("initializeExistentialWithCopy: Error existentials are not supported");
+  }
+  let tables: NativePointer;
+  if (representation === "class") {
+    type.valueWitnesses.initializeWithCopy(container, src);
+    tables = container.add(Process.pointerSize);
+  } else {
+    const witnesses = type.valueWitnesses;
+    if (witnesses.isInlineStorage) {
+      witnesses.initializeWithCopy(container, src);
+    } else {
+      const [box, storage] = getSwiftCoreApi().swift_allocBox(type.handle);
+      witnesses.initializeWithCopy(storage, src);
+      container.writePointer(box);
+    }
+    container.add(TYPE_OFFSET).writePointer(type.handle);
+    tables = container.add(TYPE_OFFSET + Process.pointerSize);
+  }
+  witnessTables.forEach((table, i) => tables.add(i * Process.pointerSize).writePointer(table));
+}
+
 // ProtocolClassConstraint ABI value: Class = 0 (class-only), Any = 1.
 export function protocolClassConstraint(descriptor: ContextDescriptor): number {
   return (descriptor.flags >>> 16) & 0x1;

@@ -465,23 +465,17 @@ function metadataDescriptorOf(type: SwiftType): ContextDescriptor {
   return metadata.description;
 }
 
-// Not existential: the marshalled path cannot construct protocol-existential arguments nor safely
-// destroy an opaque existential return.
 export type NativeFunctionType = SwiftType | SwiftTypeFacade;
 
 export interface MarshalledFunctionOptions {
   throws?: boolean;
 }
 
-function concreteMetadataOf(type: NativeFunctionType, role: string): Metadata {
+function marshalledMetadataOf(type: NativeFunctionType, role: string): Metadata {
   if (!(type instanceof SwiftType) && !(type instanceof SwiftTypeFacade)) {
     throw new Error(`swiftFunction: ${role} is not a SwiftType`);
   }
-  const metadata = metadataOf(type);
-  if (metadata.kind === MetadataKind.Existential || metadata.kind === MetadataKind.ExtendedExistential) {
-    throw new Error(`swiftFunction: ${role} ${typeName(metadata)} is existential; only concrete types are supported`);
-  }
-  return metadata;
+  return metadataOf(type);
 }
 
 // Best-effort: an address with no exported symbol (stripped/private) is assumed to borrow its
@@ -506,8 +500,8 @@ export function swiftFunction(
   options: MarshalledFunctionOptions = {}
 ): (...args: CallArg[]) => CallResult {
   const { conventions, thrown } = symbolSignatureAt(address);
-  const argMetadata = argTypes.map((t, i) => concreteMetadataOf(t, `argument type ${i}`));
-  const returnMetadata = returnType === null ? null : concreteMetadataOf(returnType, "return type");
+  const argMetadata = argTypes.map((t, i) => marshalledMetadataOf(t, `argument type ${i}`));
+  const returnMetadata = returnType === null ? null : marshalledMetadataOf(returnType, "return type");
   const lowered = argMetadata.map((m, i) => (conventions[i] === "inout" ? indirect(m) : m));
   const raw = makeSwiftNativeFunction(address, returnMetadata, lowered, { throws: options.throws, errorType: thrown });
   return (...args: CallArg[]): CallResult =>

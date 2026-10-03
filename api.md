@@ -905,6 +905,12 @@ is invoked with `.call(...)`:
 
 ```js
 const app = Process.getModuleByName("MyApp");
+An existential type (`any P`, `any P & Q`) is reached through
+`ProtocolComposition` under `/abi`: `typeOf(composition.metadata)`. Such a
+result is projected to its dynamic value, as a method's is, and such an
+argument takes a value or object facade of a conforming type, boxed for the
+call and released after it.
+
 
 const addInts = Swift.function(app, "$s5MyApp7addIntsyS2i_SitF");
 addInts.call(20, 22);     // 42
@@ -1386,8 +1392,6 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
   with an element of generic, opaque layout is refused.
 - **Methods of generic types in `Swift.function`.** `Swift.function` plans a
   symbol's own generic parameters, not those of its enclosing type.
-- **Existential argument and result types in `Swift.swiftFunction`.** Both must
-  be concrete.
 - **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan,
   and on x86-64 any floating-point argument or result when Frida's CPU context
   does not carry the XMM registers.

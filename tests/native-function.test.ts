@@ -3,9 +3,45 @@ import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftObject, SwiftError, ClassType } from "../src/index.js";
 
-import { ClassInstance, metadataFor, typeOf } from "../src/abi.js";
+import { ClassInstance, ProtocolComposition, metadataFor, typeOf } from "../src/abi.js";
 describe("Swift.NativeFunction (marshalled)", () => {
   beforeEach(() => { loadFixture(); });
+
+  test("projects an existential return and boxes a conforming value or object into an existential argument", () => {
+    const String_ = typeOf(metadataFor("Swift.String")!);
+    const Greeter = typeOf(ProtocolComposition.fromSignature("fixture.Greeter").metadata);
+    const make = Swift.NativeFunction(fixtureExport("fixture.makeGreeterExistential"), Greeter, []);
+    expect(make()).toEqual({ name: "Ada" });
+    const greet = Swift.NativeFunction(fixtureExport("fixture.greetExistential"), String_, [Greeter]);
+    expect(greet(Swift.struct("fixture.PoliteGreeter")!.$new({ name: "Bea" }))).toBe("Hello, Bea");
+    const loud = Swift.class("fixture.LoudGreeter")!.init("Cy");
+    const view = new ClassInstance(loud.$handle);
+    const before = view.retainCount;
+    expect(greet(loud)).toBe("HEY Cy");
+    // The container's reference is released with the argument temp.
+    expect(view.retainCount).toBe(before);
+    expect(() => greet(Swift.class("fixture.Robot")!.init("R2"))).toThrow(/value, expected .*fixture\.Greeter/);
+    expect(() => greet({ name: "Dee" } as never)).toThrow(/takes a value or object facade/);
+  });
+
+  test("boxes a value too large for the inline buffer and a composition with one witness table per protocol", () => {
+    const String_ = typeOf(metadataFor("Swift.String")!);
+    const Greeter = typeOf(ProtocolComposition.fromSignature("fixture.Greeter").metadata);
+    const greet = Swift.NativeFunction(fixtureExport("fixture.greetExistential"), String_, [Greeter]);
+    const pair = Swift.struct("fixture.Pair<fixture.PoliteGreeter>")!.$new({ first: { name: "A" }, second: { name: "B" } });
+    expect(greet(pair)).toBe("Hello, A & Hello, B");
+    const GreeterAged = typeOf(ProtocolComposition.fromSignature("fixture.Greeter & fixture.Aged").metadata);
+    const describe = Swift.NativeFunction(fixtureExport("fixture.describeGreeterAged"), String_, [GreeterAged]);
+    expect(describe(Swift.struct("fixture.Person")!.$new({ name: "Cy", age: 9 }))).toBe("Hi, Cy (9)");
+    expect(() => describe(Swift.struct("fixture.PoliteGreeter")!.$new({ name: "Ada" }))).toThrow(/value, expected .*fixture\.Aged/);
+  });
+
+  test("boxes an object into a class-bound existential argument", () => {
+    const String_ = typeOf(metadataFor("Swift.String")!);
+    const Named = typeOf(ProtocolComposition.fromSignature("fixture.Named").metadata);
+    const label = Swift.NativeFunction(fixtureExport("fixture.labelOfNamed"), String_, [Named]);
+    expect(label(Swift.class("fixture.Widget")!.init("Bee"))).toBe("Bee");
+  });
 
   test("marshals JS ints through an add, returning a JS number", () => {
     const Int = typeOf(metadataFor("Swift.Int")!);

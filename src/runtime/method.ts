@@ -64,6 +64,9 @@ import {
   protocolClassConstraint,
   compareProtocolDescriptors,
   getExistentialTypeMetadata,
+  existentialProtocols,
+  existentialSuperclassConstraint,
+  initializeExistentialWithCopy,
 } from "../abi/existential.js";
 import { PrefixedExport, moduleKey, swiftExportsOfTokens, hasSwiftSymbolWithPrefix, initializerSymbols, initializerSymbolsWithPrefix } from "./symbol-index.js";
 import {
@@ -382,10 +385,41 @@ function assertClassAssignable(arg: ClassInstance, declared: Metadata): void {
   throw new Error(`argument is a ${typeName(arg.dynamicType)}, expected ${typeName(declared)}`);
 }
 
+// A conforming value or object facade is boxed into an existential argument; an existential value
+// facade copies like any other value.
+function boxIntoExistential(metadata: Metadata, container: NativePointer, arg: ValueInstance | ClassInstance): void {
+  const type = arg instanceof ValueInstance ? arg.metadata : new Metadata(arg.metadata.handle);
+  const witnessTables = existentialProtocols(metadata).map((protocol) => conformsToProtocol(type, protocol));
+  const superclass = existentialSuperclassConstraint(metadata);
+  if (witnessTables.includes(null) || (superclass !== null && !(arg instanceof ClassInstance))) {
+    throw new Error(`argument is a ${typeName(type)} value, expected ${typeName(metadata)}`);
+  }
+  if (superclass !== null) {
+    assertClassAssignable(arg as ClassInstance, superclass);
+  }
+  let src: NativePointer;
+  if (arg instanceof ValueInstance) {
+    arg.checkLive();
+    src = arg.handle;
+  } else {
+    src = Memory.alloc(Process.pointerSize);
+    src.writePointer(arg.handle);
+  }
+  initializeExistentialWithCopy(metadata, container, type, src, witnessTables as NativePointer[]);
+}
+
 function marshalArg(metadata: Metadata, value: CallArg): NativePointer {
   const arg = rawArg(value);
   const buffer = Memory.alloc(metadata.typeLayout.stride);
-  if (arg instanceof ValueInstance) {
+  const boxes =
+    metadata.kind === MetadataKind.Existential &&
+    !(arg instanceof ValueInstance && arg.metadata.handle.equals(metadata.handle));
+  if (boxes) {
+    if (!(arg instanceof ValueInstance) && !(arg instanceof ClassInstance)) {
+      throw new Error(`a ${typeName(metadata)} argument takes a value or object facade of a conforming type`);
+    }
+    boxIntoExistential(metadata, buffer, arg);
+  } else if (arg instanceof ValueInstance) {
     if (!arg.metadata.handle.equals(metadata.handle)) {
       throw new Error(`argument is a ${typeName(arg.metadata)} value, expected ${typeName(metadata)}`);
     }

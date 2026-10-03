@@ -495,6 +495,7 @@ public func storeNamed(_ p: UnsafeMutableRawPointer) {
 }
 
 public func makeNamed(_ label: String) -> any Named { Widget(label: label) }
+public func labelOfNamed(_ n: any Named) -> String { n.label }
 
 extension Box {
     public func labelOf<T: Named>(_ x: T) -> String { x.label }
