@@ -976,7 +976,7 @@ export function enumerateMethods(
   const methods: MethodInfo[] = [];
   const fullName = canonicalTypeName(typeName);
   const add = (c: MethodCandidate): void => {
-    const key = `${c.isStatic ? "s" : "i"}:${c.signature.selector}`;
+    const key = `${c.isStatic ? "s" : "i"}:${c.signature.selector}:${c.signature.argTypeNames.join(",")}->${c.signature.returnTypeName}`;
     if (seen.has(key)) {
       return;
     }

@@ -91,6 +91,12 @@ describe("Swift object intrinsics", () => {
     }
   });
 
+  test("$type.instanceMethods() lists each type-based overload of a selector", () => {
+    const selectors = robot("R2").$type.instanceMethods();
+    expect(selectors.filter((s) => s === "tagged(_:)").length).toBe(2);
+    expect(selectors.filter((s) => s === "pick()").length).toBe(3);
+  });
+
   test("$type lists instance and type selectors", () => {
     const o = robot("R2");
     expect(o.$type.instanceMethods()).toContain("greet(_:)");
