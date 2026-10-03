@@ -20,19 +20,31 @@ export interface MangledName {
 }
 
 export function symbolicMangledNameLength(base: NativePointer): number {
+  return scanSymbolicMangledName(base).length;
+}
+
+// The text past the last symbolic reference is where a storage operator can follow the type.
+function scanSymbolicMangledName(base: NativePointer): { length: number; trailingText: string } {
   let offset = 0;
+  let textStart = 0;
   let byte = base.readU8();
   while (byte !== 0) {
     if (byte >= 0x01 && byte <= 0x17) {
       offset += 4;
+      textStart = offset + 1;
     } else if (byte >= 0x18 && byte <= 0x1f) {
       offset += 8;
+      textStart = offset + 1;
     }
     offset += 1;
     byte = base.add(offset).readU8();
   }
-  return offset;
+  return { length: offset, trailingText: base.add(textStart).readUtf8String(offset - textStart) ?? "" };
 }
+
+export type ReferenceStorage = "weak" | "unowned" | "unmanaged";
+
+const REFERENCE_STORAGE_OPERATORS: Record<string, ReferenceStorage> = { Xw: "weak", Xo: "unowned", Xu: "unmanaged" };
 
 export class Field {
   constructor(readonly handle: NativePointer) {}
@@ -57,6 +69,17 @@ export class Field {
   get mangledTypeName(): MangledName | null {
     const ptr = RelativeDirectPointer.resolve(this.handle.add(OFFSETOF_FR_MANGLED_TYPE_NAME));
     return ptr === null ? null : { address: ptr, length: symbolicMangledNameLength(ptr) };
+  }
+
+  // A weak, unowned or unowned(unsafe) field's type mangles with a trailing storage operator that
+  // the runtime drops when resolving it, so the slot's layout is only told apart here.
+  get referenceStorage(): ReferenceStorage | null {
+    const ptr = RelativeDirectPointer.resolve(this.handle.add(OFFSETOF_FR_MANGLED_TYPE_NAME));
+    if (ptr === null) {
+      return null;
+    }
+    const { trailingText } = scanSymbolicMangledName(ptr);
+    return REFERENCE_STORAGE_OPERATORS[trailingText.slice(-2)] ?? null;
   }
 }
 

@@ -62,6 +62,7 @@ export interface SwiftCoreApi {
   swift_isUniquelyReferenced_native: NativeFunction<number, [NativePointerValue]>;
   swift_unknownObjectRetain: NativeFunction<NativePointer, [NativePointerValue]>;
   swift_unknownObjectRelease: NativeFunction<void, [NativePointerValue]>;
+  swift_weakLoadStrong: NativeFunction<NativePointer, [NativePointerValue]>;
   swift_isUniquelyReferenced_nonNull: NativeFunction<number, [NativePointerValue]>;
   swift_getObjectType: NativeFunction<NativePointer, [NativePointerValue]>;
   swift_getExistentialTypeMetadata: NativeFunction<
@@ -183,6 +184,11 @@ export function getSwiftCoreApi(): SwiftCoreApi {
     swift_unknownObjectRelease: new NativeFunction(
       lib.getExportByName(Process.platform === "darwin" ? "swift_unknownObjectRelease" : "swift_release"),
       "void",
+      ["pointer"]
+    ),
+    swift_weakLoadStrong: new NativeFunction(
+      lib.getExportByName(Process.platform === "darwin" ? "swift_unknownObjectWeakLoadStrong" : "swift_weakLoadStrong"),
+      "pointer",
       ["pointer"]
     ),
     swift_isUniquelyReferenced_nonNull: new NativeFunction(

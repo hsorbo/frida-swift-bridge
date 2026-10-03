@@ -761,6 +761,12 @@ A field view is borrowed: its lifetime is bounded by the parent instance. It is
 not itself a full facade — for owning/ABI operations on a field value, go
 through `/abi`.
 
+A `weak` stored property's slot is a weak reference, not the optional it is
+declared as: `$fields` loads it through the runtime (`{ some: handle }` while
+the referent lives, `"none"` once it is gone), and `$field` refuses it, since no
+borrowed view of the optional exists. `unowned` and `unowned(unsafe)` slots hold
+the object pointer and read as a plain reference.
+
 ## Protocols
 
 `Swift.Protocol.find(name)` looks a protocol up by name and returns `null` when

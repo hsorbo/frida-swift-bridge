@@ -136,6 +136,9 @@ export class ClassInstance implements RawInstance {
         if (f.type === null) {
           throw new Error(`ClassInstance.field: unresolved type for field ${name}`);
         }
+        if (f.storage === "weak") {
+          throw new Error(`ClassInstance.field: ${name} is weak storage, not a ${typeName(f.type)}; read it through read() or its getter`);
+        }
         return ValueInstance.borrow(f.type, f.address, this);
       }
     }

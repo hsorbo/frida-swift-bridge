@@ -1,5 +1,5 @@
 import { Metadata, MetadataKind } from "./metadata.js";
-import { enumerateFields, fieldTypeIn, resolveFieldType } from "./field-descriptor.js";
+import { enumerateFields, fieldTypeIn, resolveFieldType, ReferenceStorage } from "./field-descriptor.js";
 import { readEnumCase, projectEnumData, projectBox, setEnumTag } from "./enum.js";
 import { enumerateTupleElements } from "./tuple.js";
 import { readString, writeString } from "./string.js";
@@ -13,6 +13,7 @@ import {
 } from "./existential.js";
 import { ClassMetadata, classMetadataOf, enumerateClassFields } from "./class-metadata.js";
 import { typeName } from "../runtime/type-name.js";
+import { getSwiftCoreApi } from "../runtime/api.js";
 
 const STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET = 0x18;
 
@@ -20,6 +21,7 @@ export interface InstanceField {
   name: string;
   type: Metadata | null;
   address: NativePointer;
+  storage: ReferenceStorage | null;
 }
 
 export type SwiftValue =
@@ -262,7 +264,7 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
       }
       const value: { [field: string]: SwiftValue } = {};
       for (const field of enumerateInstanceFields(metadata, address)) {
-        value[field.name] = field.type === null ? null : readValue(field.type, field.address);
+        value[field.name] = readField(field);
       }
       return value;
     }
@@ -286,6 +288,26 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
     }
     default:
       return null;
+  }
+}
+
+// An unowned slot holds the object pointer itself; a weak one a WeakReference, read by loading a
+// strong reference, which is dropped again so the field reads as a snapshot like a strong one.
+export function readField({ type, address, storage }: InstanceField): SwiftValue {
+  if (type === null) {
+    return null;
+  }
+  if (storage !== "weak") {
+    return readValue(type, address);
+  }
+  const api = getSwiftCoreApi();
+  const strong = api.swift_weakLoadStrong(address);
+  try {
+    return readValue(type, Memory.alloc(Process.pointerSize).writePointer(strong));
+  } finally {
+    if (!strong.isNull()) {
+      api.swift_unknownObjectRelease(strong);
+    }
   }
 }
 
@@ -409,6 +431,7 @@ export function* enumerateClassInstanceFields(object: NativePointer): Generator<
         name: field.name,
         type: resolveFieldType(field, descriptor, genericArguments),
         address: object.add(offset),
+        storage: field.referenceStorage,
       };
     }
   }
@@ -416,8 +439,8 @@ export function* enumerateClassInstanceFields(object: NativePointer): Generator<
 
 export function readObject(object: NativePointer): { [field: string]: SwiftValue } {
   const value: { [field: string]: SwiftValue } = {};
-  for (const { name, type, address } of enumerateClassInstanceFields(object)) {
-    value[name] = type === null ? null : readValue(type, address);
+  for (const field of enumerateClassInstanceFields(object)) {
+    value[field.name] = readField(field);
   }
   return value;
 }
@@ -458,6 +481,7 @@ export function* enumerateInstanceFields(
       name: field.name,
       type: fieldTypeIn(metadata, field),
       address: address.add(offset),
+      storage: field.referenceStorage,
     };
     index++;
   }

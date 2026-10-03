@@ -1885,3 +1885,21 @@ public final class Projecting {
     @Doubled public var n: Int = 3
     public init() {}
 }
+
+// Reference storage: a weak slot holds a WeakReference (side-table pointer with flag bits), an
+// unowned one the object pointer with its unowned count held; the runtime resolves both fields'
+// mangled types to the referent's type.
+public final class Watcher {
+    public weak var delegate: Token?
+    public unowned let owner: Token
+    public unowned(unsafe) var unsafeOwner: Token
+    public var tag: Int
+    public init(owner: Token) { self.owner = owner; self.unsafeOwner = owner; self.tag = 1 }
+}
+public struct WeakSlot {
+    public weak var ref: Token?
+    public var n: Int
+    public init(ref: Token?, n: Int) { self.ref = ref; self.n = n }
+}
+public func makeWatcher(_ owner: Token) -> Watcher { Watcher(owner: owner) }
+public func makeWeakSlot(_ ref: Token?, _ n: Int) -> WeakSlot { WeakSlot(ref: ref, n: n) }
