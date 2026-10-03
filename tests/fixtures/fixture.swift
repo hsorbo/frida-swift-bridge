@@ -173,6 +173,28 @@ public struct Point {
     }
 }
 
+public final class Tally {
+    var raw: Int
+    public init(raw: Int) { self.raw = raw }
+    public var count: Int {
+        get { raw }
+        _modify { yield &raw }
+    }
+}
+
+public func bumpTracked() -> Int {
+    var p = Point(x: 5)
+    p.tracked += 3
+    return p.tracked
+}
+
+public let sharedTally = Tally(raw: 1)
+
+public func bumpTally() -> Int {
+    sharedTally.count += 41
+    return sharedTally.count
+}
+
 public struct Rect {
     public var width: Int
     public var scaled: Int {

@@ -114,6 +114,7 @@ interface CallShape {
   generics: GenericEnvironment;
   throws: boolean;
   receiver: Receiver | null;
+  coroutine?: true;
 }
 
 function planType(type: TypeExpr, genericParams: string[]): TypePlan {
@@ -361,7 +362,7 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
     case "setter":
       return { args: [member], ret: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
     default:
-      throw new Error(`cannot hook a 'modify' accessor (coroutine ABI): ${symbol.demangled}`);
+      return { args: [], ret: member, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: true };
   }
 }
 
@@ -803,6 +804,9 @@ interface SwiftInvocationState {
 
 function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
   const shape = callShape(target, options.self);
+  if (shape.coroutine) {
+    return attachModify(target, shape, callbacks);
+  }
   const { args, ret, generics: environment, throws } = shape;
   const genericParams = environment.params;
   const captureIndirect = returnIsIndirect(ret);
@@ -870,6 +874,170 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
       : undefined;
 
   return Interceptor.attach(target, { onEnter, onLeave });
+}
+
+interface ResumeEntry {
+  callbacks: SwiftInvocationCallbacks;
+  metadata: Metadata;
+  receiver: Receiver | null;
+  selfAddress: NativePointer;
+  selfMetadata: Metadata | null;
+  owner: Set<ResumeEntry>;
+  slot: ResumeSlot;
+}
+
+interface ResumeSlot {
+  continuation: NativePointer;
+  yielded: NativePointer;
+  entries: ResumeEntry[];
+}
+
+// A modify accessor is a yield-once coroutine: the ramp takes the caller's coroutine buffer as its
+// first argument and returns the continuation with the yielded address; the caller mutates through
+// that address, then resumes continuation(buffer, isUnwind). The resume is observed by handing the
+// caller a trampoline in the continuation's place, keyed by the buffer, which is live until resumed.
+// On arm64e the continuation is signed with the IA key, discriminated by the buffer's address
+// blended with the stable hash of the coroutine's yield convention, "yield_once:1:inout:".
+const MODIFY_CONTINUATION_DISCRIMINATOR = 0xf45;
+const pendingResumes = new Map<string, ResumeSlot>();
+const RESUME_TRAMPOLINE_SIZE = 0x80;
+let resumeTrampoline: NativePointer | null = null;
+let resumeBridge: NativeCallback<"pointer", ["pointer"]> | null = null;
+
+function getResumeTrampoline(): NativePointer {
+  if (resumeTrampoline !== null) {
+    return resumeTrampoline;
+  }
+  resumeBridge = new NativeCallback(function (this: CallbackContext, buffer: NativePointer): NativePointer {
+    const key = buffer.toString();
+    const slot = pendingResumes.get(key)!;
+    pendingResumes.delete(key);
+    const self = { context: this.context, returnAddress: this.returnAddress, threadId: Process.getCurrentThreadId() } as unknown as SwiftInvocationContext;
+    for (const entry of slot.entries) {
+      entry.owner.delete(entry);
+      // a throwing onLeave must not divert the native resume; isolate it and re-surface next tick
+      try {
+        if (entry.receiver !== null) {
+          exposeSelf(self, entry.receiver, entry.selfAddress, entry.selfMetadata);
+        }
+        entry.callbacks.onLeave!.call(self, decodeBorrowedValue(entry.metadata, slot.yielded));
+      } catch (e) {
+        setImmediate(() => {
+          throw e;
+        });
+      }
+    }
+    return slot.continuation;
+  }, "pointer", ["pointer"]);
+
+  const page = Memory.alloc(Process.pageSize);
+  Memory.patchCode(page, RESUME_TRAMPOLINE_SIZE, (slot) => {
+    if (ARCH === "arm64") {
+      const w = new Arm64Writer(slot, { pc: page });
+      w.putPushRegReg("x0", "x1");
+      w.putPushRegReg("x29", "x30");
+      w.putLdrRegAddress("x14", resumeBridge!);
+      w.putBlrReg("x14");
+      w.putMovRegReg("x16", "x0");
+      w.putPopRegReg("x29", "x30");
+      w.putPopRegReg("x0", "x1");
+      w.putBrRegNoAuth("x16");
+      w.flush();
+    } else {
+      const w = new X86Writer(slot, { pc: page });
+      w.putPushReg("rdi");
+      w.putPushReg("rsi");
+      w.putPushReg("rbp"); // 16-align rsp across the call
+      w.putMovRegAddress("r11", resumeBridge!);
+      w.putCallReg("r11");
+      w.putMovRegReg("r11", "rax");
+      w.putPopReg("rbp");
+      w.putPopReg("rsi");
+      w.putPopReg("rdi");
+      w.putJmpReg("r11");
+      w.flush();
+    }
+  });
+  resumeTrampoline = page;
+  return page;
+}
+
+interface ModifyInvocationState {
+  buffer?: NativePointer;
+  selfAddress?: NativePointer;
+  selfMetadata?: Metadata;
+}
+
+// A ramp whose frame needs no buffer never reads x0, which Frida then takes as the redirect's
+// scratch register, so the hook is told to use x16 to keep the buffer readable on enter.
+function rampTarget(target: NativePointer): NativePointerValue | InstrumentationTarget {
+  return ARCH === "arm64" ? { target, scratchRegister: "x16" } : target;
+}
+
+function attachModify(target: NativePointer, shape: CallShape, callbacks: SwiftInvocationCallbacks): InvocationListener {
+  const receiver = knownReceiver(shape, true);
+  const metadata = (shape.ret as { metadata: Metadata }).metadata;
+  const liveEntries = new Set<ResumeEntry>();
+
+  const onEnter = function (this: SwiftInvocationContext) {
+    const context = this.context;
+    const state = this as unknown as ModifyInvocationState;
+    const { values, trailingSelf, selfMetadata } = materializeArgs(context, shape.args, shape.generics, 1, receiver);
+    state.buffer = gpArg(context, 0);
+    state.selfAddress = trailingSelf ?? selfRegister(context);
+    if (selfMetadata !== null) {
+      state.selfMetadata = selfMetadata;
+    }
+    if (receiver !== null) {
+      exposeSelf(this, receiver, state.selfAddress, selfMetadata);
+    }
+    if (callbacks.onEnter !== undefined) {
+      callbacks.onEnter.call(this, values());
+    }
+  };
+
+  const onLeave =
+    callbacks.onLeave !== undefined
+      ? function (this: SwiftInvocationContext, continuation: InvocationReturnValue) {
+          const context = this.context;
+          const state = this as unknown as ModifyInvocationState;
+          const buffer = state.buffer!;
+          const key = buffer.toString();
+          let slot = pendingResumes.get(key);
+          if (slot === undefined) {
+            slot = { continuation: gpResult(context, 0).strip(), yielded: gpResult(context, 1), entries: [] };
+            pendingResumes.set(key, slot);
+            continuation.replace(getResumeTrampoline().sign("ia", buffer.blend(MODIFY_CONTINUATION_DISCRIMINATOR)));
+          }
+          const entry: ResumeEntry = {
+            callbacks,
+            metadata,
+            receiver,
+            selfAddress: state.selfAddress!,
+            selfMetadata: state.selfMetadata ?? null,
+            owner: liveEntries,
+            slot,
+          };
+          slot.entries.push(entry);
+          liveEntries.add(entry);
+        }
+      : undefined;
+
+  const listener = Interceptor.attach(rampTarget(target), { onEnter, onLeave });
+  return {
+    detach() {
+      listener.detach();
+      // Only the bridge may delete a slot; a resuming caller may already be dereferencing pendingResumes[key].
+      for (const entry of liveEntries) {
+        const entries = entry.slot.entries;
+        const i = entries.indexOf(entry);
+        if (i !== -1) {
+          entries.splice(i, 1);
+        }
+      }
+      liveEntries.clear();
+    },
+  };
 }
 
 export interface SwiftAsyncCallbacks {

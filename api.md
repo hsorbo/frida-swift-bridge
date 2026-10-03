@@ -960,6 +960,19 @@ Swift.Interceptor.attach(acc.$method("add").address, {
 });
 ```
 
+A `modify` accessor is a coroutine: it yields the property's address to the
+caller, which mutates in place and then resumes it. `onEnter` fires when the
+accessor is entered and `onLeave` when the caller resumes it, with the mutated
+value as `retval`; `this.self` is the receiver in both:
+
+```js
+const modify = Process.getModuleByName("fixture").getExportByName("$s7fixture5PointV7trackedSivM");
+Swift.Interceptor.attach(modify, {
+    onEnter() { console.log("before", this.self.x); },      // 5
+    onLeave(retval) { console.log("after", retval); },      // 8, after `p.tracked += 3`
+});
+```
+
 A small value type's `self` goes by address when the method mutates it and in
 the argument registers otherwise, and the symbol doesn't say which. The bridge
 reads the method's code as for [calls](#calling-methods). When the code doesn't

@@ -186,6 +186,46 @@ describe("SwiftInterceptor.attach", () => {
     expect(getterRet).toEqual({ some: int64(7) });
   });
 
+  test("hooks a modify accessor: self on enter, the mutated value on resume", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const selves: CallResult[] = [];
+    let seenArgs: SwiftValue[] | null = null;
+    let resumed: CallResult = null;
+    const listener = SwiftInterceptor.attach(fixtureExport("fixture.Point.tracked.modify"), {
+      onEnter(args) {
+        seenArgs = args;
+        selves.push(this.self!);
+      },
+      onLeave(ret) {
+        resumed = ret;
+        selves.push(this.self!);
+      },
+    });
+    const result = makeSwiftNativeFunction(fixtureExport("fixture.bumpTracked"), Int, [])() as NativePointer;
+    listener.detach();
+    expect(result.readS64()).toEqual(int64(8));
+    expect(seenArgs).toEqual([]);
+    expect(resumed).toEqual(int64(8));
+    expect(selves).toEqual([{ x: int64(5) }, { x: int64(8) }]);
+  });
+
+  test("hooks a modify accessor of a class property across its exclusivity access", () => {
+    const Int = metadataFor("Swift.Int")!;
+    let resumed: CallResult = null;
+    let seenSelf: CallResult = null;
+    const listener = SwiftInterceptor.attach(fixtureExport("fixture.Tally.count.modify"), {
+      onLeave(ret) {
+        resumed = ret;
+        seenSelf = this.self!;
+      },
+    });
+    const result = makeSwiftNativeFunction(fixtureExport("fixture.bumpTally"), Int, [])() as NativePointer;
+    listener.detach();
+    expect(result.readS64()).toEqual(int64(42));
+    expect(resumed).toEqual(int64(42));
+    expect((seenSelf as unknown as SwiftObject).count).toEqual(int64(42));
+  });
+
   test("recovers a generic scalar argument and return from the implicit metadata", () => {
     const Int = metadataFor("Swift.Int")!;
     const identity = fixtureExport("fixture.genericIdentity");
