@@ -23,7 +23,11 @@ describe("Swift.enumerateFunctions", () => {
 
     const level = matches.find((m) => m.name === "fixture.Gauge.level.getter : Swift.Int")!;
     expect(level.kind).toBe("getter");
-    expect(level.signature).toBeNull();
+    expect(level.signature.argTypeNames).toEqual([]);
+    expect(level.signature.returnTypeName).toBe("Swift.Int");
+    const setLevel = matches.find((m) => m.name === "fixture.Gauge.level.setter : Swift.Int")!;
+    expect(setLevel.signature.argTypeNames).toEqual(["Swift.Int"]);
+    expect(setLevel.signature.returnTypeName).toBeNull();
   });
 
   test("a glob over the demangled name spans every module", () => {

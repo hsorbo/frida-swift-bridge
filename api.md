@@ -210,8 +210,9 @@ Frida's resolver, so only the hits are realized:
 `Swift.enumerateFunctions(filter?)` takes the same `Module` or glob, matched
 against the demangled name of every function and accessor that has a Swift
 symbol. Each match has an `address`, its `module`, the demangled `name`, a
-`kind` (`function`, `getter`, `setter` or `modify`) and, for a function, the
-`signature` a member carries. A match goes straight into
+`kind` (`function`, `getter`, `setter` or `modify`) and the `signature` a
+member carries; a getter or modify yields the property's type and a setter
+takes it, as the hook's callbacks see them. A match goes straight into
 `Swift.Interceptor.attach`. Methods and free functions alike are listed;
 metadata accessors, deinitializers and thunks are not. With no module in the
 filter the query walks every loaded module's symbols, so scope it when you can:
