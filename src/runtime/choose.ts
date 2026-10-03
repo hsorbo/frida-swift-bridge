@@ -1,6 +1,6 @@
 import { ClassMetadata, OFFSETOF_SUPERCLASS, OFFSETOF_DESCRIPTION } from "../abi/class-metadata.js";
-import { Metadata } from "../abi/metadata.js";
-import { ContextDescriptorKind } from "../abi/context-descriptor.js";
+import { Metadata, MetadataKind } from "../abi/metadata.js";
+import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { LIBSWIFT_CORE_NAME } from "./platform.js";
 import { asSwiftObject, SwiftClassObject } from "./object-facade.js";
 import { SwiftClass } from "./type-facade.js";
@@ -73,6 +73,37 @@ function isInstanceBlock(address: NativePointer, instanceSize: number): boolean 
     );
   } catch {
     return false;
+  }
+}
+
+// Every metadata built so far for a generic declaration: each names the descriptor at a fixed word,
+// so one scan finds them all, validated by shape and by that word read back exactly. The runtime
+// builds them in writable memory; the compiler's prespecialized ones sit in read-only image data.
+export function specializedMetadataOf(descriptor: ContextDescriptor): Metadata[] {
+  const isClass = descriptor.kind === ContextDescriptorKind.Class;
+  const wordOffset = isClass ? OFFSETOF_DESCRIPTION : Process.pointerSize;
+  const data = Process.enumerateRanges("r--").filter((range) => !range.protection.includes("x"));
+  const seen = new Set<string>();
+  const found: Metadata[] = [];
+  for (const { address } of findWordsEqualTo(data, [descriptor.handle])) {
+    const candidate = address.sub(wordOffset);
+    const metadata = isClass ? classMetadataAt(candidate) : valueMetadataAt(candidate);
+    if (metadata === null || seen.has(candidate.toString()) || !address.readPointer().strip().equals(descriptor.handle)) {
+      continue;
+    }
+    seen.add(candidate.toString());
+    found.push(new Metadata(candidate));
+  }
+  return found;
+}
+
+function valueMetadataAt(address: NativePointer): Metadata | null {
+  try {
+    const metadata = new Metadata(address);
+    const kind = metadata.kind;
+    return kind === MetadataKind.Struct || kind === MetadataKind.Enum || kind === MetadataKind.Optional ? metadata : null;
+  } catch {
+    return null;
   }
 }
 

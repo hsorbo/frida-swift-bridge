@@ -147,6 +147,7 @@ const Keyed = Swift.type("MyApp.Keyed");              // the declaration
 const KeyedInt = Swift.type("MyApp.Keyed<Swift.Int>"); // a specialization
 KeyedInt.echo(21);                                     // 21
 Keyed.echo(21);                                        // throws: needs MyApp.Keyed's type arguments
+Keyed.$type.specializations().map(t => t.$type.name);  // ["MyApp.Keyed<Swift.Int>", ...]
 ```
 
 When you know the kind, the singular forms return it precisely typed:
@@ -318,6 +319,10 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
 - `info.properties(query?)`: the properties as `{ name, typeName, isStatic, writable }`;
   `query` is `{ deep? }`.
 - `info.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
+- `info.specializations()`: on a generic type named without its arguments, the
+  facades of every specialization built so far, the compiler's prespecialized
+  ones included, whether or not an instance lives. A memory scan answers each
+  call, like `Swift.choose`; nothing is cached.
 
 Listing is exploratory, so the lists stay shallow by default: the type's own
 module, with inherited members. `{ deep: true }` sweeps every loaded module for
@@ -445,11 +450,6 @@ const view = Swift.borrowObject(handle);
 view.$type.name;    // "MyApp.Robot"
 ```
 
-## Objects and values
-
-Both class and value instances are represented by a facade — a JS proxy that
-exposes Swift members directly and reserves the whole `$` prefix for its own
-controls, so an unknown `$` name reads as `undefined` without a lookup. A
 A live Objective-C object wraps the same way. Its type is the imported class
 (`"__C.NSURLSession"`), and `$method` or the bare-name sugar finds the Swift
 extension members declared on it or on any of its ObjC superclasses:
@@ -459,6 +459,11 @@ const session = Swift.borrowObject(ObjC.classes.NSURLSession.sharedSession());
 await session.$method("data(from:delegate:)").call(url, null);
 ```
 
+## Objects and values
+
+Both class and value instances are represented by a facade — a JS proxy that
+exposes Swift members directly and reserves the whole `$` prefix for its own
+controls, so an unknown `$` name reads as `undefined` without a lookup. A
 property wrapper's projected value, Swift's own `$`-name, is read with
 `$get("$x")`.
 `$kind` discriminates the two: `"object"` for classes, `"value"` for
@@ -900,6 +905,12 @@ const rename = Swift.NativeFunction(renameAddr, null, [Robot, String]);
 rename(robot, "new");     // null
 ```
 
+An existential type (`any P`, `any P & Q`) is reached through
+`ProtocolComposition` under `/abi`: `typeOf(composition.metadata)`. Such a
+result is projected to its dynamic value, as a method's is, and such an
+argument takes a value or object facade of a conforming type, boxed for the
+call and released after it.
+
 The only option the stable wrapper accepts is `{ throws: true }` for a Swift
 `throws` function (see [Errors](#errors)). Consuming (`__owned`) and `inout`
 parameters are handled as for methods when the address has a symbol; without
@@ -918,12 +929,6 @@ is invoked with `.call(...)`:
 
 ```js
 const app = Process.getModuleByName("MyApp");
-An existential type (`any P`, `any P & Q`) is reached through
-`ProtocolComposition` under `/abi`: `typeOf(composition.metadata)`. Such a
-result is projected to its dynamic value, as a method's is, and such an
-argument takes a value or object facade of a conforming type, boxed for the
-call and released after it.
-
 
 const addInts = Swift.function(app, "$s5MyApp7addIntsyS2i_SitF");
 addInts.call(20, 22);     // 42

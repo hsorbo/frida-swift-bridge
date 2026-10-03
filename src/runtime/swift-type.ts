@@ -6,6 +6,7 @@ import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
 import { parseSwiftSignature, symbolicate, resolveParsedType, resolveTypeExpr, resolveType, ParamConvention } from "./symbolication.js";
+import { specializedMetadataOf } from "./choose.js";
 import {
   SwiftBoundMethod,
   CallArg,
@@ -249,6 +250,14 @@ export abstract class NominalType extends SwiftType {
 
   protocols(): { [name: string]: Protocol } {
     return protocolsForType(descriptorOf(this).handle);
+  }
+
+  // A scan answers each call: the specializations built so far, whether or not any instance lives.
+  specializations(): SwiftTypeFacade[] {
+    if (!isUnboundGeneric(this)) {
+      throw new Error(`${this.name} is not a generic type named without its arguments`);
+    }
+    return specializedMetadataOf(descriptorOf(this)).map((metadata) => (typeOf(metadata) as NominalType).facade);
   }
 
   properties({ deep = false }: MemberQuery = {}): PropertyInfo[] {
