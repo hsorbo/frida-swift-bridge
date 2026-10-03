@@ -32,6 +32,7 @@ import type { StableProtocol, StableProtocolComposition } from "./runtime/protoc
 import { markResilientModule, markFrozenType } from "./runtime/calling-convention.js";
 import { resolveSwiftAsyncFunction, resolveSwiftFunction } from "./runtime/qualified-function.js";
 import { closure } from "./runtime/closure.js";
+import { choose, ChooseOptions } from "./runtime/choose.js";
 import { moduleRegistry, ModuleRegistry } from "./runtime/module-namespace.js";
 import { ContextDescriptor } from "./abi/context-descriptor.js";
 
@@ -118,6 +119,7 @@ export {
   AnyClosureBody,
 } from "./runtime/closure.js";
 export { SwiftSymbol } from "./runtime/symbolication.js";
+export type { ChooseOptions } from "./runtime/choose.js";
 export {
   SwiftInterceptorApi,
   SwiftInvocationCallbacks,
@@ -223,6 +225,10 @@ export const Swift = {
 
   adoptObject(handle: NativePointer): SwiftClassObject {
     return asSwiftObject(ClassInstance.adopt(handle));
+  },
+
+  choose(cls: SwiftClass, options?: ChooseOptions): SwiftClassObject[] {
+    return choose(cls, options);
   },
 
   NativeFunction: swiftFunction,

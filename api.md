@@ -97,6 +97,8 @@ The default export is the whole facade. Its members:
   [Closures](#closures).
 - `Swift.borrowObject(handle)`, `Swift.adoptObject(handle)`: wrap a raw class
   pointer as an object facade. See [Ownership and lifetime](#ownership-and-lifetime).
+- `Swift.choose(cls, options?)`: the live instances of a class, found by
+  scanning the heap. See [Finding live instances](#finding-live-instances).
 - `Swift.markResilient(moduleName)`: treat a module as built with library
   evolution, for one the bridge can't detect as such. See
   [Known limitations](#known-limitations).
@@ -459,6 +461,28 @@ other modules only for a name it did not find there, filtering symbols by name
 before demangling anything. Listing a facade (`Object.keys(robot)`, `in`)
 shows the defining module's members plus names already looked up; use
 `robot.$type.instanceMethods()` for the full list.
+
+### Finding live instances
+
+`Swift.choose(cls, options?)` returns the live instances of a class as borrowed
+object facades, sorted by address, like `ObjC.chooseSync`. `cls` is a class
+facade; `options.subclasses` (default `true`) also matches instances of its
+subclasses. A generic class named without its arguments covers every
+specialization instantiated so far.
+
+```js
+for (const robot of Swift.choose(Swift.class("MyApp.Robot")))
+    console.log(robot.$handle, robot.name);
+Swift.choose(Swift.class("MyApp.Robot"), { subclasses: false });
+Swift.choose(Swift.class("MyApp.Pool"));   // Pool<Int>, Pool<String>, ... instances
+```
+
+Classes only: values have no heap identity. The scan needs no executable
+memory, so it also works in a jailed process. Like
+`ObjC.choose`, it is a heap scan, not a registry: an object allocated outside
+malloc (a static object) is not found, and an unrelated allocation that begins
+with the class address can appear as a phantom instance. On Linux, where the
+allocator cannot be asked about a block, phantoms are somewhat likelier.
 
 ## Calling methods
 

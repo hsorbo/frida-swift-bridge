@@ -10,12 +10,12 @@ import { getClassMetadataBounds } from "./class-metadata-bounds.js";
 // every later field down by three words.
 const OBJC_INTEROP_PREFIX = Process.platform === "darwin" ? 0x18 : 0;
 
-const OFFSETOF_SUPERCLASS = 0x8;
+export const OFFSETOF_SUPERCLASS = 0x8;
 const OFFSETOF_DATA = 0x20; // Darwin only (isSwift bit)
 const OFFSETOF_FLAGS = 0x10 + OBJC_INTEROP_PREFIX;
 const OFFSETOF_INSTANCE_SIZE = 0x18 + OBJC_INTEROP_PREFIX;
 const OFFSETOF_INSTANCE_ALIGN_MASK = 0x1c + OBJC_INTEROP_PREFIX;
-const OFFSETOF_DESCRIPTION = 0x28 + OBJC_INTEROP_PREFIX;
+export const OFFSETOF_DESCRIPTION = 0x28 + OBJC_INTEROP_PREFIX;
 
 export const ROOT_CLASS_METADATA_SIZE = OFFSETOF_DESCRIPTION + 2 * Process.pointerSize;
 
