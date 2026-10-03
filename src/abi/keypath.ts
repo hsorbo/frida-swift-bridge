@@ -323,7 +323,7 @@ function nameForComponent(component: KeyPathComponent, container: Metadata): str
 }
 
 function protocolRequirementName(container: Metadata, id: NativePointer): string | null {
-  if (container.kind !== MetadataKind.Existential) {
+  if (container.kind !== MetadataKind.Existential && container.kind !== MetadataKind.ExtendedExistential) {
     return null;
   }
   const protocols = existentialProtocols(container);

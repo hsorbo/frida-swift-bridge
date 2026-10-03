@@ -1290,11 +1290,17 @@ public enum ObjCBoxes {
 public protocol Holder<Item> {
     associatedtype Item
     var item: Item { get }
+    var tag: Int { get }
 }
 public struct IntHolder: Holder {
     public var item: Int
+    public var tag: Int { item * 2 }
     public init(item: Int) { self.item = item }
 }
+// A key path to a requirement whose type mentions Item crashes the compiler, so the root's
+// extended-existential shape is exercised through the concretely typed tag.
+private let keyPathHolderTagValue: AnyKeyPath = \(any Holder<Int>).tag
+public func keyPathHolderTag() -> UnsafeRawPointer { unsafeBitCast(keyPathHolderTagValue, to: UnsafeRawPointer.self) }
 public func holderIntType() -> UnsafeRawPointer { unsafeBitCast((any Holder<Int>).self as Any.Type, to: UnsafeRawPointer.self) }
 public func storeHolderInt(_ p: UnsafeMutableRawPointer) {
     p.assumingMemoryBound(to: (any Holder<Int>).self).initialize(to: IntHolder(item: 42))

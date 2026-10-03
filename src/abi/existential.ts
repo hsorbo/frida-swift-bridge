@@ -5,9 +5,11 @@ import {
   GenericRequirementKind,
   readGenericRequirementDescriptors,
 } from "./generic-requirement-descriptor.js";
+import { MangledName } from "./field-descriptor.js";
 import { dynamicTypeOf } from "./class-metadata.js";
 import { metatypeInstanceType } from "./metatype.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
+import { RelativeDirectPointer } from "../basic/relative-pointer.js";
 
 const FLAGS_OFFSET = Process.pointerSize;
 const NUM_PROTOCOLS_OFFSET = Process.pointerSize + 4;
@@ -34,6 +36,9 @@ const GENERALIZATION_ARGUMENTS_OFFSET = 2 * Process.pointerSize;
 // Self is opened one depth below the generalization parameters: τ_1_0, or τ_0_0 when there are none.
 const OPENED_SELF_BEHIND_GENERALIZATION = "qd__";
 const OPENED_SELF_ALONE = "x";
+const ASSOCIATED_TYPE_OF_OPENED_SELF = "Qyd__";
+const SYMBOLIC_REFERENCE_DIRECT = 0x01;
+const SYMBOLIC_REFERENCE_INDIRECT = 0x02;
 
 export type ExistentialRepresentation = "opaque" | "class" | "error";
 
@@ -122,6 +127,72 @@ export function extendedExistentialGeneralizationArguments(metadata: Metadata): 
     result.push(new Metadata(args.add(i * Process.pointerSize).readPointer()));
   }
   return result;
+}
+
+export interface BoundAssociatedType {
+  name: string;
+  protocol: ContextDescriptor | null;
+  type: Metadata;
+}
+
+// The generalization arguments of any P<A, B>, each paired with the associated type its
+// same-type requirement (τ_0_i == Self.Name) binds it to.
+export function extendedExistentialBoundAssociatedTypes(metadata: Metadata): BoundAssociatedType[] {
+  const args = extendedExistentialGeneralizationArguments(metadata);
+  const bound: BoundAssociatedType[] = [];
+  for (const requirement of extendedExistentialRequirementSignature(metadata)) {
+    if (requirement.kind !== GenericRequirementKind.SameType || requirement.sameTypeName === null) {
+      continue;
+    }
+    const index = generalizationParamIndex(requirement.param);
+    const associated = openedSelfAssociatedType(requirement.sameTypeName);
+    if (index !== null && index < args.length && associated !== null) {
+      bound.push({ ...associated, type: args[index] });
+    }
+  }
+  return bound;
+}
+
+// x is τ_0_0; q_ is τ_0_1; q<n>_ is τ_0_(n+2).
+function generalizationParamIndex({ address, length }: MangledName): number | null {
+  const text = address.readUtf8String(length)!;
+  if (text === "x") {
+    return 0;
+  }
+  const match = /^q(\d*)_$/.exec(text);
+  if (match === null) {
+    return null;
+  }
+  return match[1] === "" ? 1 : Number(match[1]) + 2;
+}
+
+// <identifier> <symbolic protocol reference> Qy d__: the named associated type of the opened Self.
+function openedSelfAssociatedType({ address, length }: MangledName): { name: string; protocol: ContextDescriptor | null } | null {
+  let nameLength = 0;
+  let cursor = 0;
+  for (; cursor < length; cursor++) {
+    const byte = address.add(cursor).readU8();
+    if (byte < 0x30 || byte > 0x39) {
+      break;
+    }
+    nameLength = nameLength * 10 + (byte - 0x30);
+  }
+  if (cursor === 0 || nameLength === 0) {
+    return null;
+  }
+  const name = address.add(cursor).readUtf8String(nameLength)!;
+  cursor += nameLength;
+  const referenceKind = address.add(cursor).readU8();
+  let protocol: ContextDescriptor | null = null;
+  if (referenceKind === SYMBOLIC_REFERENCE_DIRECT || referenceKind === SYMBOLIC_REFERENCE_INDIRECT) {
+    const target = RelativeDirectPointer.resolve(address.add(cursor + 1));
+    if (target !== null) {
+      protocol = new ContextDescriptor(referenceKind === SYMBOLIC_REFERENCE_INDIRECT ? target.readPointer().strip() : target);
+    }
+    cursor += 1 + RELATIVE_POINTER_SIZE;
+  }
+  const tail = address.add(cursor).readUtf8String(length - cursor);
+  return tail === ASSOCIATED_TYPE_OF_OPENED_SELF ? { name, protocol } : null;
 }
 
 function extendedExistentialProtocols(metadata: Metadata): ContextDescriptor[] {

@@ -12,6 +12,7 @@ import {
   existentialProtocols,
   extendedExistentialRequirementSignature,
   extendedExistentialGeneralizationArguments,
+  extendedExistentialBoundAssociatedTypes,
 } from "../src/abi.js";
 import { MetadataKind } from "../src/abi/metadata.js";
 import { MetatypeType, typeOf } from "../src/runtime/swift-type.js";
@@ -87,6 +88,18 @@ describe("extended existential shape", () => {
     expect(signature.map((r) => r.kind)).toEqual([GenericRequirementKind.SameType, GenericRequirementKind.Protocol]);
     expect(signature[0].sameTypeName).not.toBeNull();
     expect(signature[1].protocol!.fullTypeName).toBe("fixture.Holder");
+  });
+
+  test("pairs each generalization argument with the associated type it binds", (ctx) => {
+    requireSwift();
+    const describe = (m: Metadata) =>
+      extendedExistentialBoundAssociatedTypes(m).map((b) => [b.name, b.protocol?.fullTypeName, typeName(b.type)]);
+    expect(describe(existentialMetadata("fixture.holderIntType"))).toEqual([["Item", "fixture.Holder", "Swift.Int"]]);
+    expect(describe(existentialMetadata("fixture.refIntType"))).toEqual([["T", "fixture.Ref", "Swift.Int"]]);
+    if (loadFixture().findExportByName("$s7fixture19hashedBoxHolderTypeSVyF") === null) {
+      ctx.skip("fixture compiled without class & parameterized-protocol compositions (Swift < 6.2)");
+    }
+    expect(describe(existentialMetadata("fixture.hashedBoxHolderType"))).toEqual([["Item", "fixture.Holder", "Swift.String"]]);
   });
 
   test("separates a generic superclass's arguments and conformances from Self's protocols", (ctx) => {

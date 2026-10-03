@@ -12,6 +12,7 @@ import { typeName } from "../src/runtime/type-name.js";
 import { Swift } from "../src/index.js";
 
 import { metadataFor } from "../src/abi.js";
+import { MetadataKind } from "../src/abi/metadata.js";
 function keyPath(accessor: string, mod: Module = loadFixture()): NativePointer {
   return new NativeFunction(fixtureExport(accessor, mod), "pointer", [])() as NativePointer;
 }
@@ -199,6 +200,15 @@ describe("resolveKeyPathNames › protocol requirements", () => {
     const label = readKeyPathBuffer(keyPath("fixturesyms.keyPathNamedLabel", mod));
     const root = existentialMetadata("fixturesyms.namedType", mod);
     expect(resolveKeyPathNames(label.components, root)).toEqual(["label"]);
+  });
+
+  test("names a property on a parameterized-protocol existential root (any Holder<Int>)", () => {
+    const mod = loadFixtureSyms();
+    const tag = readKeyPathBuffer(keyPath("fixturesyms.keyPathHolderTag", mod));
+    expect((tag.components[0] as ComputedKeyPathComponent).idKind).toBe("vtableOffset");
+    const root = existentialMetadata("fixturesyms.holderIntType", mod);
+    expect(root.kind).toBe(MetadataKind.ExtendedExistential);
+    expect(resolveKeyPathNames(tag.components, root)).toEqual(["tag"]);
   });
 
   test("leaves the requirement unnamed when the root is a multi-protocol composition", () => {

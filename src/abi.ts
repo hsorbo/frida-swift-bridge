@@ -127,6 +127,8 @@ export {
   existentialProtocols,
   extendedExistentialRequirementSignature,
   extendedExistentialGeneralizationArguments,
+  extendedExistentialBoundAssociatedTypes,
+  BoundAssociatedType,
 } from "./abi/existential.js";
 export { ValueInstance } from "./abi/value.js";
 export { ClassInstance, VTableInvokeSignature } from "./abi/heap-object.js";
