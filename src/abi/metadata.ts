@@ -31,7 +31,26 @@ const OFFSETOF_CLASS_GENERIC_HEADER = 0x34;
 const OFFSETOF_EXTENSION_GENERIC_HEADER = 0xc;
 const OFFSETOF_ANONYMOUS_GENERIC_HEADER = 0x8;
 const OFFSETOF_OPAQUE_TYPE_GENERIC_HEADER = 0x8;
-const OFFSETOF_NUM_KEY_ARGUMENTS = 0x4;
+const OFFSETOF_GENERIC_HEADER_NUM_REQUIREMENTS = 0x2;
+const OFFSETOF_GENERIC_HEADER_NUM_KEY_ARGUMENTS = 0x4;
+const OFFSETOF_GENERIC_HEADER_FLAGS = 0x6;
+export const GENERIC_CONTEXT_HEADER_SIZE = 0x8;
+
+export interface GenericContextHeader {
+  numParams: number;
+  numRequirements: number;
+  numKeyArguments: number;
+  flags: number;
+}
+
+export function readGenericContextHeader(header: NativePointer): GenericContextHeader {
+  return {
+    numParams: header.readU16(),
+    numRequirements: header.add(OFFSETOF_GENERIC_HEADER_NUM_REQUIREMENTS).readU16(),
+    numKeyArguments: header.add(OFFSETOF_GENERIC_HEADER_NUM_KEY_ARGUMENTS).readU16(),
+    flags: header.add(OFFSETOF_GENERIC_HEADER_FLAGS).readU16(),
+  };
+}
 
 export interface TypeLayout {
   size: number;
@@ -110,9 +129,7 @@ export function getGenericMetadata(
   descriptor: ContextDescriptor,
   typeArguments: Metadata[]
 ): Metadata {
-  const header = genericHeader(descriptor);
-  const numParams = header.readU16();
-  const numKeyArguments = header.add(OFFSETOF_NUM_KEY_ARGUMENTS).readU16();
+  const { numParams, numKeyArguments } = readGenericContextHeader(genericHeader(descriptor));
   if (typeArguments.length !== numParams) {
     throw new Error(`expected ${numParams} type argument(s), got ${typeArguments.length}`);
   }
@@ -128,7 +145,7 @@ export function instantiateGenericMetadata(
   descriptor: ContextDescriptor,
   keyArguments: NativePointer[]
 ): Metadata {
-  const numKeyArguments = genericHeader(descriptor).add(OFFSETOF_NUM_KEY_ARGUMENTS).readU16();
+  const { numKeyArguments } = readGenericContextHeader(genericHeader(descriptor));
   if (keyArguments.length !== numKeyArguments) {
     throw new Error(`expected ${numKeyArguments} key argument(s), got ${keyArguments.length}`);
   }

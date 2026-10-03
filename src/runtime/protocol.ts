@@ -13,6 +13,7 @@ import {
 } from "../abi/existential.js";
 import {
   ProtocolRequirement,
+  numProtocolRequirements,
   readProtocolRequirements,
   readRequirementSignature,
 } from "../abi/protocol-descriptor.js";
@@ -20,8 +21,6 @@ import { NamedRequirement, namedProtocolRequirements } from "./method.js";
 import { GenericRequirementDescriptor } from "../abi/generic-requirement-descriptor.js";
 import { WitnessTable } from "../abi/witness-table.js";
 import { NominalType, typeFromDescriptor } from "./swift-type.js";
-
-const OFFSETOF_NUM_REQUIREMENTS = 0x10;
 
 // The stable root's view of a protocol: identity plus conformer enumeration. Raw requirement,
 // witness-table, and descriptor inspection stay on the full class, reachable only through /abi.
@@ -69,7 +68,7 @@ export class Protocol implements StableProtocol {
   }
 
   get numRequirements(): number {
-    return this.descriptor.handle.add(OFFSETOF_NUM_REQUIREMENTS).readU32();
+    return numProtocolRequirements(this.descriptor);
   }
 
   get requirements(): ProtocolRequirement[] {

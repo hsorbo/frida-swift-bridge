@@ -1,6 +1,6 @@
 import { Metadata, MetadataKind, getMetadata } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
-import { ClassMetadata } from "../abi/class-metadata.js";
+import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
 import { readVTableChain } from "../abi/class-descriptor.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { asSwiftObject, SwiftObject, SwiftValueObject, SwiftField, RAW } from "./object-facade.js";
@@ -280,7 +280,7 @@ function rawArg(value: CallArg): CallArg | ClassInstance | ValueInstance {
 
 function assertClassAssignable(arg: ClassInstance, declared: Metadata): void {
   const declaredClass =
-    declared.kind === MetadataKind.ObjCClassWrapper ? declared.handle.add(Process.pointerSize).readPointer().strip() : declared.handle;
+    declared.kind === MetadataKind.ObjCClassWrapper ? objcClassOf(declared) : declared.handle;
   for (let cls: ClassMetadata | null = arg.metadata; cls !== null; cls = cls.superclass) {
     if (cls.handle.equals(declaredClass)) {
       return;

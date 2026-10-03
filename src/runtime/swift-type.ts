@@ -1,6 +1,6 @@
 import { Metadata, MetadataKind, getMetadata } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
-import { ClassMetadata } from "../abi/class-metadata.js";
+import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
 import { isActor, isDefaultActor } from "../abi/class-descriptor.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
@@ -284,7 +284,7 @@ export class ClassType extends NominalType {
 
 export class ObjCClassWrapperType extends SwiftType {
   get objcClass(): NativePointer {
-    return metadataOf(this).handle.add(Process.pointerSize).readPointer().strip();
+    return objcClassOf(metadataOf(this));
   }
 }
 

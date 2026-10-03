@@ -1,4 +1,4 @@
-import { Metadata, MetadataKind } from "./metadata.js";
+import { Metadata, MetadataKind, readGenericContextHeader, GENERIC_CONTEXT_HEADER_SIZE } from "./metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "./context-descriptor.js";
 import {
   GenericRequirementDescriptor,
@@ -27,8 +27,6 @@ const SHAPE_HAS_IMPLICIT_REQ_SIG_PARAMS = 0x800;
 const SHAPE_HAS_IMPLICIT_GEN_SIG_PARAMS = 0x1000;
 const SHAPE_REQ_SIG_HEADER_OFFSET = 0x8;
 const SHAPE_GEN_SIG_HEADER_OFFSET = 0x10;
-const GENERIC_HEADER_SIZE = 0x8;
-const GENERIC_HEADER_NUM_REQUIREMENTS_OFFSET = 0x2;
 const RELATIVE_POINTER_SIZE = 4;
 const GENERALIZATION_ARGUMENTS_OFFSET = 2 * Process.pointerSize;
 
@@ -86,19 +84,18 @@ function hasGeneralizationSignature(shape: NativePointer): boolean {
 }
 
 function numGeneralizationParams(shape: NativePointer): number {
-  return hasGeneralizationSignature(shape) ? shape.add(SHAPE_GEN_SIG_HEADER_OFFSET).readU16() : 0;
+  return hasGeneralizationSignature(shape) ? readGenericContextHeader(shape.add(SHAPE_GEN_SIG_HEADER_OFFSET)).numParams : 0;
 }
 
 export function extendedExistentialRequirementSignature(metadata: Metadata): GenericRequirementDescriptor[] {
   const shape = extendedExistentialShape(metadata);
   const flags = shape.readU32();
-  const numReqSigParams = shape.add(SHAPE_REQ_SIG_HEADER_OFFSET).readU16();
-  const numReqSigRequirements = shape
-    .add(SHAPE_REQ_SIG_HEADER_OFFSET + GENERIC_HEADER_NUM_REQUIREMENTS_OFFSET)
-    .readU16();
+  const { numParams: numReqSigParams, numRequirements: numReqSigRequirements } = readGenericContextHeader(
+    shape.add(SHAPE_REQ_SIG_HEADER_OFFSET)
+  );
   let offset = SHAPE_GEN_SIG_HEADER_OFFSET;
   if (hasGeneralizationSignature(shape)) {
-    offset += GENERIC_HEADER_SIZE;
+    offset += GENERIC_CONTEXT_HEADER_SIZE;
   }
   if ((flags & SHAPE_HAS_TYPE_EXPRESSION) !== 0) {
     offset += RELATIVE_POINTER_SIZE;

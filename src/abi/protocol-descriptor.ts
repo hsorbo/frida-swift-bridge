@@ -40,6 +40,10 @@ const KIND_MASK = 0x0f;
 const IS_INSTANCE = 0x10;
 const IS_ASYNC = 0x20;
 
+export function numProtocolRequirements(descriptor: ContextDescriptor): number {
+  return descriptor.handle.add(OFFSETOF_NUM_REQUIREMENTS).readU32();
+}
+
 export function readProtocolRequirements(descriptor: ContextDescriptor): ProtocolRequirement[] {
   if (descriptor.kind !== ContextDescriptorKind.Protocol) {
     throw new Error("readProtocolRequirements: descriptor is not a protocol");
@@ -47,7 +51,7 @@ export function readProtocolRequirements(descriptor: ContextDescriptor): Protoco
 
   const base = descriptor.handle;
   const numRequirementsInSignature = base.add(OFFSETOF_NUM_REQUIREMENTS_IN_SIGNATURE).readU32();
-  const numRequirements = base.add(OFFSETOF_NUM_REQUIREMENTS).readU32();
+  const numRequirements = numProtocolRequirements(descriptor);
   const requirementsBase = base.add(
     OFFSETOF_REQUIREMENT_SIGNATURE + numRequirementsInSignature * GENERIC_REQUIREMENT_DESCRIPTOR_SIZE
   );

@@ -1,9 +1,17 @@
 import { ContextDescriptor } from "./context-descriptor.js";
-import { Metadata, MetadataKind, instantiateGenericMetadata, genericHeaderOffset } from "./metadata.js";
+import {
+  Metadata,
+  MetadataKind,
+  instantiateGenericMetadata,
+  genericHeaderOffset,
+  readGenericContextHeader,
+  GENERIC_CONTEXT_HEADER_SIZE,
+} from "./metadata.js";
 import { conformsToProtocol } from "./protocol-conformance.js";
 import { resolveTypeByMangledName } from "./field-descriptor.js";
 import { isObjCExistential } from "./existential.js";
 import {
+  GENERIC_REQUIREMENT_DESCRIPTOR_SIZE,
   GenericRequirementDescriptor,
   GenericRequirementKind,
   GenericRequirementLayoutKind,
@@ -13,16 +21,9 @@ import { getSwiftCoreApi } from "../runtime/api.js";
 import { ValueWitnessTable } from "./value-witness.js";
 import { RelativeDirectPointer, RelativeIndirectablePointer } from "../basic/relative-pointer.js";
 
-const OFFSETOF_NUM_REQUIREMENTS = 0x2;
-const OFFSETOF_NUM_KEY_ARGUMENTS = 0x4;
-const OFFSETOF_HEADER_FLAGS = 0x6;
-const OFFSETOF_GENERIC_PARAMS = 0x8;
-
 const FLAG_HAS_KEY_ARGUMENT = 0x80;
 const GENERIC_PARAM_KIND_MASK = 0x3f;
 const GENERIC_PARAM_KIND_TYPE = 0x0;
-
-const REQUIREMENT_SIZE = 0xc;
 
 const FLAG_HAS_TYPE_PACKS = 0x1;
 const FLAG_HAS_CONDITIONAL_INVERTED_PROTOCOLS = 0x2;
@@ -57,11 +58,9 @@ function popcount16(bits: number): number {
 export function genericContextEnd(descriptor: ContextDescriptor): number {
   const base = genericHeaderOffset(descriptor);
   const handle = descriptor.handle;
-  const numParams = handle.add(base).readU16();
-  const numRequirements = handle.add(base + OFFSETOF_NUM_REQUIREMENTS).readU16();
-  const flags = handle.add(base + OFFSETOF_HEADER_FLAGS).readU16();
-  const paramsOffset = base + OFFSETOF_GENERIC_PARAMS;
-  let offset = genericRequirementsOffset(paramsOffset, numParams) + numRequirements * REQUIREMENT_SIZE;
+  const { numParams, numRequirements, flags } = readGenericContextHeader(handle.add(base));
+  const paramsOffset = base + GENERIC_CONTEXT_HEADER_SIZE;
+  let offset = genericRequirementsOffset(paramsOffset, numParams) + numRequirements * GENERIC_REQUIREMENT_DESCRIPTOR_SIZE;
 
   if ((flags & FLAG_HAS_TYPE_PACKS) !== 0) {
     const numPacks = handle.add(offset).readU16();
@@ -78,7 +77,7 @@ export function genericContextEnd(descriptor: ContextDescriptor): number {
         : handle.add(offset + (numCounts - 1) * SIZEOF_CONDITIONAL_REQUIREMENT_COUNT).readU16();
     offset += numCounts * SIZEOF_CONDITIONAL_REQUIREMENT_COUNT;
     offset = (offset + 3) & ~3;
-    offset += totalRequirements * REQUIREMENT_SIZE;
+    offset += totalRequirements * GENERIC_REQUIREMENT_DESCRIPTOR_SIZE;
   }
 
   if ((flags & FLAG_HAS_VALUES) !== 0) {
@@ -92,9 +91,8 @@ export function genericContextEnd(descriptor: ContextDescriptor): number {
 export function genericRequirements(descriptor: ContextDescriptor): GenericRequirementDescriptor[] {
   const base = genericHeaderOffset(descriptor);
   const handle = descriptor.handle;
-  const numParams = handle.add(base).readU16();
-  const numRequirements = handle.add(base + OFFSETOF_NUM_REQUIREMENTS).readU16();
-  const paramsOffset = base + OFFSETOF_GENERIC_PARAMS;
+  const { numParams, numRequirements } = readGenericContextHeader(handle.add(base));
+  const paramsOffset = base + GENERIC_CONTEXT_HEADER_SIZE;
   const requirementsOffset = genericRequirementsOffset(paramsOffset, numParams);
   return readGenericRequirementDescriptors(handle.add(requirementsOffset), numRequirements);
 }
@@ -111,16 +109,16 @@ export function hasFixedLayoutInGenericContext(descriptor: ContextDescriptor): b
 // One entry per generic parameter in scope, the enclosing contexts' first.
 export function genericParamsAreKey(descriptor: ContextDescriptor): boolean[] {
   const base = genericHeaderOffset(descriptor);
-  const numParams = descriptor.handle.add(base).readU16();
+  const { numParams } = readGenericContextHeader(descriptor.handle.add(base));
   return Array.from(
     { length: numParams },
-    (_, i) => (descriptor.handle.add(base + OFFSETOF_GENERIC_PARAMS + i).readU8() & FLAG_HAS_KEY_ARGUMENT) !== 0
+    (_, i) => (descriptor.handle.add(base + GENERIC_CONTEXT_HEADER_SIZE + i).readU8() & FLAG_HAS_KEY_ARGUMENT) !== 0
   );
 }
 
 export function keyGenericArguments(metadata: Metadata): { typeArguments: Metadata[]; witnessTables: NativePointer[] } {
   const descriptor = metadata.description;
-  const numKeyArguments = descriptor.handle.add(genericHeaderOffset(descriptor) + OFFSETOF_NUM_KEY_ARGUMENTS).readU16();
+  const { numKeyArguments } = readGenericContextHeader(descriptor.handle.add(genericHeaderOffset(descriptor)));
   const numKeyParams = genericParamsAreKey(descriptor).filter((isKey) => isKey).length;
   const keyArguments: NativePointer[] = [];
   for (let i = 0; i < numKeyArguments; i++) {
@@ -138,13 +136,12 @@ export function buildGenericMetadata(
 ): Metadata {
   const base = genericHeaderOffset(descriptor); // throws for non-generic / unsupported kinds
   const handle = descriptor.handle;
-  const numParams = handle.add(base).readU16();
-  const numRequirements = handle.add(base + OFFSETOF_NUM_REQUIREMENTS).readU16();
+  const { numParams, numRequirements } = readGenericContextHeader(handle.add(base));
   if (typeArguments.length !== numParams) {
     throw new Error(`expected ${numParams} type argument(s), got ${typeArguments.length}`);
   }
 
-  const paramsOffset = base + OFFSETOF_GENERIC_PARAMS;
+  const paramsOffset = base + GENERIC_CONTEXT_HEADER_SIZE;
   const paramHandles: NativePointer[] = [];
   for (let i = 0; i < numParams; i++) {
     const param = handle.add(paramsOffset + i).readU8();

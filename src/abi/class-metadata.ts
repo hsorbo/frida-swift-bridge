@@ -89,10 +89,14 @@ export function getClassMetadata(descriptor: ContextDescriptor): ClassMetadata {
   return new ClassMetadata(metadata.handle);
 }
 
+export function objcClassOf(wrapper: Metadata): NativePointer {
+  return wrapper.handle.add(Process.pointerSize).readPointer().strip();
+}
+
 export function classMetadataOf(object: NativePointer): ClassMetadata {
   const type = dynamicTypeOf(object);
   if (type.kind === MetadataKind.ObjCClassWrapper) {
-    return new ClassMetadata(type.handle.add(Process.pointerSize).readPointer().strip());
+    return new ClassMetadata(objcClassOf(type));
   }
   return new ClassMetadata(type.handle);
 }
