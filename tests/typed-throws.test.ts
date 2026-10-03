@@ -39,28 +39,38 @@ function intValue(v: number): NativePointer {
   return Memory.alloc(8).writeS64(v);
 }
 
+// The fixture declares its typed throws only for a Swift 6 toolchain.
+function requireTypedThrows(ctx: { skip: (reason?: string) => never }): void {
+  loadFixture();
+  if (metadataFor("fixture.CodedFailure") === null) ctx.skip("fixture compiled without typed throws (Swift < 6.0)");
+}
+
 describe("typed throws", () => {
-  test("a loadable error rides the result registers beside a float result", () => {
+  test("a loadable error rides the result registers beside a float result", (ctx) => {
+    requireTypedThrows(ctx);
     const fn = Swift.function(loadFixture(), THROWS_CODED);
     expect(fn.call(0)).toBe(2.5);
     expect(thrownBy(() => fn.call(3)).value).toEqual({ code: int64(3), flag: false });
     expect(thrownBy(() => fn.call(9)).value).toEqual({ code: int64(9), flag: true });
   });
 
-  test("a payload-less enum error decodes as its case", () => {
+  test("a payload-less enum error decodes as its case", (ctx) => {
+    requireTypedThrows(ctx);
     const fn = Swift.function(loadFixture(), THROWS_TYPED);
     expect(fn.call(3)).toEqual(int64(30));
     expect(thrownBy(() => fn.call(1)).value).toBe("bad");
     expect(thrownBy(() => fn.call(2)).value).toBe("worse");
   });
 
-  test("an error too wide for the registers comes back through the caller's buffer", () => {
+  test("an error too wide for the registers comes back through the caller's buffer", (ctx) => {
+    requireTypedThrows(ctx);
     const fn = Swift.function(loadFixture(), THROWS_WIDE);
     expect(fn.call(0)).toEqual(int64(7));
     expect(thrownBy(() => fn.call(4)).value).toEqual({ a: int64(4), b: int64(5), c: int64(6), d: int64(7), e: int64(8) });
   });
 
-  test("a floating-point error and an indirect result both take the buffer", () => {
+  test("a floating-point error and an indirect result both take the buffer", (ctx) => {
+    requireTypedThrows(ctx);
     const ratio = Swift.function(loadFixture(), THROWS_RATIO);
     expect(ratio.call(0)).toBe(null);
     expect(thrownBy(() => ratio.call(3)).value).toEqual({ ratio: 1.5 });
@@ -69,7 +79,8 @@ describe("typed throws", () => {
     expect(thrownBy(() => big.call(1)).value).toBe("bad");
   });
 
-  test("a class error is adopted as an object", () => {
+  test("a class error is adopted as an object", (ctx) => {
+    requireTypedThrows(ctx);
     const fn = Swift.function(loadFixture(), THROWS_CLASS);
     expect(fn.call(0)).toEqual(int64(3));
     const error = thrownBy(() => fn.call(5));
@@ -79,7 +90,8 @@ describe("typed throws", () => {
     expect(error.value).toBe(failure);
   });
 
-  test("a method's typed error reaches its facade call", () => {
+  test("a method's typed error reaches its facade call", (ctx) => {
+    requireTypedThrows(ctx);
     loadFixture();
     const thrower = Swift.type("fixture.TypedThrower")!.init(10) as SwiftClassObject;
     expect(thrower.scaled(0)).toEqual(int64(20));
@@ -87,7 +99,8 @@ describe("typed throws", () => {
     expect(thrownBy(() => thrower.$method("scaled").call(2)).message).toBe("Swift function threw fixture.CodedFailure");
   });
 
-  test("Swift.NativeFunction reads the thrown type off the symbol", () => {
+  test("Swift.NativeFunction reads the thrown type off the symbol", (ctx) => {
+    requireTypedThrows(ctx);
     const Int = metadataFor("Swift.Int")!;
     const Double = metadataFor("Swift.Double")!;
     const fn = Swift.NativeFunction(fixtureExport("fixture.throwsCoded"), Swift.type("Swift.Double")!, [Swift.type("Swift.Int")!], { throws: true });
@@ -97,7 +110,8 @@ describe("typed throws", () => {
     expect(thrownBy(() => raw(intValue(2))).value).toEqual({ code: int64(2), flag: false });
   });
 
-  test("an async typed error rides the resume registers or the buffer", async () => {
+  test("an async typed error rides the resume registers or the buffer", async (ctx) => {
+    requireTypedThrows(ctx);
     const coded = Swift.asyncFunction(loadFixture(), THROWS_CODED_ASYNC);
     expect(await coded.call(0)).toEqual(int64(1));
     expect((await rejectedWith(coded.call(6))).value).toEqual({ code: int64(6), flag: true });
@@ -109,7 +123,8 @@ describe("typed throws", () => {
     expect((await rejectedWith(thrower.scaledAsync(1) as Promise<CallResult>)).value).toEqual({ code: int64(6), flag: true });
   });
 
-  test("a hook decodes a typed error from the registers and from the buffer", () => {
+  test("a hook decodes a typed error from the registers and from the buffer", (ctx) => {
+    requireTypedThrows(ctx);
     const Int = metadataFor("Swift.Int")!;
     const seen: { ret: CallResult; error: CallResult | undefined }[] = [];
     const listeners = [fixtureExport("fixture.throwsCoded"), fixtureExport("fixture.throwsWide")].map((target) =>
@@ -137,7 +152,8 @@ describe("typed throws", () => {
     ]);
   });
 
-  test("an async hook decodes a typed error on completion", async () => {
+  test("an async hook decodes a typed error on completion", async (ctx) => {
+    requireTypedThrows(ctx);
     const seen: { ret: CallResult; error: CallResult | undefined }[] = [];
     const module = loadFixture();
     const listeners = [THROWS_CODED_ASYNC, THROWS_WIDE_ASYNC].map((name) =>
