@@ -1,10 +1,11 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture, loadNoMetadata, loadConformance, NOMETADATA_MODULE, CONFORMANCE_MODULE } from "./fixtures/load.js";
+import { loadFixture, loadNoMetadata, loadConformance, loadRetroactive, NOMETADATA_MODULE, CONFORMANCE_MODULE, RETROACTIVE_MODULE } from "./fixtures/load.js";
 
 import { Swift, StructType, SwiftClass, SwiftStruct } from "../src/index.js";
 import { enumerateMethods, enumerateProperties, resolveMethod } from "../src/runtime/method.js";
 import { Protocol, ValueInstance, metadataFor, typeOf } from "../src/abi.js";
 import { enumerateSwiftModules, enumerateTypes } from "../src/reflection/registry.js";
+import { getSwiftSection } from "../src/image/sections.js";
 
 // Runs before anything in this process loads the extending module, so it must come first.
 describe("a module loaded after the search has already run", () => {
@@ -193,5 +194,26 @@ describe("a module that declares conformances but no types", () => {
   test("its conformer names an async requirement, so a stripped conformer's async extension method resolves", async () => {
     const ruler = (Swift.type("fixture.Ruler") as SwiftStruct).$new({ n: 7 });
     expect(await ruler.measureTwice()).toEqual(int64(14));
+  });
+});
+
+describe("a module whose only Swift section is __swift5_proto", () => {
+  beforeEach(() => { loadRetroactive(); });
+
+  test("it declares neither types nor protocols", () => {
+    const retroactive = Process.getModuleByName(RETROACTIVE_MODULE);
+    expect(getSwiftSection(retroactive, "__swift5_proto")).not.toBeNull();
+    for (const name of ["__swift5_types", "__swift5_types2", "__swift5_protos"]) {
+      expect(getSwiftSection(retroactive, name)).toBeNull();
+    }
+    expect([...enumerateTypes(retroactive)].length).toBe(0);
+  });
+
+  test("it is scanned, so the type it extends reports the conformance", () => {
+    const retroactive = Process.getModuleByName(RETROACTIVE_MODULE);
+    expect([...enumerateSwiftModules()].some((m) => m.path === retroactive.path)).toBeTruthy();
+    const protocols = (Swift.type("fixture.Pup") as SwiftClass).$type.protocols();
+    expect(Object.keys(protocols)).toContain("fixture.Container");
+    expect(Protocol.find("fixture.Container")!.conformingTypes().map((t) => t.name)).toContain("fixture.Pup");
   });
 });
