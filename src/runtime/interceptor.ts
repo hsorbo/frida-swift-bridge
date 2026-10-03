@@ -1,10 +1,11 @@
-import { Metadata, MetadataKind } from "../abi/metadata.js";
+import { Metadata, MetadataKind, genericHeaderOffset, readGenericContextHeader } from "../abi/metadata.js";
 import { readValue, embedsManagedReference, SwiftValue } from "../abi/instance.js";
 import { ValueInstance } from "../abi/value.js";
-import { enumerateTupleElements } from "../abi/tuple.js";
+import { enumerateTupleElements, getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { ClassMetadata, classMetadataOf } from "../abi/class-metadata.js";
-import { genericParamsAreKey, hasFixedLayoutInGenericContext } from "../abi/generic-instantiation.js";
+import { enumerateFields, resolveTypeByMangledName } from "../abi/field-descriptor.js";
+import { buildGenericMetadata, genericParamsAreKey, hasFixedLayoutInGenericContext } from "../abi/generic-instantiation.js";
 import { decodeThrownError } from "./thrown-error.js";
 import {
   shouldPassIndirectly,
@@ -57,10 +58,52 @@ type TypePlan =
 // A small loadable value's self trails the formal args unless the method mutates it; any other
 // self is in swiftself. trailing is null when neither the symbol nor the callee's code tells. A
 // generic type's self is typed only at entry: a class by its isa, an address-only value by the
-// Self metadata word past the arguments.
+// Self metadata word past the arguments, a fixed-layout value by the type arguments that follow
+// its trailing self (or by Self metadata when mutating). Such a value lowers like a stand-in tuple
+// of its field types.
+interface FixedLayoutReceiver {
+  type: ContextDescriptor;
+  standIn: Metadata;
+}
+
 interface Receiver {
-  metadata: Metadata | "isa" | "selfMetadata";
+  metadata: Metadata | "isa" | "selfMetadata" | FixedLayoutReceiver;
   trailing: boolean | null;
+}
+
+function isFixedLayoutReceiver(metadata: Receiver["metadata"]): metadata is FixedLayoutReceiver {
+  return typeof metadata === "object" && !(metadata instanceof Metadata);
+}
+
+// How a receiver's self lowers when it rides the argument registers.
+function receiverLowering({ metadata }: Receiver): Metadata | null {
+  return metadata instanceof Metadata ? metadata : isFixedLayoutReceiver(metadata) ? metadata.standIn : null;
+}
+
+function receiverName({ metadata }: Receiver): string {
+  return metadata instanceof Metadata ? typeName(metadata) : isFixedLayoutReceiver(metadata) ? metadata.type.fullTypeName ?? "the type" : "the type";
+}
+
+// A generic struct whose layout ignores its parameters lays its fields out as a tuple of their
+// types would, so that tuple lowers to the same registers; null when a field's type names a param.
+function fixedLayoutStandIn(type: ContextDescriptor): Metadata | null {
+  if (type.kind !== ContextDescriptorKind.Struct) {
+    return null;
+  }
+  const fieldTypes: Metadata[] = [];
+  for (const field of enumerateFields(type)) {
+    const mangled = field.mangledTypeName;
+    const metadata = mangled === null ? null : resolveTypeByMangledName(mangled, type);
+    if (metadata === null) {
+      return null;
+    }
+    fieldTypes.push(metadata);
+  }
+  return getUnlabelledTupleTypeMetadata(fieldTypes);
+}
+
+function typeKeyArgumentCount(type: ContextDescriptor): number {
+  return readGenericContextHeader(type.handle.add(genericHeaderOffset(type))).numKeyArguments;
 }
 
 interface CallShape {
@@ -185,7 +228,7 @@ function paramPaths(type: TypeExpr, params: string[], path: number[]): { param: 
   return nominalArguments(type).flatMap((arg, i) => paramPaths(arg, params, [...path, i]));
 }
 
-function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOwnership | undefined): GenericEnvironment {
+function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOwnership | undefined, trailingSelfLowered = false): GenericEnvironment {
   const isStatic = /^(static|class) /.test(signature.context);
   const type = findType(signature.context.replace(/^(static|class) /, ""));
   const outer = type?.isGeneric ? typeParams(type) : { names: [], depth: 0 };
@@ -199,7 +242,9 @@ function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOw
       from = isStatic || signature.name === "__allocating_init" ? "selfMetatype" : "selfObject";
     } else if (!isStatic && signature.name !== "init") {
       if (hasFixedLayoutInGenericContext(type!) && ownership !== "mutating") {
-        undecodable = `cannot locate the type arguments of ${signature.context}.${signature.selector}: a fixed-layout generic value passes self by value`;
+        if (!trailingSelfLowered) {
+          undecodable = `cannot locate the type arguments of ${signature.context}.${signature.selector}: a fixed-layout generic value passes self by value`;
+        }
       } else {
         from = "selfMetadata";
         passesSelfMetadata = true;
@@ -273,21 +318,32 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
     if (parsed.genericParams.length > 0 && !parsed.simpleGenerics) {
       throw new Error(`unsupported generic signature: ${symbol.demangled}`);
     }
-    const generics = genericEnvironment(parsed, ownership);
+    let generics = genericEnvironment(parsed, ownership);
     const gp = generics.params;
     const inout = parsed.params.find((p) => p.convention === "inout");
     if (inout !== undefined) {
       throw new Error(`cannot hook ${parsed.selector}: inout parameter ${inout.text} is unsupported`);
     }
     const args = parsed.params.map((p) => planType(p.type, gp));
-    const probe = (metadata: Metadata): SelfOwnership | null =>
-      ownership ?? (isAsync ? null : probedOwnership(target, args, parsed, metadata));
+    const ownWords = parsed.genericParams.length + witnessTableCount(parsed);
+    const probe = (metadata: Metadata, typeKeyArguments = 0): SelfOwnership | null =>
+      ownership ??
+      (isAsync
+        ? null
+        : probedOwnership(target, args, metadata, {
+            trailingSelf: ownWords + typeKeyArguments,
+            selfInRegister: ownWords + (typeKeyArguments > 0 ? 1 : 0),
+          }));
+    const receiver = receiverOf(parsed.context, probe, parsed.name === "init", ownership);
+    if (receiver !== null && isFixedLayoutReceiver(receiver.metadata) && receiver.trailing !== null) {
+      generics = genericEnvironment(parsed, receiver.trailing ? "borrowing" : "mutating", true);
+    }
     return {
       args,
       ret: parsed.result === null ? null : planType(parsed.result, gp),
       generics,
       throws: parsed.throws,
-      receiver: receiverOf(parsed.context, probe, parsed.name === "init", ownership),
+      receiver,
     };
   }
 
@@ -311,7 +367,7 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
 // metatype being erased, so it lowers like a static.
 function receiverOf(
   context: string,
-  ownership: (metadata: Metadata) => SelfOwnership | null,
+  ownership: (metadata: Metadata, typeKeyArguments?: number) => SelfOwnership | null,
   isInit = false,
   statedOwnership?: SelfOwnership
 ): Receiver | null {
@@ -327,7 +383,15 @@ function receiverOf(
     if (type.kind === ContextDescriptorKind.Class) {
       return { metadata: "isa", trailing: false };
     }
-    return hasFixedLayoutInGenericContext(type) && statedOwnership !== "mutating" ? null : { metadata: "selfMetadata", trailing: false };
+    if (!hasFixedLayoutInGenericContext(type)) {
+      return { metadata: "selfMetadata", trailing: false };
+    }
+    const standIn = fixedLayoutStandIn(type);
+    if (standIn === null) {
+      return statedOwnership === "mutating" ? { metadata: "selfMetadata", trailing: false } : null;
+    }
+    const known = statedOwnership ?? ownership(standIn, typeKeyArgumentCount(type));
+    return { metadata: { type, standIn }, trailing: known === null ? null : known !== "mutating" };
   }
   if (metadata.kind === MetadataKind.Class || metadata.kind === MetadataKind.ObjCClassWrapper) {
     return { metadata, trailing: false };
@@ -347,8 +411,8 @@ function unlocatableGenerics({ receiver, generics }: CallShape): string | null {
   if (generics.undecodable !== null) {
     return generics.undecodable;
   }
-  if (receiver?.trailing === null && receiver.metadata instanceof Metadata && generics.params.length > 0) {
-    return `cannot tell how a generic method of ${typeName(receiver.metadata)} takes self; pass { self: "borrowing" | "mutating" }`;
+  if (receiver?.trailing === null && generics.params.length > 0) {
+    return `cannot tell how a generic method of ${receiverName(receiver)} takes self; pass { self: "borrowing" | "mutating" }`;
   }
   return null;
 }
@@ -385,13 +449,17 @@ function selfRegister(context: CpuContext): NativePointer {
 }
 
 // Read before the hook patches the entry, as calls do (method.ts probedSelfOwnership).
-function probedOwnership(target: NativePointer, args: TypePlan[], signature: SwiftFunctionSignature, receiver: Metadata): SelfOwnership | null {
+function probedOwnership(
+  target: NativePointer,
+  args: TypePlan[],
+  receiver: Metadata,
+  implicitWords: { trailingSelf: number; selfInRegister: number }
+): SelfOwnership | null {
   const argTypes = args.map((plan) =>
     plan.kind === "concrete" ? plan.metadata : plan.kind === "closure" ? { closure: true as const } : { genericParam: 0 }
   );
-  const implicitWords = signature.genericParams.length + witnessTableCount(signature);
-  const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords);
-  const inRegister = argumentRegisterUse(argTypes, implicitWords);
+  const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf);
+  const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister);
   return probeSelfOwnership(target, { gp: [inRegister.gp, trailing.gp], fp: [inRegister.fp, trailing.fp] });
 }
 
@@ -399,7 +467,7 @@ function decodeSelf({ metadata }: Receiver, address: NativePointer, selfMetadata
   if (metadata === "isa" || (metadata instanceof Metadata && metadata.kind === MetadataKind.Class)) {
     return asSwiftObject(new ClassInstance(address));
   }
-  if (metadata === "selfMetadata") {
+  if (metadata === "selfMetadata" || isFixedLayoutReceiver(metadata)) {
     return decodeBorrowedValue(selfMetadata!, address);
   }
   return metadata.kind === MetadataKind.ObjCClassWrapper ? address : decodeBorrowedValue(metadata, address);
@@ -600,19 +668,24 @@ function materializeArgs(
   }
 
   let trailingSelf: NativePointer | null = null;
-  if (receiver?.trailing && receiver.metadata instanceof Metadata) {
-    trailingSelf = Memory.alloc(Math.max(words(receiver.metadata), 1) * 8);
-    for (const scalar of loweredScalars(receiver.metadata)) {
+  const lowering = receiver === null ? null : receiverLowering(receiver);
+  if (receiver?.trailing && lowering !== null) {
+    trailingSelf = Memory.alloc(Math.max(words(lowering), 1) * 8);
+    for (const scalar of loweredScalars(lowering)) {
       cursor.readScalar(scalar, trailingSelf);
     }
   }
 
-  const selfMetadata = environment.passesSelfMetadata ? new Metadata(cursor.gp()) : null;
+  let selfMetadata = environment.passesSelfMetadata ? new Metadata(cursor.gp()) : null;
   const generics = environment.sources.map((source) =>
     source.kind === "passed"
       ? new Metadata(cursor.gp())
       : carriedMetadata(source, context, (arg) => slots[arg].address.readPointer(), selfMetadata)
   );
+  if (receiver !== null && isFixedLayoutReceiver(receiver.metadata) && selfMetadata === null) {
+    const { type } = receiver.metadata;
+    selfMetadata = buildGenericMetadata(type, generics.slice(0, typeParams(type).names.length));
+  }
 
   const values = (): SwiftValue[] =>
     slots.map((s) => {
@@ -729,7 +802,7 @@ function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, opti
   const receiver = knownReceiver(shape, decodesArgs);
   const unlocatable = unlocatableGenerics(shape);
   const capturesGenerics = callbacks.onLeave !== undefined && genericParams.length > 0 && unlocatable === null;
-  const selfReadOnEnter = receiver?.trailing === true || receiver?.metadata === "selfMetadata";
+  const selfReadOnEnter = receiver !== null && (receiver.trailing === true || !(receiver.metadata instanceof Metadata || receiver.metadata === "isa"));
   const wantsArgs = decodesArgs || (selfReadOnEnter && callbacks.onLeave !== undefined) || capturesGenerics;
 
   const onEnter =

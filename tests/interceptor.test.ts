@@ -695,10 +695,49 @@ describe("SwiftInterceptor.attach on members of generic types", () => {
     expect(call.ret).toEqual(int64(10));
   });
 
-  test("a borrowing method of a fixed-layout generic value hides its type arguments behind self", () => {
-    const scaled = fixtureExport("fixture.PhantomScaled.scaled(");
-    expect(() => SwiftInterceptor.attach(scaled, { onEnter() {} })).toThrow(/fixed-layout generic value passes self by value/);
-    SwiftInterceptor.attach(scaled, { onLeave() {} }).detach();
+  test("a borrowing method of a fixed-layout generic value reads self from the registers and the type's arguments after it", () => {
+    loadFixture();
+    const value = Swift.struct("fixture.PhantomScaled<Swift.Int>")!.$new({ raw: 10 });
+    const scaled = value.$method("scaled");
+    let seen: { args: SwiftValue[]; self: CallResult; typeArguments: string[] } | null = null;
+    let left: CallResult = null;
+    const listener = SwiftInterceptor.attach(scaled.address, {
+      onEnter(args) {
+        seen = { args, self: this.self!, typeArguments: this.typeArguments! };
+      },
+      onLeave(retval) {
+        left = retval;
+      },
+    });
+    try {
+      expect(scaled.call(3, 7)).toEqual(int64(31));
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual({ args: [int64(3), int64(7)], self: { raw: int64(10) }, typeArguments: ["Swift.Int"] });
+    expect(left).toEqual(int64(31));
+  });
+
+  test("a mutating method of a fixed-layout generic value reads self through swiftself and its Self metadata", () => {
+    loadFixture();
+    const value = Swift.struct("fixture.PhantomScaled<Swift.Int>")!.$new({ raw: 10 });
+    const bump = value.$method("bump");
+    const seen: CallResult[] = [];
+    const listener = SwiftInterceptor.attach(bump.address, {
+      onEnter() {
+        seen.push(this.self!, this.typeArguments!);
+      },
+      onLeave() {
+        seen.push(this.self!);
+      },
+    });
+    try {
+      bump.call(3);
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual([{ raw: int64(10) }, ["Swift.Int"], { raw: int64(13) }]);
+    expect(value.$fields).toEqual({ raw: int64(13) });
   });
 
   function typeArgumentsDuringDrive(symbol: string, callbacks: "onEnter" | "onLeave"): (string[] | undefined)[] {
