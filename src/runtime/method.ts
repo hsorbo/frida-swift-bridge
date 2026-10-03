@@ -3309,9 +3309,14 @@ function isWitnessOf(
 ): boolean {
   const { context } = stripReceiverKeyword(signature.context);
   return (
-    signature.kind === WITNESS_KIND[requirement.kind] &&
+    accessorKind(signature) === WITNESS_KIND[requirement.kind] &&
     (context === conformingType.fullTypeName || context === protocol.fullTypeName)
   );
+}
+
+// A subscript accessor parses as a function named subscript; its witness kind is the accessor's.
+function accessorKind(signature: ParsedSwiftSignature): string {
+  return signature.kind === "function" && signature.accessor !== undefined ? signature.accessor : signature.kind;
 }
 
 function witnessTargetSignature(table: WitnessTable, requirement: ProtocolRequirement): ParsedSwiftSignature | null {
