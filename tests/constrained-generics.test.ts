@@ -1,11 +1,12 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift, requireDarwin } from "./swift.js";
-import { loadFixture } from "./fixtures/load.js";
+import { loadFixture, existentialMetadata } from "./fixtures/load.js";
 
 import { findType } from "../src/reflection/registry.js";
 import { MetadataKind, instantiateGenericMetadata } from "../src/abi/metadata.js";
 import { buildGenericMetadata, genericRequirements } from "../src/abi/generic-instantiation.js";
 import { findProtocol, conformsToProtocol } from "../src/abi/protocol-conformance.js";
+import { getExistentialTypeMetadata } from "../src/abi/existential.js";
 
 import { metadataFor } from "../src/abi.js";
 import { typeName } from "../src/runtime/type-name.js";
@@ -70,6 +71,14 @@ describe("constrained generic auto-assembly", () => {
     expect(typeName(metadataFor("fixture.BaseBox", [metadataFor("fixture.Derived")!])!)).toBe("fixture.BaseBox<fixture.Derived>");
     expect(() => metadataFor("fixture.BaseBox", [metadataFor("fixture.Pup")!])).toThrow(/superclass/);
     expect(() => metadataFor("fixture.BaseBox", [metadataFor("Swift.Int")!])).toThrow(/superclass/);
+  });
+
+  test("a superclass requirement accepts an existential whose superclass constraint is the class", () => {
+    loadFixture();
+    const baseGreeter = existentialMetadata("fixture.baseGreeterType");
+    expect(typeName(metadataFor("fixture.BaseBox", [baseGreeter])!)).toBe("fixture.BaseBox<fixture.Base & fixture.Greeter>");
+    const greeter = getExistentialTypeMetadata([findProtocol("fixture.Greeter")!]);
+    expect(() => metadataFor("fixture.BaseBox", [greeter])).toThrow(/superclass/);
   });
 
   test("an AnyObject requirement rejects value types", () => {

@@ -191,6 +191,14 @@ export function existentialProtocols(metadata: Metadata): ContextDescriptor[] {
   return protocols;
 }
 
+export function existentialSuperclassConstraint(metadata: Metadata): Metadata | null {
+  const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
+  if ((flags & HAS_SUPERCLASS_CONSTRAINT) === 0) {
+    return null;
+  }
+  return new Metadata(metadata.handle.add(NUM_PROTOCOLS_OFFSET + 4).readPointer());
+}
+
 export function projectErrorExistential(container: NativePointer): OpaqueExistential {
   const errorBox = container.readPointer();
   const bridgedNSErrorScratch = Memory.alloc(Process.pointerSize);

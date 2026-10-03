@@ -9,7 +9,7 @@ import {
 } from "./metadata.js";
 import { conformsToProtocol } from "./protocol-conformance.js";
 import { resolveTypeByMangledName } from "./field-descriptor.js";
-import { isObjCExistential } from "./existential.js";
+import { isObjCExistential, existentialSuperclassConstraint } from "./existential.js";
 import {
   GENERIC_REQUIREMENT_DESCRIPTOR_SIZE,
   GenericRequirementDescriptor,
@@ -211,7 +211,8 @@ function checkRequirement(
     }
     case GenericRequirementKind.BaseClass: {
       const superclass = resolveTypeByMangledName(requirement.sameTypeName!, descriptor, keyArguments);
-      if (superclass === null || getSwiftCoreApi().swift_dynamicCastMetatype(subject.handle, superclass.handle).isNull()) {
+      const subclass = subject.kind === MetadataKind.Existential ? existentialSuperclassConstraint(subject) ?? subject : subject;
+      if (superclass === null || getSwiftCoreApi().swift_dynamicCastMetatype(subclass.handle, superclass.handle).isNull()) {
         throw new Error("type is not a subclass of the required superclass");
       }
       return null;
