@@ -39,7 +39,13 @@ export interface TypeMember {
   isVar: boolean;
 }
 
-export interface MethodQuery {
+// Listing is exploratory: the defining module by default; deep sweeps every loaded module's
+// extensions and the protocol extensions the type conforms to.
+export interface MemberQuery {
+  deep?: boolean;
+}
+
+export interface MethodQuery extends MemberQuery {
   inherited?: boolean;
 }
 
@@ -233,8 +239,8 @@ export abstract class NominalType extends SwiftType {
     );
   }
 
-  private selectors(isStatic: boolean, { inherited = true }: MethodQuery): string[] {
-    return enumerateMethods(this.name, "allLoadedModules", inherited ? "withSuperclasses" : "thisType")
+  private selectors(isStatic: boolean, { inherited = true, deep = false }: MethodQuery): string[] {
+    return enumerateMethods(this.name, deep ? "allLoadedModules" : "definingModule", inherited ? "withSuperclasses" : "thisType")
       .filter((m) => m.kind === "method" && m.isStatic === isStatic)
       .map((m) => m.selector);
   }
@@ -243,8 +249,8 @@ export abstract class NominalType extends SwiftType {
     return protocolsForType(descriptorOf(this).handle);
   }
 
-  get properties(): PropertyInfo[] {
-    return enumerateProperties(this.name);
+  properties({ deep = false }: MemberQuery = {}): PropertyInfo[] {
+    return enumerateProperties(this.name, deep ? "allLoadedModules" : "definingModule");
   }
 }
 

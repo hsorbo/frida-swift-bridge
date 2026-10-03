@@ -37,7 +37,7 @@ describe("subscripts", () => {
     board.$setSubscript("a string long enough to live on the heap", 0);
     expect(board.$subscript(0)).toBe("a string long enough to live on the heap");
     expect(board.$type.instanceMethods()).not.toContain("subscript(_:)");
-    expect(board.$type.properties.map((p) => p.name)).toEqual(["cells"]);
+    expect(board.$type.properties().map((p) => p.name)).toEqual(["cells"]);
   });
 
   test("reflection finds a subscript accessor by selector and accessor kind", () => {

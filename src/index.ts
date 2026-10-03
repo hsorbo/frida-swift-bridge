@@ -80,6 +80,7 @@ export {
   ForeignClassType,
   ForeignReferenceType,
   TypeMember,
+  MemberQuery,
   MethodQuery,
   MemberLookupOptions,
   SwiftMember,

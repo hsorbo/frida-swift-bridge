@@ -139,7 +139,7 @@ describe("enumerateProperties", () => {
 
   test("is exposed on the type wrapper as .properties", () => {
     const point = typeOf(metadataFor("fixture.Point")!) as StructType;
-    expect(point.properties.map((p) => p.name).sort()).toEqual(["doubled", "tracked", "x"]);
+    expect(point.properties().map((p) => p.name).sort()).toEqual(["doubled", "tracked", "x"]);
   });
 
   test("lists class properties with their types", () => {

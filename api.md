@@ -285,7 +285,7 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
 - `info.facade`: the type facade.
 - `info.instanceMethods(query?)` / `info.typeMethods(query?)`: the selectors
   of its instance methods and of its type methods, e.g. `["greet(_:)", …]`.
-  `query` is `{ inherited? }`.
+  `query` is `{ inherited?, deep? }`.
 - `info.instanceMethod(name, options?)`, `info.typeMethod(name, options?)`,
   `info.initializer(options?)`: find one member of that kind by name, without
   an instance or type arguments. See [Calling methods](#calling-methods). A
@@ -295,12 +295,17 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
   generic member's read `"A"` and the names paste into `{ argTypes }`.
 - `info.subscript(selector?, options?)` / `info.typeSubscript(...)`: a subscript
   accessor, the getter unless `{ accessor: "setter" }`. See [Properties](#properties).
-- `info.properties`: the properties as `{ name, typeName, isStatic, writable }`.
+- `info.properties(query?)`: the properties as `{ name, typeName, isStatic, writable }`;
+  `query` is `{ deep? }`.
 - `info.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
 
-The lists span every loaded module: they include members that other modules
-add in extensions, and members a conformed-to protocol provides through a
-protocol extension, stdlib protocols such as `Sequence` included. A constrained extension (`extension P where Self: Base`,
+Listing is exploratory, so the lists stay shallow by default: the type's own
+module, with inherited members. `{ deep: true }` sweeps every loaded module for
+members other modules add in extensions, and members a conformed-to protocol
+provides through a protocol extension, stdlib protocols such as `Sequence`
+included; a `Collection` conformer gains dozens. Lookup by name needs no
+option: it searches the defining module first and falls back to one query
+across the loaded modules. A constrained extension (`extension P where Self: Base`,
 `where Item: Numeric`) contributes only to types that meet its `where` clause,
 and its members shadow the same members of a less constrained extension. An
 extension whose clause the bridge can't check is left out: one with a same-type
@@ -347,7 +352,8 @@ The reflection split moved these members outright; there are no aliases.
 | Before | Now |
 | --- | --- |
 | `type.$name`, `$kind`, `$moduleName`, `$superClass` | `type.$type.name`, `.kind`, `.moduleName`, `.superClass` |
-| `type.$protocols()`, `$properties`, `$fields`, `$cases` | `type.$type.protocols()`, `.properties`, `.fields`, `.cases` |
+| `type.$protocols()`, `$properties`, `$fields`, `$cases` | `type.$type.protocols()`, `.properties()`, `.fields`, `.cases` |
+| `info.properties` | `info.properties(query?)`, shallow unless `{ deep: true }` |
 | `type.$isActor`, `$isDefaultActor` | `type.$type.isActor`, `.isDefaultActor` |
 | `type.$instanceMethods()`, `$typeMethods()` | `type.$type.instanceMethods()`, `.typeMethods()` |
 | `type.$instanceMethod(name, options?)` | `type.$type.instanceMethod(name, options?)` |
@@ -511,9 +517,12 @@ robot.at(5, 6);     // calls at(_:_:)
 When bare-name resolution is ambiguous — same arity, different labels; or a
 generic method — use `$method(name, options)` to get an explicit bound method.
 Options: `arity`, `labels`, `argTypes`, `returnType`, `static`, `typeArguments`,
-and (value types only) `self`: `"borrowing"`, `"mutating"` or `"consuming"`,
-how the method takes `self`. `argTypes` and `returnType` match the demangled
-type names exactly; `returnType: null` selects the overload returning `Void`.
+`deep`, and (value types only) `self`: `"borrowing"`, `"mutating"` or
+`"consuming"`, how the method takes `self`. `argTypes` and `returnType` match
+the demangled type names exactly; `returnType: null` selects the overload
+returning `Void`. A lookup searches the type's own module and, on a miss, every
+loaded module and the type's protocol extensions once; `deep: false` stops at
+the own module, for a hot callback that must not pay for the sweep.
 
 ```js
 robot.$method("move", { labels: ["to"] }).call(5);   // move(to:)
@@ -745,10 +754,11 @@ robot.badge;                // "[D2]"
 Assigning a property without a setter, or a name that is not a property,
 throws.
 
-`type.$type.properties` enumerates the declared members:
+`type.$type.properties()` enumerates the declared members, those of its own
+module unless `{ deep: true }`:
 
 ```js
-Swift.type("MyApp.Robot").$type.properties.map(p => p.name);   // ["name", "badge"]
+Swift.type("MyApp.Robot").$type.properties().map(p => p.name);   // ["name", "badge"]
 ```
 
 Static properties, including those a protocol extension provides, read through

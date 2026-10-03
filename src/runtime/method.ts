@@ -274,6 +274,7 @@ interface BaseResolveOptions {
   returnType?: string | null; // exact match against the demangled return-type name; null = Void
   static?: boolean;
   accessor?: AccessorKind; // a subscript's getter or setter; a method lookup names neither
+  deep?: boolean; // false: the defining module only, skipping the cross-module and protocol-extension fallbacks
 }
 
 export interface MethodResolveOptions extends BaseResolveOptions {
@@ -327,8 +328,8 @@ export function initializerLookup<T extends BaseResolveOptions>(selector: string
 }
 
 export function lowerResolveOptions(stable: ValueMethodResolveOptions): RawValueMethodResolveOptions {
-  const { arity, labels, argTypes, returnType, static: isStatic, accessor, self, typeArguments } = stable;
-  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, accessor, self };
+  const { arity, labels, argTypes, returnType, static: isStatic, accessor, deep, self, typeArguments } = stable;
+  const raw: RawValueMethodResolveOptions = { arity, labels, argTypes, returnType, static: isStatic, accessor, deep, self };
   if (typeArguments !== undefined) {
     raw.typeArguments = typeArguments.map((t) => metadataOf(t));
   }
@@ -1208,7 +1209,7 @@ export function findMethod(
   const fullName = canonicalTypeName(typeName);
   return (
     resolveMethodIn(fullName, methodName, options, definingModuleMembers) ??
-    resolveMethodIn(fullName, methodName, options, allLoadedModuleMembers)
+    (options.deep === false ? null : resolveMethodIn(fullName, methodName, options, allLoadedModuleMembers))
   );
 }
 
@@ -2416,7 +2417,7 @@ function matchingMethods(
   match: (candidate: MethodCandidate) => boolean
 ): MethodCandidate[] {
   const own = applyOverloadFilters(definingModuleMembers(fullName).methods.filter(match), options);
-  return own.length > 0
+  return own.length > 0 || options.deep === false
     ? own
     : applyOverloadFilters(allLoadedModuleMembers(fullName).methods.filter(match), options);
 }
@@ -3013,6 +3014,9 @@ export function bindConformanceMethod(
   name: string,
   options: RawMethodResolveOptions = {}
 ): BoundMethod {
+  if (options.deep === false) {
+    throw noMethodError(fullName, name);
+  }
   const conformance = conformanceDeclaring(
     fullName,
     name,
