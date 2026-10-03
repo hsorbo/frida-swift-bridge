@@ -82,8 +82,11 @@ describe("constrained generic auto-assembly", () => {
     expect(() => metadataFor("fixture.BaseBox", [greeter])).toThrow(/superclass/);
   });
 
-  test("an unsuppressed generic parameter rejects a noncopyable argument, also inside a tuple", () => {
+  test("an unsuppressed generic parameter rejects a noncopyable argument, also inside a tuple", (ctx) => {
     loadFixture();
+    if (findType("fixture.MaybeCopyableBox") === null) {
+      ctx.skip("fixture descriptors carry no inverted protocols (Swift < 6.0)");
+    }
     const noncopyable = metadataFor("fixture.NoncopyableStruct")!;
     expect(() => metadataFor("fixture.Pair", [noncopyable])).toThrow(/Copyable requirement/);
     const tuple = getUnlabelledTupleTypeMetadata([metadataFor("Swift.Int")!, noncopyable]);
