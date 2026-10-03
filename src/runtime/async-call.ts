@@ -3,7 +3,7 @@ import { AsyncTask } from "../abi/async-task.js";
 import { SwiftError } from "./thrown-error.js";
 import { LIBSWIFT_CORE_NAME, SWIFT_HOST_SUPPORTED } from "./platform.js";
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
-import type { LoweredScalar, RegisterLocation } from "./calling-convention.js";
+import type { RegisterLocation, PlacedResultScalar } from "./calling-convention.js";
 import { FloatClass, SWIFTCC, GP_ARG_REGISTERS, GP_RESULT_REGISTERS, FP_RESULT_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
 export type { FloatClass };
@@ -22,7 +22,8 @@ const ARG_REGS_X64 = SWIFTCC.gpArgs as X86Register[];
 const GP_RESULT_REGS_ARM64 = ARG_REGS_ARM64.slice(0, GP_RESULT_REGISTERS);
 const GP_RESULT_REGS_X64 = ARG_REGS_X64.slice(0, GP_RESULT_REGISTERS);
 const NUM_ARG_REGS = GP_ARG_REGISTERS;
-const NUM_GP_RESULT_REGS = GP_RESULT_REGISTERS;
+// A four-word scalar result reaches x6 once AAPCS64 even-aligns each i128 half, so capture every argument register.
+const NUM_GP_RESULT_REGS = ARCH === "arm64" ? GP_ARG_REGISTERS : GP_RESULT_REGISTERS;
 const NUM_FP_RESULT_REGS = FP_RESULT_REGISTERS;
 const MAX_FLOAT_REGS = 8;
 
@@ -34,11 +35,6 @@ const MAX_STACK_WORD_CODE_SIZE = 24;
 const DEFAULT_TIMEOUT_MS = 1000;
 const DISPATCH_TIME_FOREVER = uint64("0xffffffffffffffff");
 const POLL_INTERVAL_MS = 5;
-
-export interface PlacedResultScalar {
-  scalar: LoweredScalar;
-  location: RegisterLocation;
-}
 
 // "scalars" is a direct result lowered per scalar, each read from the result register it was placed in.
 export type AsyncResultShape =
@@ -170,7 +166,7 @@ function synthesizeAsyncCall(afp: AsyncFunctionPointer, args: NativePointer[], o
   if (floatArgs.length > MAX_FLOAT_REGS) {
     throw new Error("too many floating-point arguments");
   }
-  if (shape.kind === "gp" && (shape.words < 1 || shape.words > NUM_GP_RESULT_REGS)) {
+  if (shape.kind === "gp" && (shape.words < 1 || shape.words > GP_RESULT_REGISTERS)) {
     throw new Error("direct GP results wider than 4 words are not supported");
   }
   const swift_task_alloc = concExport("swift_task_alloc").strip();
@@ -269,7 +265,7 @@ function writeArm64Continuation(slot: NativePointer, pc: NativePointer, c: Conti
   } else if (c.shape.kind === "scalars") {
     w.putLdrRegAddress("x14", c.result);
     for (let i = 0; i < NUM_GP_RESULT_REGS; i++) {
-      w.putStrRegRegOffset(GP_RESULT_REGS_ARM64[i], "x14", resultRegisterSlot({ register: "gp", index: i }));
+      w.putStrRegRegOffset(ARG_REGS_ARM64[i], "x14", resultRegisterSlot({ register: "gp", index: i }));
     }
     for (let i = 0; i < NUM_FP_RESULT_REGS; i++) {
       w.putStrRegRegOffset(fpReg("double", i), "x14", resultRegisterSlot({ register: "fp", index: i }));

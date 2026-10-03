@@ -340,6 +340,11 @@ export class ArgumentAllocator {
     return this.stackSlot(16);
   }
 
+  evenGp(): ArgLocation {
+    this.ngrn += this.ngrn % 2;
+    return this.gp();
+  }
+
   fp(width: number): ArgLocation {
     if (this.nsrn < FP_ARG_REGISTERS) {
       return { register: "fp", index: this.nsrn++ };
@@ -364,6 +369,28 @@ export class ArgumentAllocator {
     this.stackSize = stackOffset + size;
     return { stackOffset };
   }
+}
+
+export interface PlacedResultScalar {
+  scalar: LoweredScalar;
+  location: RegisterLocation;
+}
+
+// An async result rides the resume function's argument registers, where AAPCS64 starts each half of
+// an i128 at an even register on its own; a sync result and Darwin pack them.
+const ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER = I128_STARTS_AT_EVEN_REGISTER;
+
+export function placeAsyncResultScalars(metadata: Metadata): PlacedResultScalar[] {
+  const allocator = new ArgumentAllocator(0, true);
+  return loweredScalars(metadata).flatMap((scalar) => {
+    if (ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER && scalar.cls === "int" && scalar.size === 16) {
+      return [0, 8].map((half) => ({
+        scalar: { offset: scalar.offset + half, size: 8, cls: "int" as const },
+        location: allocator.evenGp() as RegisterLocation,
+      }));
+    }
+    return [{ scalar, location: allocator.scalar(scalar) as RegisterLocation }];
+  });
 }
 
 // A generic-typed value is always passed indirectly.

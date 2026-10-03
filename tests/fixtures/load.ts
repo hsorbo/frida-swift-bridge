@@ -66,10 +66,16 @@ export function loadOptimized(): Module {
   return loadModule(OPTIMIZED_DYLIB, OPTIMIZED_MODULE, OPTIMIZED_B64);
 }
 
+// "storeGreeter" must not match "storeGreeterMetatype": export order differs between Mach-O and ELF.
+function continuesIdentifier(demangled: string, swiftName: string): boolean {
+  const next = demangled.charAt(demangled.indexOf(swiftName) + swiftName.length);
+  return /[A-Za-z0-9_]$/.test(swiftName) && /[A-Za-z0-9_]/.test(next);
+}
+
 export function fixtureExport(swiftName: string, mod: Module = loadFixture()): NativePointer {
   for (const e of mod.enumerateExports()) {
     const demangled = Swift.demangle(e.name);
-    if (demangled !== null && demangled.includes(swiftName)) {
+    if (demangled !== null && demangled.includes(swiftName) && !continuesIdentifier(demangled, swiftName)) {
       return e.address;
     }
   }

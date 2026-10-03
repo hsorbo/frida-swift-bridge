@@ -37,8 +37,8 @@ import {
   loweredScalars,
   ArgumentAllocator,
   LoweredScalar,
-  RegisterLocation,
   argumentRegisterUse,
+  placeAsyncResultScalars,
 } from "./calling-convention.js";
 import { probeSelfOwnership, RegisterRange } from "./value-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
@@ -1486,12 +1486,7 @@ function asyncResultShape(returnType: Metadata | null): AsyncResultShape | null 
   if (shouldPassIndirectly(returnType)) {
     return { kind: "indirect", stride: returnType.valueWitnesses.stride };
   }
-  const allocator = new ArgumentAllocator(0, true);
-  const placed = loweredScalars(returnType).map((scalar) => ({
-    scalar,
-    location: allocator.scalar(scalar) as RegisterLocation,
-  }));
-  return { kind: "scalars", placed, stride: returnType.valueWitnesses.stride };
+  return { kind: "scalars", placed: placeAsyncResultScalars(returnType), stride: returnType.valueWitnesses.stride };
 }
 
 class AsyncArgs {
