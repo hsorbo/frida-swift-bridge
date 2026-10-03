@@ -72,10 +72,16 @@ function continuesIdentifier(demangled: string, swiftName: string): boolean {
   return /[A-Za-z0-9_]$/.test(swiftName) && /[A-Za-z0-9_]/.test(next);
 }
 
+// The function itself, not its method descriptor or dispatch thunk, which also mention the name.
 export function fixtureExport(swiftName: string, mod: Module = loadFixture()): NativePointer {
   for (const e of mod.enumerateExports()) {
     const demangled = Swift.demangle(e.name);
-    if (demangled !== null && demangled.includes(swiftName) && !continuesIdentifier(demangled, swiftName)) {
+    if (
+      demangled !== null &&
+      demangled.includes(swiftName) &&
+      !continuesIdentifier(demangled, swiftName) &&
+      !/^(method descriptor|dispatch thunk)/.test(demangled)
+    ) {
       return e.address;
     }
   }
