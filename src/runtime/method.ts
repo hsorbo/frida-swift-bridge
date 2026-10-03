@@ -1766,6 +1766,12 @@ export function bindValueInitializer(
   receiver: Metadata,
   options: RawMethodResolveOptions = {}
 ): SwiftBoundInitializer {
+  if (options.typeArguments !== undefined) {
+    const plan = planGenericMethod(typeName(receiver), "init", options);
+    const argConventions = plan.argPlans.map((_, i): ParamConvention => (plan.argConventions?.[i] === "inout" ? "inout" : "owned"));
+    const bound = new BoundMethod({ ...plan, argConventions }, { adoptResult: true });
+    return { address: bound.address, call: (...args) => bound.call(...args) as SwiftValueObject | null };
+  }
   const resolved = resolveMethod(typeName(receiver), "init", options);
   if (resolved.returnType === null) {
     throw new Error(`${resolved.selector} is not a value initializer`);

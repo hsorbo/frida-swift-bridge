@@ -89,4 +89,20 @@ describe("generic stdlib method with an associated-type constraint", () => {
     s.$method("append(contentsOf:)", { typeArguments: [Str], self: "mutating" }).call("cd");
     expect(s.$fields).toBe("abcd");
   });
+
+  // String.init<A: BinaryInteger>(_:radix:uppercase:): a generic initializer on a non-generic type.
+  test("String.init(_:radix:uppercase:) binds with a BinaryInteger type argument", () => {
+    requireSwift();
+    const Int = Swift.type("Swift.Int")!;
+    const Str = Swift.type("Swift.String")!;
+    const init = Str.$initializer("init(_:radix:uppercase:)", { typeArguments: [Int] });
+    expect(init.call(255, 16, true)!.$fields).toBe("FF");
+    expect(init.call(-10, 2, false)!.$fields).toBe("-1010");
+  });
+
+  test("a generic initializer without type arguments asks for them", () => {
+    requireSwift();
+    const Str = Swift.type("Swift.String")!;
+    expect(() => Str.$initializer("init(_:radix:uppercase:)").call(255, 16, true)).toThrow(/typeArguments/);
+  });
 });

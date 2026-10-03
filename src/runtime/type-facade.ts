@@ -130,8 +130,8 @@ export abstract class SwiftValueType extends SwiftTypeFacade {
     if (descriptorOf(type).isGeneric) {
       return genericMember(type.name, "init", raw) ?? narrowBoundInitializer(bindGenericTypeInitializer(metadataOf(type), raw));
     }
-    if (findMethod(type.name, "init", raw) === null) {
-      const generic = genericMember(type.name, "init", raw);
+    if (raw.typeArguments === undefined && findMethod(type.name, "init", raw) === null) {
+      const generic = genericMember(type.name, "init", raw, "pass its type arguments as { typeArguments }");
       if (generic !== null) {
         return generic;
       }
@@ -379,12 +379,17 @@ function needsTypeArguments(type: NominalType, member: SwiftMember): SwiftAddres
 }
 
 // A generic member, e.g. init<D>(data: D), which findMethod skips.
-function genericMember(typeName: string, name: string, options: LookupOptions): SwiftAddressOnly | null {
+function genericMember(
+  typeName: string,
+  name: string,
+  options: LookupOptions,
+  remedy = "calling it through its type is not supported yet"
+): SwiftAddressOnly | null {
   const member = findMember(typeName, name, options);
   if (member === null || !member.generic) {
     return null;
   }
-  return addressOnly(member, `${typeName}.${member.selector} is generic; calling it through its type is not supported yet`);
+  return addressOnly(member, `${typeName}.${member.selector} is generic; ${remedy}`);
 }
 
 const RESERVED = new Set(["constructor", "toString", "valueOf", "toJSON", "hasOwnProperty", "init"]);
