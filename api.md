@@ -1193,6 +1193,34 @@ corrupts memory instead of failing cleanly.
   life of the script, since a descriptor never changes. If a module is unloaded
   and another mapped at the same address, the old wrapper is stale.
 
+**Things the bridge refuses**
+
+Each of these throws on purpose: the bridge has no lowering for the shape yet.
+
+- **Subscripts.** A subscript's getter and setter cannot be read, written or
+  hooked by name; the member resolver knows only properties and methods.
+- **Variadic parameters.** A method with a `T...` parameter does not resolve:
+  `could not resolve type`.
+- **Closures as results.** A function returning a closure is refused
+  (`closure return types are not supported`). Closure parameters take only the
+  shapes listed under [Closures](#closures); a consuming or `inout` closure
+  parameter is refused too.
+- **Tuples with an opaque element.** A tuple parameter, result or async result
+  with an element of generic, opaque layout is refused.
+- **Generic free functions.** `Swift.function` and `Swift.asyncFunction` take
+  only non-generic symbols, and an async function's `.bind` takes only a class
+  receiver.
+- **Existential argument and result types in `Swift.swiftFunction`.** Both must
+  be concrete.
+- **Hooking.** `Swift.Interceptor` refuses a function with an `inout` parameter,
+  a generic signature it can't plan, and on x86-64 any floating-point argument
+  or result when Frida's CPU context does not carry the XMM registers.
+- **`FixedArray` and `Borrow` metadata.** The metadata kinds behind
+  `InlineArray` and borrowed values have no reflection wrapper and throw
+  `unsupported metadata kind`.
+- **Hosts.** arm64 and x86-64 on Darwin and Linux. Anything else throws
+  `unsupported Swift host`.
+
 ## Going lower: the `/abi` entry point
 
 Everything above is the stable facade. When you need to reverse the Swift ABI
