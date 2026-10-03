@@ -121,8 +121,8 @@ function* protocolsMatching(query: string): Generator<ContextDescriptor> {
   }
 }
 
-export function* protocolDescriptors(filter?: NameFilter): Generator<ContextDescriptor> {
-  yield* protocolsMatching(nameQuery("protocols", filter));
+export function protocolDescriptors(filter?: NameFilter): Generator<ContextDescriptor> {
+  return protocolsMatching(nameQuery("protocols", filter));
 }
 
 export function* protocolsNamedUnder(moduleName: string): Generator<ContextDescriptor> {

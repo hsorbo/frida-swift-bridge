@@ -22,7 +22,13 @@ export function nameQuery(kind: "types" | "protocols", filter?: NameFilter): str
   if (filter === undefined) {
     return `${kind}:*!*`;
   }
-  return typeof filter === "string" ? `${kind}:*!${filter}` : `${kind}:${filter.path}!*`;
+  if (typeof filter === "string") {
+    return `${kind}:*!${filter}`;
+  }
+  if (typeof filter?.path !== "string") {
+    throw new Error("expected a Module or a name glob");
+  }
+  return `${kind}:${filter.path}!*`;
 }
 
 function requireFrida(minimum: number[]): void {

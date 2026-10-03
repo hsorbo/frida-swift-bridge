@@ -98,28 +98,29 @@ export function findNestedType(parentName: string, name: string): ContextDescrip
   return null;
 }
 
-export function* swiftTypes(filter?: NameFilter): Generator<ContextDescriptor> {
-  yield* typeDescriptors(nameQuery("types", filter));
+// The query is built before the generator so a bad filter throws at the call, not on iteration.
+export function swiftTypes(filter?: NameFilter): Generator<ContextDescriptor> {
+  return typeDescriptors(nameQuery("types", filter));
 }
 
-function* typesByKind(kind: ContextDescriptorKind, filter?: NameFilter): Generator<ContextDescriptor> {
-  for (const descriptor of swiftTypes(filter)) {
+function* ofKind(kind: ContextDescriptorKind, descriptors: Generator<ContextDescriptor>): Generator<ContextDescriptor> {
+  for (const descriptor of descriptors) {
     if (descriptor.kind === kind) {
       yield descriptor;
     }
   }
 }
 
-export function* swiftClasses(filter?: NameFilter): Generator<ContextDescriptor> {
-  yield* typesByKind(ContextDescriptorKind.Class, filter);
+export function swiftClasses(filter?: NameFilter): Generator<ContextDescriptor> {
+  return ofKind(ContextDescriptorKind.Class, swiftTypes(filter));
 }
 
-export function* swiftStructs(filter?: NameFilter): Generator<ContextDescriptor> {
-  yield* typesByKind(ContextDescriptorKind.Struct, filter);
+export function swiftStructs(filter?: NameFilter): Generator<ContextDescriptor> {
+  return ofKind(ContextDescriptorKind.Struct, swiftTypes(filter));
 }
 
-export function* swiftEnums(filter?: NameFilter): Generator<ContextDescriptor> {
-  yield* typesByKind(ContextDescriptorKind.Enum, filter);
+export function swiftEnums(filter?: NameFilter): Generator<ContextDescriptor> {
+  return ofKind(ContextDescriptorKind.Enum, swiftTypes(filter));
 }
 
 export function findType(name: string): ContextDescriptor | null {

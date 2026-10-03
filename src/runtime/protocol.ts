@@ -107,8 +107,12 @@ export class Protocol implements StableProtocol {
   }
 }
 
-export function* swiftProtocols(filter?: NameFilter): Generator<Protocol> {
-  for (const descriptor of protocolDescriptors(filter)) {
+export function swiftProtocols(filter?: NameFilter): Generator<Protocol> {
+  return protocolsOf(protocolDescriptors(filter));
+}
+
+function* protocolsOf(descriptors: Generator<ContextDescriptor>): Generator<Protocol> {
+  for (const descriptor of descriptors) {
     if (descriptor.fullTypeName !== null) {
       yield new Protocol(descriptor);
     }

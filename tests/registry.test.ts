@@ -177,6 +177,15 @@ describe("registry", () => {
     expect(names(Swift.enumerateTypes("*.NoSuchTypeQX"))).toEqual([]);
   });
 
+  test("a filter that is neither a Module nor a glob throws at the call", () => {
+    const bad = 12 as unknown as string;
+    expect(() => Swift.enumerateTypes(bad)).toThrow();
+    expect(() => Swift.enumerateClasses(bad)).toThrow();
+    expect(() => Swift.enumerateStructs(bad)).toThrow();
+    expect(() => Swift.enumerateEnums(bad)).toThrow();
+    expect(() => Swift.enumerateProtocols(bad)).toThrow();
+  });
+
   test("enumeration names generic types without realizing metadata", () => {
     loadFixture();
     const fixture = Process.getModuleByName(FIXTURE_MODULE);

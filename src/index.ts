@@ -37,12 +37,10 @@ import { choose, ChooseOptions } from "./runtime/choose.js";
 import { moduleRegistry, ModuleRegistry } from "./runtime/module-namespace.js";
 import { ContextDescriptor } from "./abi/context-descriptor.js";
 
-function* nameable(
-  descriptors: Generator<ContextDescriptor>
-): Generator<ContextDescriptor> {
+function* facadesOf<T extends NominalType>(descriptors: Generator<ContextDescriptor>): Generator<T["facade"]> {
   for (const descriptor of descriptors) {
     if (descriptor.fullTypeName !== null) {
-      yield descriptor;
+      yield (typeFromDescriptor(descriptor) as T).facade;
     }
   }
 }
@@ -178,40 +176,32 @@ export const Swift = {
     return nominalTypeNamed(name)?.facade ?? null;
   },
 
-  *enumerateTypes(filter?: NameFilter): Generator<SwiftTypeFacade> {
-    for (const descriptor of nameable(swiftTypes(filter))) {
-      yield typeFromDescriptor(descriptor).facade;
-    }
+  enumerateTypes(filter?: NameFilter): Generator<SwiftTypeFacade> {
+    return facadesOf<NominalType>(swiftTypes(filter));
   },
 
   class(name: string): SwiftClass | null {
     return typeOfKind(name, ClassType, "class");
   },
 
-  *enumerateClasses(filter?: NameFilter): Generator<SwiftClass> {
-    for (const descriptor of nameable(swiftClasses(filter))) {
-      yield (typeFromDescriptor(descriptor) as ClassType).facade;
-    }
+  enumerateClasses(filter?: NameFilter): Generator<SwiftClass> {
+    return facadesOf<ClassType>(swiftClasses(filter));
   },
 
   struct(name: string): SwiftStruct | null {
     return typeOfKind(name, StructType, "struct");
   },
 
-  *enumerateStructs(filter?: NameFilter): Generator<SwiftStruct> {
-    for (const descriptor of nameable(swiftStructs(filter))) {
-      yield (typeFromDescriptor(descriptor) as StructType).facade;
-    }
+  enumerateStructs(filter?: NameFilter): Generator<SwiftStruct> {
+    return facadesOf<StructType>(swiftStructs(filter));
   },
 
   enum(name: string): SwiftEnum | null {
     return typeOfKind(name, EnumType, "enum");
   },
 
-  *enumerateEnums(filter?: NameFilter): Generator<SwiftEnum> {
-    for (const descriptor of nameable(swiftEnums(filter))) {
-      yield (typeFromDescriptor(descriptor) as EnumType).facade;
-    }
+  enumerateEnums(filter?: NameFilter): Generator<SwiftEnum> {
+    return facadesOf<EnumType>(swiftEnums(filter));
   },
 
   closure,
