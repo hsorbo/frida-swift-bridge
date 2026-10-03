@@ -1376,6 +1376,22 @@ public func noncopyableConsumableType() -> UnsafeRawPointer {
 }
 #endif
 
+public struct GridPoint: Equatable {
+    public var x: Int
+    public var y: Int
+    public init(x: Int, y: Int) { self.x = x; self.y = y }
+}
+public struct TaggedCount: Equatable {
+    public var tag: String
+    public var n: Int
+    public init(tag: String, n: Int) { self.tag = tag; self.n = n }
+}
+public struct Approx: Equatable {
+    public var v: Double
+    public init(v: Double) { self.v = v }
+    public static func == (lhs: Approx, rhs: Approx) -> Bool { abs(lhs.v - rhs.v) < 0.5 }
+}
+
 // Method-name rendering: an operator and a generic return.
 public struct Selectors {
     public var n: Int

@@ -489,7 +489,11 @@ The control surface (never shadowed by Swift members of the same spelling):
 - `$container()`: on a value facade wrapping a bridged `Array`/`Set`/`Dictionary`,
   the decoded JS value.
 - `$dispose()` and `[Symbol.dispose]()`: release (idempotent); works with `using`.
-- `equals(other)`, `toString()`.
+- `equals(other)`: on an object, identity (Swift `===`); on a value, the type's
+  `==` through its `Equatable` conformance, so a custom `==` decides. A value
+  type with no `Equatable` conformance throws; `ValueInstance.equals` under
+  [`/abi`](#going-lower-the-abi-entry-point) compares storage instead.
+- `toString()`.
 
 ```js
 robot.$type.name;                       // "MyApp.Robot"

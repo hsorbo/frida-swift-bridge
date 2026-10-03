@@ -12,6 +12,9 @@ import {
   splitSelector,
 } from "./method.js";
 import { SwiftType, NominalType, ClassType, StructType, EnumType } from "./swift-type.js";
+import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js";
+import { WitnessTable } from "../abi/witness-table.js";
+import { typeName } from "./type-name.js";
 import { POISON, invokeOptions, splitSubscriptArgs, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 
 const RESERVED = new Set([
@@ -101,6 +104,19 @@ function handleOf(other: SwiftObject | ClassInstance | ValueInstance | NativePoi
   // A facade is `instanceof ClassInstance/ValueInstance` (proxy prototype), so unwrap it first.
   const raw = (other as { [RAW]?: ClassInstance | ValueInstance })[RAW] ?? other;
   return raw.handle;
+}
+
+// Swift ==: a value compares through its type's Equatable conformance, never bytewise.
+function equatableEquals(value: ValueInstance, other: SwiftObject | ClassInstance | ValueInstance | NativePointer): boolean {
+  const raw = (other as { [RAW]?: ClassInstance | ValueInstance })[RAW] ?? other;
+  if (!(raw instanceof ValueInstance) || !raw.metadata.handle.equals(value.metadata.handle)) {
+    return false;
+  }
+  const table = conformsToProtocol(value.metadata, findProtocol("Swift.Equatable")!);
+  if (table === null) {
+    throw new Error(`${typeName(value.metadata)} does not conform to Swift.Equatable; ValueInstance.equals under /abi compares storage`);
+  }
+  return new WitnessTable(table, value.metadata).method(value.metadata.handle, "==").call(value, raw) === true;
 }
 
 // One facade for class and value alike; $kind discriminates. The proxy roots its target, so an
@@ -214,7 +230,7 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
           return () => target.toJSON();
         case "equals":
           return (other: SwiftObject | ClassInstance | ValueInstance | NativePointer) =>
-            handle().equals(handleOf(other));
+            isValue ? equatableEquals(value, other) : handle().equals(handleOf(other));
         case "hasOwnProperty":
           return has;
         case "toString":
