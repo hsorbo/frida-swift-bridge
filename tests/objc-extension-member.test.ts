@@ -6,6 +6,16 @@ import { Swift, SwiftObjCClass } from "../src/index.js";
 import { findMethod } from "../src/runtime/method.js";
 
 const NSOBJECT_SWIFT_TAG = "$sSo8NSObjectC10nometadataE8swiftTagSiyF";
+
+// [[cls alloc] init] through the ObjC runtime: the receiver route takes any live ObjC object.
+function newObjCObject(className: string): NativePointer {
+  const libobjc = Process.getModuleByName("libobjc.A.dylib");
+  const msgSend = new NativeFunction(libobjc.getExportByName("objc_msgSend"), "pointer", ["pointer", "pointer"]);
+  const selector = new NativeFunction(libobjc.getExportByName("sel_registerName"), "pointer", ["pointer"]);
+  const lookUp = new NativeFunction(libobjc.getExportByName("objc_lookUpClass"), "pointer", ["pointer"]);
+  const cls = lookUp(Memory.allocUtf8String(className));
+  return msgSend(msgSend(cls, selector(Memory.allocUtf8String("alloc"))), selector(Memory.allocUtf8String("init")));
+}
 const NSOBJECT_SWIFT_BANNER = "$sSo8NSObjectC10nometadataE11swiftBannerSSyFZ";
 
 describe("Swift extension members of an imported ObjC class", () => {
@@ -91,6 +101,23 @@ describe("Swift extension members of an imported ObjC class", () => {
     expect(starling.swiftTag()).toEqual(int64(7));
     expect(starling.swiftTag(3)).toEqual(int64(21));
     expect(starling.chirp()).toBe("whistle");
+  });
+
+  test("a live ObjC object answers the extension members of its class chain", (ctx) => {
+    requireDarwin(ctx);
+    const object = Swift.adoptObject(newObjCObject("NSObject"));
+    expect(object.$type.name).toBe("__C.NSObject");
+    expect(object.$method("swiftTag()").origin).toEqual({ kind: "extension", type: "__C.NSObject", module: NOMETADATA_MODULE });
+    expect(object.$method("swiftTag()").call()).toEqual(int64(7));
+    expect(object.swiftTag(3)).toEqual(int64(21));
+    expect("swiftTag" in object).toBe(true);
+    expect(Swift.type("__C.NSObject")!.$type.instanceMethod("swiftTag()").bind(object).call()).toEqual(int64(7));
+    // A private concrete class (an NSMutableString is a __NSCFString) reaches NSObject through class_getSuperclass.
+    const string = Swift.adoptObject(newObjCObject("NSMutableString"));
+    expect(string.$type.name).not.toBe("__C.NSObject");
+    expect(string.$method("swiftTag(scaled:)").origin).toEqual({ kind: "extension", type: "__C.NSObject", module: NOMETADATA_MODULE });
+    expect(string.swiftTag(2)).toEqual(int64(14));
+    expect(() => object.$method("noSuchMember")).toThrow("no method noSuchMember on __C.NSObject");
   });
 
   test("a found member hooks like any other", (ctx) => {

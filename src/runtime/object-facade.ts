@@ -118,8 +118,7 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   const object = target as ClassInstance;
 
   const handle = (): NativePointer => target.handle;
-  const fullName = (): string =>
-    (isValue ? value.metadata : object.metadata).description.fullTypeName ?? "";
+  const fullName = (): string => (isValue ? value.metadata.description.fullTypeName ?? "" : object.typeName);
 
   const readProperty = (name: string): CallResult => (isValue ? value.get(name) : object.get(name));
   const writeProperty = (name: string, v: CallArg): void =>

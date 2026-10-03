@@ -4,7 +4,7 @@ import { isActor, isDefaultActor, readVTableChain, VTableEntry } from "./class-d
 import { enumerateClassInstanceFields, readObject, SwiftValue } from "./instance.js";
 import { ValueInstance } from "./value.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
-import { objcRetainCount } from "../runtime/objc.js";
+import { objcRetainCount, objcClassName } from "../runtime/objc.js";
 import { SwiftType, typeOf } from "../runtime/swift-type.js";
 import { typeName } from "../runtime/type-name.js";
 import {
@@ -154,7 +154,8 @@ export class ClassInstance implements RawInstance {
     if (options.typeArguments !== undefined) {
       return rootAsyncReceiver(bindGenericMethod(this.typeName, name, this.handle, { ...options, static: false }), this);
     }
-    if (this.metadata.description.isGeneric) {
+    const description = this.metadata.isTypeMetadata ? this.metadata.description : null;
+    if (description !== null && description.isGeneric) {
       return rootAsyncReceiver(bindGenericTypeClassMethod(this.dynamicType, this.handle, name, options), this);
     }
     const resolved = findMethod(this.typeName, name, { ...options, static: false });
@@ -162,9 +163,9 @@ export class ClassInstance implements RawInstance {
       return rootAsyncReceiver(bindConformanceMethod(this.typeName, this.handle, name, options), this);
     }
     let executor = null;
-    if (resolved.async === true && isActor(this.metadata.description)) {
+    if (resolved.async === true && description !== null && isActor(description)) {
       executor = actorSerialExecutor(this.dynamicType, this.handle)
-        ?? (isDefaultActor(this.metadata.description) ? { identity: this.handle, implementation: NULL } : null);
+        ?? (isDefaultActor(description) ? { identity: this.handle, implementation: NULL } : null);
     }
     return rootAsyncReceiver(bindResolved(resolved, this.handle, { executor }), this);
   }
@@ -202,8 +203,13 @@ export class ClassInstance implements RawInstance {
     setProperty(this.handle, this.typeName, name, value);
   }
 
-  private get typeName(): string {
-    const name = this.metadata.description.fullTypeName;
+  // An ObjC object's isa has no Swift descriptor; its Swift members live under the imported __C. name.
+  get typeName(): string {
+    const metadata = this.metadata;
+    if (!metadata.isTypeMetadata) {
+      return `__C.${objcClassName(metadata.handle)}`;
+    }
+    const name = metadata.description.fullTypeName;
     if (name === null) {
       throw new Error("ClassInstance: class has no type name");
     }

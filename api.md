@@ -450,6 +450,15 @@ view.$type.name;    // "MyApp.Robot"
 Both class and value instances are represented by a facade — a JS proxy that
 exposes Swift members directly and reserves the whole `$` prefix for its own
 controls, so an unknown `$` name reads as `undefined` without a lookup. A
+A live Objective-C object wraps the same way. Its type is the imported class
+(`"__C.NSURLSession"`), and `$method` or the bare-name sugar finds the Swift
+extension members declared on it or on any of its ObjC superclasses:
+
+```js
+const session = Swift.borrowObject(ObjC.classes.NSURLSession.sharedSession());
+await session.$method("data(from:delegate:)").call(url, null);
+```
+
 property wrapper's projected value, Swift's own `$`-name, is read with
 `$get("$x")`.
 `$kind` discriminates the two: `"object"` for classes, `"value"` for
@@ -720,9 +729,9 @@ An `async throws` function rejects its promise with a `SwiftError` (see
 
 The symbol may also be a cross-module extension method on an imported ObjC
 class — for example Foundation's `URLSession.data(from:)`. Bind the receiver
-from frida-objc-bridge, pass `null` where Swift expects an Optional `.none`,
-and an ObjC-class return arrives as a raw pointer ready to wrap in
-`ObjC.Object`:
+from frida-objc-bridge (or wrap it with `Swift.borrowObject` and call the
+member by name), pass `null` where Swift expects an Optional `.none`, and an
+ObjC-class return arrives as a raw pointer ready to wrap in `ObjC.Object`:
 
 ```js
 const DATA_FROM =
