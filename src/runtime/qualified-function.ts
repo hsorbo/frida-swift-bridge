@@ -3,6 +3,7 @@ import {
   CallArg,
   CallResult,
   FoundMember,
+  FunctionResolveOptions,
   MemberOrigin,
   SwiftAsyncFunction,
   SwiftFunction,
@@ -120,21 +121,24 @@ export function qualifiedAsyncFunction(
 
 export function resolveSwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]>(
   module: Module,
-  mangled: string
+  mangled: string,
+  options?: FunctionResolveOptions
 ): SwiftFunction<Ret, Args>;
 export function resolveSwiftFunction(qualified: string, options?: ValueMethodResolveOptions): SwiftMemberFunction;
 export function resolveSwiftFunction(
   target: Module | string,
-  spec?: string | ValueMethodResolveOptions
+  spec?: string | ValueMethodResolveOptions,
+  options?: FunctionResolveOptions
 ): SwiftFunction | SwiftMemberFunction {
   return typeof target === "string"
     ? qualifiedFunction(target, spec as ValueMethodResolveOptions | undefined)
-    : resolveFunction(target, spec as string);
+    : resolveFunction(target, spec as string, options);
 }
 
 export function resolveSwiftAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
   module: Module,
-  mangled: string
+  mangled: string,
+  options?: FunctionResolveOptions
 ): SwiftAsyncFunction<Ret, Args>;
 export function resolveSwiftAsyncFunction(
   qualified: string,
@@ -142,9 +146,10 @@ export function resolveSwiftAsyncFunction(
 ): SwiftAsyncMemberFunction;
 export function resolveSwiftAsyncFunction(
   target: Module | string,
-  spec?: string | ValueMethodResolveOptions
+  spec?: string | ValueMethodResolveOptions,
+  options?: FunctionResolveOptions
 ): SwiftAsyncFunction | SwiftAsyncMemberFunction {
   return typeof target === "string"
     ? qualifiedAsyncFunction(target, spec as ValueMethodResolveOptions | undefined)
-    : resolveAsyncFunction(target, spec as string);
+    : resolveAsyncFunction(target, spec as string, options);
 }

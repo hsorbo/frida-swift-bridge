@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadResilient } from "./fixtures/load.js";
 import { SWIFTCORE_MODULE } from "./swift.js";
 
-import { Swift, SwiftError, ClassType, SwiftObject } from "../src/index.js";
+import { Swift, SwiftError, ClassType, SwiftObject, SwiftStruct, SwiftType } from "../src/index.js";
 import { metadataFor, typeOf } from "../src/abi.js";
 
 const ADD_INTS = "$s7fixture7addIntsyS2i_SitF";
@@ -12,6 +12,14 @@ const SUM_LOADABLE = "$s7fixture11sumLoadableySiAA0C6StructVF";
 const MAKE_LOADABLE_STRUCT = "$s7fixture18makeLoadableStructAA0cD0VyF";
 const MIGHT_THROW = "$s7fixture10mightThrowyS2iKF";
 const GENERIC_IDENTITY = "$s7fixture15genericIdentityyxxlF";
+const GENERIC_FIRST = "$s7fixture12genericFirstyxx_q_tr0_lF";
+const SCALE_GENERIC = "$s7fixture12scaleGeneric_2bySix_SitAA8ScalableRzlF";
+const ECHO_GENERIC_ASYNC = "$s7fixture16echoGenericAsyncyxxYalF";
+const ACCUMULATOR_PEEK = "$s7fixture11AccumulatorV4peekyS2iF";
+const ACCUMULATOR_PEEK_ASYNC = "$s7fixture11AccumulatorV9peekAsyncyS2iYaF";
+const ACCUMULATOR_DEPOSIT_ASYNC = "$s7fixture11AccumulatorV12depositAsyncyySiYaF";
+const SMALL_GENERIC_BOX_ECHO = "$s7fixture15SmallGenericBoxV4echoyxxlF";
+const SMALL_GENERIC_BOX_SCALED_BY_ASYNC = "$s7fixture15SmallGenericBoxV13scaledByAsyncySix_SitYaAA8ScalableRzlF";
 const ROBOT_METADATA_ACCESSOR = "$s7fixture5RobotCMa";
 const ROBOT_GREET = "$s7fixture5RobotC5greetyS2SF";
 const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
@@ -23,8 +31,12 @@ const RESILIENT_BASE_GREETING_DISPATCH_THUNK = "$s9resilient13ResilientBaseC8gre
 
 describe("Swift.function", () => {
   let module: Module;
+  let Int: SwiftType;
+  let Str: SwiftType;
   beforeEach(() => {
     module = loadFixture();
+    Int = typeOf(metadataFor("Swift.Int")!);
+    Str = typeOf(metadataFor("Swift.String")!);
   });
 
   test("calls a free function with Int arguments: addInts(20, 22) ⇒ 42", () => {
@@ -76,8 +88,43 @@ describe("Swift.function", () => {
     expect(() => Swift.function(module, ADD_INTS).call(1)).toThrow(/2 argument/);
   });
 
-  test("rejects a generic symbol", () => {
-    expect(() => Swift.function(module, GENERIC_IDENTITY)).toThrow(/genericIdentity\(_:\) is generic/);
+  test("calls a generic free function with { typeArguments }: genericIdentity<Int>(21) ⇒ 21", () => {
+    expect(Swift.function(module, GENERIC_IDENTITY, { typeArguments: [Int] }).call(21)).toEqual(int64(21));
+    expect(Swift.function(module, GENERIC_IDENTITY, { typeArguments: [Str] }).call("hi")).toBe("hi");
+    expect(Swift.function(module, GENERIC_FIRST, { typeArguments: [Int, Str] }).call(7, "x")).toEqual(int64(7));
+  });
+
+  test("passes the witness table of a constrained generic: scaleGeneric<Int>(3, by: 7) ⇒ 21", () => {
+    expect(Swift.function(module, SCALE_GENERIC, { typeArguments: [Int] }).call(3, 7)).toEqual(int64(21));
+  });
+
+  test("a generic symbol without its type arguments throws", () => {
+    expect(() => Swift.function(module, GENERIC_IDENTITY)).toThrow(/genericIdentity\(_:\); supply it via \{ typeArguments \}/);
+    expect(() => Swift.function(module, GENERIC_FIRST, { typeArguments: [Int] })).toThrow(/needs 2 type argument/);
+  });
+
+  test("drives a generic async free function: echoGenericAsync<Int>(21) ⇒ 21", async () => {
+    expect(await Swift.asyncFunction(module, ECHO_GENERIC_ASYNC, { typeArguments: [Int] }).call(21)).toEqual(int64(21));
+    expect(await Swift.function(module, ECHO_GENERIC_ASYNC, { typeArguments: [Str] }).call("hi")).toBe("hi");
+  });
+
+  test("binds a value receiver: Accumulator(total: 10).peek(5) ⇒ 15, peekAsync(5) ⇒ 15", async () => {
+    const acc = (Swift.type("fixture.Accumulator") as SwiftStruct).$new({ total: 10 });
+    expect(Swift.function(module, ACCUMULATOR_PEEK).bind(acc)(5)).toEqual(int64(15));
+    expect(await Swift.asyncFunction(module, ACCUMULATOR_PEEK_ASYNC).bind(acc)(5)).toEqual(int64(15));
+  });
+
+  test("binds a mutating async value method with { self: \"mutating\" }: depositAsync(5) adds to total", async () => {
+    const acc = (Swift.type("fixture.Accumulator") as SwiftStruct).$new({ total: 10 });
+    await Swift.asyncFunction(module, ACCUMULATOR_DEPOSIT_ASYNC, { self: "mutating" }).bind(acc)(5);
+    expect(acc.total).toEqual(int64(15));
+  });
+
+  test("binds a value receiver for a generic method: SmallGenericBox.echo<Int>(7) ⇒ 7, scaledByAsync<Int>(3, 7) ⇒ 31", async () => {
+    const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 10 });
+    expect(Swift.function(module, SMALL_GENERIC_BOX_ECHO, { typeArguments: [Int] }).bind(box)(7)).toEqual(int64(7));
+    const scaledBy = Swift.asyncFunction(module, SMALL_GENERIC_BOX_SCALED_BY_ASYNC, { typeArguments: [Int], self: "borrowing" });
+    expect(await scaledBy.bind(box)(3, 7)).toEqual(int64(31));
   });
 
   test("rejects a method of a generic type", () => {

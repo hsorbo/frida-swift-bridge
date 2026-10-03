@@ -1858,36 +1858,50 @@ function resolveReceiver(signature: SwiftFunctionSignature): FunctionReceiver {
 // casting; both default to the untyped CallResult/CallArg.
 export class SwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]> {
   constructor(
-    private readonly resolved: ResolvedMethod,
-    private readonly receiver: FunctionReceiver
+    private readonly plan: CallPlan,
+    private readonly receiver: FunctionReceiver,
+    private readonly selfOwnership?: SelfOwnership
   ) {}
 
   get address(): NativePointer {
-    return this.resolved.address;
+    return this.plan.address;
   }
 
   call(...args: Args): Ret {
     if (this.receiver.instanceType !== null) {
-      throw new Error(`${this.resolved.selector} is an instance method; bind a receiver with .bind(self)`);
+      throw new Error(`${this.plan.selector} is an instance method; bind a receiver with .bind(self)`);
     }
-    return this.boundTo(this.receiver.metatypeSelf).call(...args) as Ret;
+    return new BoundMethod(this.plan, { self: this.receiver.metatypeSelf }).call(...args) as Ret;
   }
 
   bind(receiver: AsyncReceiver): (...args: Args) => Ret {
     const { instanceType } = this.receiver;
     if (instanceType === null) {
-      throw new Error(`${this.resolved.selector} takes no receiver`);
-    }
-    if (!isClassType(instanceType)) {
-      throw new Error(`receiver binding is only supported for class receivers, not ${typeName(instanceType)}`);
+      throw new Error(`${this.plan.selector} takes no receiver`);
     }
     const self = toReceiverPointer(receiver);
-    return (...args: Args) => rootAsyncReceiver(this.boundTo(self), receiver).call(...args) as Ret;
+    const binding: Binding = isClassType(instanceType)
+      ? { self }
+      : { self, routing: valueReceiverRouting(instanceType, this.plan, this.selfOwnership), consumedSelf: this.selfOwnership === "consuming" ? instanceType : null };
+    return (...args: Args) => rootAsyncReceiver(new BoundMethod(this.plan, binding), receiver).call(...args) as Ret;
   }
+}
 
-  private boundTo(self: NativePointer | null): BoundMethod {
-    return bindResolved(this.resolved, self);
+// A value receiver routes as the facade's $method would: both ways for a plain sync call, borrowing
+// unless stated for a plain async one, and probed from the callee once implicit words trail self.
+function valueReceiverRouting(receiver: Metadata, plan: CallPlan, ownership: SelfOwnership | undefined): SelfRouting {
+  const implicitWords = plan.typeArguments.length + plan.witnessTables.length;
+  if (implicitWords > 0) {
+    return genericValueSelfRouting(receiver, plan, ownership, { trailingSelf: implicitWords, selfInRegister: implicitWords });
   }
+  if (!plan.async) {
+    return shouldPassIndirectly(receiver) ? { indirect: true } : { indirect: false, receiver, bothWays: true };
+  }
+  const routing = valueSelfRouting(receiver, plan.selector, ownership ?? "borrowing");
+  if (!routing.indirect && ownership === undefined) {
+    routing.bothWays = true;
+  }
+  return routing;
 }
 
 export class SwiftAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]> extends SwiftFunction<
@@ -1907,44 +1921,57 @@ function parseFunctionSymbol(mangled: string): SwiftFunctionSignature {
   return signature;
 }
 
+export interface FunctionResolveOptions {
+  typeArguments?: (SwiftType | SwiftTypeFacade)[]; // one entry per generic parameter
+  self?: SelfOwnership; // how a bound value receiver is taken, as for $method
+}
+
 export function resolveFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]>(
   module: Module,
-  mangled: string
+  mangled: string,
+  options: FunctionResolveOptions = {}
 ): SwiftFunction<Ret, Args> {
   const signature = parseFunctionSymbol(mangled);
-  if (signature.genericParams.length > 0) {
-    throw new Error(`${signature.selector} is generic; generic functions are not supported here`);
-  }
-  const resolved = signature.async
-    ? resolveAsyncSymbol(module, mangled, signature)
-    : resolveSyncSymbol(module, mangled, signature);
-  return new SwiftFunction<Ret, Args>(resolved, resolveReceiver(signature));
+  return new SwiftFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self);
 }
 
 export function resolveAsyncFunction<Ret = CallResult, Args extends CallArg[] = CallArg[]>(
   module: Module,
-  mangled: string
+  mangled: string,
+  options: FunctionResolveOptions = {}
 ): SwiftAsyncFunction<Ret, Args> {
   const signature = parseFunctionSymbol(mangled);
   if (!signature.async) {
     throw new Error(`${signature.selector} is not async; use Swift.function`);
   }
-  if (signature.genericParams.length > 0) {
-    throw new Error(`${signature.selector} is generic; async generics are not supported here`);
-  }
-  return new SwiftAsyncFunction<Ret, Args>(
-    resolveAsyncSymbol(module, mangled, signature),
-    resolveReceiver(signature)
-  );
+  return new SwiftAsyncFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self);
 }
 
-function resolveSyncSymbol(module: Module, mangled: string, signature: SwiftFunctionSignature): ResolvedMethod {
+// A generic symbol is planned as a generic method is: its type arguments and witness tables trail
+// the formal arguments, and only a signature planGenericType cannot lower is refused.
+function planFunctionSymbol(module: Module, mangled: string, signature: SwiftFunctionSignature, options: FunctionResolveOptions): CallPlan {
+  if (!argPlanBound(signature)) {
+    if (signature.genericParams.length > 0) {
+      throw new Error(`unsupported generic signature: ${signature.selector}`);
+    }
+    return planOf(signature.async ? resolveAsyncSymbol(module, mangled, signature) : resolveSyncSymbol(module, mangled, signature));
+  }
+  rejectInitializer(signature);
+  const typeArguments = options.typeArguments?.map((t) => metadataOf(t));
+  return planGenericSignature(symbolAddress(module, mangled), mangled, signature, { typeArguments });
+}
+
+function symbolAddress(module: Module, mangled: string): NativePointer {
   const address = module.findExportByName(mangled) ?? module.findSymbolByName(mangled);
   if (address === null) {
     throw new Error(`no symbol ${mangled} in ${module.name}`);
   }
+  return address.strip();
+}
+
+function resolveSyncSymbol(module: Module, mangled: string, signature: SwiftFunctionSignature): ResolvedMethod {
   return {
-    address: address.strip(),
+    address: symbolAddress(module, mangled),
     ...resolveSignatureTypes(signature),
     throws: signature.throws,
     isStatic: false,
@@ -1971,14 +1998,18 @@ function resolveAsyncSymbol(module: Module, mangled: string, signature: SwiftFun
   };
 }
 
-function resolveSignatureTypes(
-  signature: SwiftFunctionSignature
-): { argTypes: Metadata[]; returnType: Metadata | null; thrown?: ThrownType; argConventions: ParamConvention[] } {
+function rejectInitializer(signature: SwiftFunctionSignature): void {
   if (methodKind(signature.name) === "init") {
     throw new Error(
       `${signature.selector} is an initializer, which consumes its arguments; construct through Swift.type(...).init`
     );
   }
+}
+
+function resolveSignatureTypes(
+  signature: SwiftFunctionSignature
+): { argTypes: Metadata[]; returnType: Metadata | null; thrown?: ThrownType; argConventions: ParamConvention[] } {
+  rejectInitializer(signature);
   const params = splitParams(signature.params);
   const { argTypes, returnType, thrown } = signatureMetadata(signature);
   return { argTypes, returnType, thrown, argConventions: params.conventions };
@@ -2489,7 +2520,6 @@ function argPlanBound(signature: SwiftFunctionSignature): boolean {
 
 function planGenericMethod(typeNameArg: string, methodName: string, options: RawMethodResolveOptions): CallPlan {
   const fullName = canonicalTypeName(typeNameArg);
-  const typeArguments = options.typeArguments ?? [];
   const candidates = matchingMethods(
     fullName,
     options,
@@ -2503,6 +2533,16 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     throw new Error(`ambiguous generic method ${methodName} on ${fullName}: ${selectors} (disambiguate with { arity } or { labels })`);
   }
   const { address, signature, mangled } = candidates[0];
+  return { ...planGenericSignature(address, mangled, signature, options), origin: memberOrigin(address, fullName) };
+}
+
+function planGenericSignature(
+  address: NativePointer,
+  mangled: string,
+  signature: SwiftFunctionSignature,
+  options: RawMethodResolveOptions
+): CallPlan {
+  const typeArguments = options.typeArguments ?? [];
   const resolvedTypeArguments =
     typeArguments.length === 0 && signature.genericParams.length > 0
       ? inferClosureTypeArguments(signature)
@@ -2531,8 +2571,7 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
       throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
     }
   }
-  const origin = memberOrigin(address, fullName);
-  return setterPlan({ address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, thrown, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin, signature });
+  return setterPlan({ address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, thrown, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, signature });
 }
 
 function planThrownType(signature: SwiftFunctionSignature, typeParams: string[], typeArguments: Metadata[]): ThrownType | undefined {

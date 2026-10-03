@@ -135,6 +135,7 @@ export type {
   MethodKind,
   MethodResolveOptions,
   ValueMethodResolveOptions,
+  FunctionResolveOptions,
   SelfOwnership,
   AccessorKind,
   PropertyInfo,

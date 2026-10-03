@@ -82,8 +82,8 @@ The default export is the whole facade. Its members:
   look up protocols. See [Protocols](#protocols).
 - `Swift.NativeFunction(address, returnType, argTypes, options?)`: wrap a free
   Swift function as a callable. See [Free functions](#free-functions).
-- `Swift.function(module, mangledName)`: wrap a Swift function, sync or
-  `async`, resolved from its mangled symbol, with its types derived from the
+- `Swift.function(module, mangledName, options?)`: wrap a Swift function, sync
+  or `async`, resolved from its mangled symbol, with its types derived from the
   signature. See [Free functions](#free-functions).
 - `Swift.function(qualifiedSelector, options?)`: resolve a type's member from
   its qualified selector, `"Module.Type.member(labels:)"`. See
@@ -695,7 +695,8 @@ await computeAsync.call(21);    // 42
 
 An instance method binds its receiver first: `.bind(self)` accepts a Swift
 object facade, a raw pointer, or an ObjC object, and returns a plain async
-function. Receiver binding is supported for class receivers.
+function. A value receiver is routed as `$method` would route it, so a small
+loadable receiver of a mutating method states `{ self: "mutating" }`.
 
 ```js
 const calc = Swift.type("MyApp.AsyncCalc").init(100);
@@ -707,8 +708,8 @@ An `async throws` function rejects its promise with a `SwiftError` (see
 [Errors](#errors)); a tuple return decodes to a destructurable array. Misuse
 fails fast: a non-async symbol is rejected (use `Swift.function`),
 calling an unbound instance method throws, as does binding a receiver to a
-free function. Generic async functions and methods of generic types are not
-supported.
+free function. A generic symbol takes `{ typeArguments }` as a generic method
+does; methods of generic types are not supported.
 
 In TypeScript the wrapper is generic like `NativeFunction<Ret, Args>`: annotate
 the marshalled return (and optionally argument) types once and the call site is
@@ -915,11 +916,11 @@ mightThrow.call(1);       // throws SwiftError
 ```
 
 It has the same shape as `Swift.asyncFunction` (see
-[Async and actors](#async-and-actors)): an instance method binds a class
-receiver with `.bind(self)` and returns a plain function, and the TypeScript
-wrapper is generic over the return and argument types. It also accepts an
-`async` symbol, whose calls return a `Promise`: sync and async share one call
-site, as with methods.
+[Async and actors](#async-and-actors)): an instance method binds its receiver
+with `.bind(self)` and returns a plain function, and the TypeScript wrapper is
+generic over the return and argument types. It also accepts an `async` symbol,
+whose calls return a `Promise`: sync and async share one call site, as with
+methods.
 
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
@@ -930,9 +931,18 @@ const computeAsync = Swift.function(app, "$s5MyApp12computeAsyncyS2iYaF");
 await computeAsync.call(21);    // 42
 ```
 
-Generic functions and methods of generic types are rejected; reach for `/abi`
-for those. An initializer consumes its arguments, so it is rejected too:
-construct through `Swift.type(...).init`.
+A generic function takes its type arguments as a generic method does, one per
+parameter in `{ typeArguments }`; the witness tables its where-clause needs are
+resolved from them. A value receiver takes `{ self }` as `$method` does.
+
+```js
+const Int = Swift.type("Swift.Int");
+Swift.function(app, "$s5MyApp15genericIdentityyxxlF", { typeArguments: [Int] }).call(21);   // 21
+```
+
+Methods of generic types are rejected; reach for `/abi` for those. An
+initializer consumes its arguments, so it is rejected too: construct through
+`Swift.type(...).init`.
 
 A type's member can also be named by its qualified selector, the spelling a
 demangled symbol prints: `Swift.function("Module.Type.member(labels:)")`. The
@@ -1365,9 +1375,9 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
   parameter is refused too.
 - **Tuples with an opaque element.** A tuple parameter, result or async result
   with an element of generic, opaque layout is refused.
-- **Generic free functions.** `Swift.function` and `Swift.asyncFunction` take
-  only non-generic symbols, and an async function's `.bind` takes only a class
-  receiver.
+- **Methods of generic types in `Swift.function`.** `Swift.function` and
+  `Swift.asyncFunction` plan a symbol's own generic parameters, not those of
+  its enclosing type.
 - **Existential argument and result types in `Swift.swiftFunction`.** Both must
   be concrete.
 - **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan,

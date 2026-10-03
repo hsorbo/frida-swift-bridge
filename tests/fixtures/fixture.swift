@@ -1647,6 +1647,10 @@ public func computeAsync(_ x: Int) async -> Int {
     await Task.yield()
     return x * 2
 }
+public func echoGenericAsync<T>(_ x: T) async -> T {
+    await Task.yield()
+    return x
+}
 
 final class AsyncResultBox: @unchecked Sendable { var value = 0 }
 
