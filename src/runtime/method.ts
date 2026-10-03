@@ -2428,7 +2428,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     }
   }
   return {
-    address,
+    address: address.strip(),
     selector: signature.selector,
     argPlans,
     returnPlan,
