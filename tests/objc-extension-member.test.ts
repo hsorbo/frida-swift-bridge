@@ -79,6 +79,20 @@ describe("Swift extension members of an imported ObjC class", () => {
     expect(Protocol.$type.typeMethods()).toContain("swiftBanner()");
   });
 
+  test("a Swift class rooted in an ObjC class finds the extension members of its ObjC superclasses", (ctx) => {
+    requireDarwin(ctx);
+    const Starling = Swift.class("fixture.Starling")!;
+    expect(Starling.$typeMethod("swiftBanner()").origin).toEqual({ kind: "extension", type: "__C.NSObject", module: NOMETADATA_MODULE });
+    expect(Starling.$type.instanceMethods()).toContain("swiftTag()");
+    expect(Starling.$type.typeMethods()).toContain("swiftBanner()");
+    expect(Starling.swiftBanner()).toBe("banner");
+    expect(Starling.swiftVersion).toEqual(int64(3));
+    const starling = Starling.init();
+    expect(starling.swiftTag()).toEqual(int64(7));
+    expect(starling.swiftTag(3)).toEqual(int64(21));
+    expect(starling.chirp()).toBe("whistle");
+  });
+
   test("a found member hooks like any other", (ctx) => {
     requireDarwin(ctx);
     const NSObject = Swift.type("__C.NSObject")!;

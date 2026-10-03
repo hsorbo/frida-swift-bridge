@@ -677,11 +677,16 @@ function importedObjCClassToken(fullName: string): string {
 }
 
 function importedObjCClassChain(fullName: string): string[] {
+  const names = objcClassChainNames(lookUpObjCClass(fullName.slice(OBJC_MODULE_PREFIX.length)));
+  return names.length === 0 ? [fullName] : names;
+}
+
+function objcClassChainNames(cls: NativePointer | null): string[] {
   const names: string[] = [];
-  for (let cls = lookUpObjCClass(fullName.slice(OBJC_MODULE_PREFIX.length)); cls !== null; cls = objcSuperclass(cls)) {
+  for (; cls !== null; cls = objcSuperclass(cls)) {
     names.push(`${OBJC_MODULE_PREFIX}${objcClassName(cls)}`);
   }
-  return names.length === 0 ? [fullName] : names;
+  return names;
 }
 
 // The metatype value of an imported ObjC class is the class itself, not its Swift wrapper.
@@ -712,7 +717,8 @@ function canonicalTypeName(typeName: string): string {
 }
 
 // A member is keyed to its declaring class, so inherited ones need the superclass chain.
-// Most-derived first; non-class/generic types collapse to one level.
+// Most-derived first; non-class/generic types collapse to one level. A Swift class rooted in an
+// ObjC class continues through its ObjC superclasses, whose Swift members are extension members.
 function classChainNames(fullName: string): string[] {
   if (isImportedObjCClass(fullName)) {
     return importedObjCClassChain(fullName);
@@ -730,6 +736,9 @@ function classChainNames(fullName: string): string[] {
     }
     names.push(name);
     cls = cls.superclass;
+  }
+  if (cls !== null && !cls.isTypeMetadata) {
+    names.push(...objcClassChainNames(cls.handle));
   }
   return names.length === 0 ? [fullName] : names;
 }
@@ -2919,6 +2928,9 @@ function conformanceMembers(fullName: string, mayName: SymbolFilter | null = nul
   const conformances: { table: WitnessTable; protocol: ContextDescriptor }[] = [];
   const seen = new Set<string>();
   for (const className of classChainNames(fullName)) {
+    if (isImportedObjCClass(className)) {
+      continue;
+    }
     for (const protocol of conformingProtocols(findType(className)!.handle)) {
       const key = protocol.handle.toString();
       if (seen.has(key)) {
