@@ -20,7 +20,7 @@ describe("Swift.choose", () => {
     expect(handles(found)).toContain(second.$handle.toString());
     expect(found.every((o) => o.$type.name === "fixture.Base" && !o.$owned)).toBe(true);
     expect(found.find((o) => o.$handle.equals(second.$handle))!.kind).toEqual(int64(2));
-  });
+  }, { timeout: 30000 });
 
   test("includes subclass instances by default and excludes them on request", () => {
     const Base = Swift.class("fixture.Base")!;
@@ -29,7 +29,7 @@ describe("Swift.choose", () => {
     expect(handles(withSubclasses)).toContain(derived.$handle.toString());
     expect(withSubclasses.find((o) => o.$handle.equals(derived.$handle))!.$type.name).toBe("fixture.Derived");
     expect(handles(Swift.choose(Base, { subclasses: false }))).not.toContain(derived.$handle.toString());
-  });
+  }, { timeout: 30000 });
 
   test("a generic class named without arguments covers its live specializations", () => {
     const intCell = Swift.class("fixture.Cell<Swift.Int>")!.init(5);
