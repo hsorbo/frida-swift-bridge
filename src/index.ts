@@ -98,6 +98,7 @@ export {
   SwiftValueType,
   SwiftStruct,
   SwiftEnum,
+  SwiftObjCClass,
   SwiftClassBoundInitializer,
 } from "./runtime/type-facade.js";
 export { SwiftValue } from "./abi/instance.js";

@@ -53,3 +53,13 @@ public extension Collection {
 public extension CustomStringConvertible {
     func quoted() -> String { "\"\(description)\"" }
 }
+
+#if canImport(ObjectiveC)
+import ObjectiveC
+public extension NSObject {
+    func swiftTag() -> Int { 7 }
+    func swiftTag(scaled by: Int) -> Int { 7 * by }
+    static func swiftBanner() -> String { "banner" }
+    static var swiftVersion: Int { 3 }
+}
+#endif

@@ -5,7 +5,7 @@ import { isActor, isDefaultActor } from "../abi/class-descriptor.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
-import { parseSwiftSignature, symbolicate, resolveParsedType, resolveTypeExpr, ParamConvention } from "./symbolication.js";
+import { parseSwiftSignature, symbolicate, resolveParsedType, resolveTypeExpr, resolveType, ParamConvention } from "./symbolication.js";
 import {
   SwiftBoundMethod,
   CallArg,
@@ -24,14 +24,16 @@ import {
   splitSelector,
   initializerLookup,
   findMember,
+  importedObjCClassName,
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
 import { metatypeInstanceType } from "../abi/metatype.js";
 import { readFunctionType, ParameterOwnership } from "../abi/function-type.js";
 import { typeName } from "./type-name.js";
+import { objcClassName } from "./objc.js";
 import { findType } from "../reflection/registry.js";
 import { Protocol, protocolsForType } from "./protocol.js";
-import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum, typeFacade } from "./type-facade.js";
+import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum, SwiftObjCClass, typeFacade } from "./type-facade.js";
 
 export interface TypeMember {
   name: string;
@@ -307,9 +309,26 @@ export class ClassType extends NominalType {
   }
 }
 
-export class ObjCClassWrapperType extends SwiftType {
+export class ObjCClassWrapperType extends NominalType {
+  get facade(): SwiftObjCClass {
+    return facadeOf(this, () => typeFacade(new SwiftObjCClass(this)));
+  }
+
   get objcClass(): NativePointer {
     return objcClassOf(metadataOf(this));
+  }
+
+  // swift_getTypeName prints the class bare; its symbols spell it under the __C module.
+  get name(): string {
+    return `__C.${objcClassName(this.objcClass)}`;
+  }
+
+  get moduleName(): string {
+    return "__C";
+  }
+
+  protocols(): { [name: string]: Protocol } {
+    throw new Error(`${this.name} is an Objective-C class; its conformances are not listed`);
   }
 }
 
@@ -576,8 +595,14 @@ export function nominalTypeNamed(name: string): NominalType | null {
     const type = metadata === null ? null : typeOf(metadata);
     return type instanceof NominalType ? type : null;
   }
-  const descriptor = findType(name);
-  return descriptor === null ? null : typeFromDescriptor(descriptor);
+  const descriptor = name.startsWith("__C.") ? null : findType(name);
+  if (descriptor !== null) {
+    return typeFromDescriptor(descriptor);
+  }
+  const objcClass = importedObjCClassName(name);
+  const metadata = objcClass === null ? null : resolveType(objcClass);
+  const type = metadata === null ? null : typeOf(metadata);
+  return type instanceof NominalType ? type : null;
 }
 
 // A non-generic nominal type has one wrapper, shared by its descriptor and its metadata; every

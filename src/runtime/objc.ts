@@ -78,3 +78,25 @@ export function objcRetainCount(object: NativePointer): number {
   }
   return Number(cachedRetainCountSend(object, cachedRetainCountSelector!));
 }
+
+let cachedClassGetSuperclass: NativeFunction<NativePointer, [NativePointerValue]> | null = null;
+let cachedClassGetName: NativeFunction<NativePointer, [NativePointerValue]> | null = null;
+
+export function objcSuperclass(cls: NativePointer): NativePointer | null {
+  if (cachedClassGetSuperclass === null) {
+    const libobjc = Process.getModuleByName("libobjc.A.dylib");
+    cachedClassGetSuperclass = new NativeFunction(libobjc.getExportByName("class_getSuperclass"), "pointer", [
+      "pointer",
+    ]);
+  }
+  const superclass = cachedClassGetSuperclass(cls);
+  return superclass.isNull() ? null : superclass;
+}
+
+export function objcClassName(cls: NativePointer): string {
+  if (cachedClassGetName === null) {
+    const libobjc = Process.getModuleByName("libobjc.A.dylib");
+    cachedClassGetName = new NativeFunction(libobjc.getExportByName("class_getName"), "pointer", ["pointer"]);
+  }
+  return cachedClassGetName(cls).readUtf8String()!;
+}

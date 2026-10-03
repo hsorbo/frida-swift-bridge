@@ -53,7 +53,7 @@ import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClas
 import { SwiftClosure, ClosureSpec, ClosureBody, LoadableClosureBody, SwiftThrow } from "./closure.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
-import { lookUpObjCProtocol } from "./objc.js";
+import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName } from "./objc.js";
 import { getSwiftCoreApi } from "./api.js";
 import { readString, createString } from "../abi/string.js";
 import {
@@ -650,8 +650,43 @@ function describeOverloads(candidates: MethodCandidate[]): string {
 
 function memberOrigin(address: NativePointer, type: string): MemberOrigin {
   const module = imageName(address);
-  const owner = imageName(findType(type)!.handle);
+  const owner = isImportedObjCClass(type) ? null : imageName(findType(type)!.handle);
   return { kind: module === owner ? "own" : "extension", type, module };
+}
+
+const OBJC_MODULE_PREFIX = "__C.";
+const OBJC_CLASS_IDENTIFIER = /^[A-Za-z_]\w*$/;
+
+function isImportedObjCClass(fullName: string): boolean {
+  return fullName.startsWith(OBJC_MODULE_PREFIX);
+}
+
+// The demangler spells an imported ObjC class __C.<name>; a bare name is accepted when no Swift type
+// claims it. Its Swift members are all extension members, led by the class's So<len><name>C token.
+export function importedObjCClassName(name: string): string | null {
+  const ident = isImportedObjCClass(name) ? name.slice(OBJC_MODULE_PREFIX.length) : name;
+  if (Process.platform !== "darwin" || !OBJC_CLASS_IDENTIFIER.test(ident) || lookUpObjCClass(ident) === null) {
+    return null;
+  }
+  return `${OBJC_MODULE_PREFIX}${ident}`;
+}
+
+function importedObjCClassToken(fullName: string): string {
+  const ident = fullName.slice(OBJC_MODULE_PREFIX.length);
+  return `So${ident.length}${ident}C`;
+}
+
+function importedObjCClassChain(fullName: string): string[] {
+  const names: string[] = [];
+  for (let cls = lookUpObjCClass(fullName.slice(OBJC_MODULE_PREFIX.length)); cls !== null; cls = objcSuperclass(cls)) {
+    names.push(`${OBJC_MODULE_PREFIX}${objcClassName(cls)}`);
+  }
+  return names.length === 0 ? [fullName] : names;
+}
+
+// The metatype value of an imported ObjC class is the class itself, not its Swift wrapper.
+function metatypeSelf(type: Metadata): NativePointer {
+  return type.kind === MetadataKind.ObjCClassWrapper ? objcClassOf(type) : type.handle;
 }
 
 // swift_getTypeName spells a private type's anonymous parent as "(unknown context at $<address>)";
@@ -660,9 +695,14 @@ const RUNTIME_ANONYMOUS_CONTEXT = /\(unknown context at \$[0-9a-f]+\)\./g;
 const PRIVATE_DECL_NAME = /\(([^()\s]+) in _[0-9A-F]+\)/g;
 
 function canonicalTypeName(typeName: string): string {
-  const descriptor = findType(withoutTypeArguments(typeName).replace(RUNTIME_ANONYMOUS_CONTEXT, ""));
+  const declared = withoutTypeArguments(typeName).replace(RUNTIME_ANONYMOUS_CONTEXT, "");
+  const descriptor = isImportedObjCClass(declared) ? null : findType(declared);
   if (descriptor === null) {
-    throw new Error(`unknown type: ${typeName}`);
+    const objcClass = importedObjCClassName(declared);
+    if (objcClass === null) {
+      throw new Error(`unknown type: ${typeName}`);
+    }
+    return objcClass;
   }
   const full = descriptor.fullTypeName;
   if (full === null) {
@@ -674,6 +714,9 @@ function canonicalTypeName(typeName: string): string {
 // A member is keyed to its declaring class, so inherited ones need the superclass chain.
 // Most-derived first; non-class/generic types collapse to one level.
 function classChainNames(fullName: string): string[] {
+  if (isImportedObjCClass(fullName)) {
+    return importedObjCClassChain(fullName);
+  }
   const descriptor = findType(fullName);
   if (descriptor === null || descriptor.kind !== ContextDescriptorKind.Class || descriptor.isGeneric) {
     return [fullName];
@@ -730,19 +773,26 @@ type SymbolFilter = (symbol: string) => boolean;
 // Keyed on the module, not on the answer: a loaded module's symbols can't change, while
 // "type T has no member m" stops being true as soon as another module is loaded.
 function foreignMembers(fullName: string, mayName: SymbolFilter | null = null): TypeMembers {
-  const methods: MethodCandidate[] = [];
-  const accessors: AccessorCandidate[] = [];
+  if (isImportedObjCClass(fullName)) {
+    return exportedMembersAcrossModules(fullName, importedObjCClassToken(fullName), mayName, null);
+  }
   const descriptor = findType(fullName)!;
   const owner = Process.findModuleByAddress(descriptor.handle);
   if (owner === null) {
-    return { methods, accessors };
+    return { methods: [], accessors: [] };
   }
   const token = provenToken(fullName, descriptor, owner);
   if (token === null) {
-    return { methods, accessors };
+    return { methods: [], accessors: [] };
   }
+  return exportedMembersAcrossModules(fullName, token, mayName, owner);
+}
+
+function exportedMembersAcrossModules(fullName: string, token: string, mayName: SymbolFilter | null, except: Module | null): TypeMembers {
+  const methods: MethodCandidate[] = [];
+  const accessors: AccessorCandidate[] = [];
   for (const module of Process.enumerateModules()) {
-    if (module.base.equals(owner.base)) {
+    if (except !== null && module.base.equals(except.base)) {
       continue;
     }
     forEachExportedMembers(module, [{ fullName, token, withConstrainedExtensions: false }], mayName, (_, found) => {
@@ -889,6 +939,9 @@ type MemberSource = (fullName: string) => TypeMembers;
 
 function allLoadedModuleMembers(fullName: string): TypeMembers {
   const own = definingModuleMembers(fullName);
+  if (isImportedObjCClass(fullName)) {
+    return own;
+  }
   const foreign = foreignMembers(fullName);
   return {
     methods: [...own.methods, ...foreign.methods],
@@ -896,7 +949,12 @@ function allLoadedModuleMembers(fullName: string): TypeMembers {
   };
 }
 
+// An imported ObjC class has no defining module: every loaded module's extensions stand in for it,
+// and the aggregate is never cached since a module loaded later may add to it.
 function definingModuleMembers(fullName: string): TypeMembers {
+  if (isImportedObjCClass(fullName)) {
+    return foreignMembers(fullName);
+  }
   const cached = tableCache.get(fullName);
   if (cached !== undefined) {
     return cached;
@@ -1791,7 +1849,7 @@ function resolveReceiver(signature: SwiftFunctionSignature): FunctionReceiver {
   if (!isStatic) {
     return { instanceType: type, metatypeSelf: null };
   }
-  return { instanceType: null, metatypeSelf: isClassType(type) ? type.handle : null };
+  return { instanceType: null, metatypeSelf: isClassType(type) ? metatypeSelf(type) : null };
 }
 
 // Swift.NativeFunction resolved from a symbol: call() for a free function, bind(self) for a method.
@@ -2800,9 +2858,9 @@ export function getStaticProperty(receiver: Metadata, member: string): CallResul
   const name = typeName(receiver);
   const accessor = findAccessor(name, member, "getter", true);
   if (accessor === null) {
-    return conformanceGetProperty(canonicalTypeName(name), receiver.handle, member, true);
+    return conformanceGetProperty(canonicalTypeName(name), metatypeSelf(receiver), member, true);
   }
-  return new BoundMethod(accessorPlan(accessor.address, accessor.type, "getter"), { self: receiver.handle }).call() as CallResult;
+  return new BoundMethod(accessorPlan(accessor.address, accessor.type, "getter"), { self: metatypeSelf(receiver) }).call() as CallResult;
 }
 
 export function setStaticProperty(receiver: Metadata, member: string, value: CallArg): void {
@@ -2811,7 +2869,7 @@ export function setStaticProperty(receiver: Metadata, member: string, value: Cal
   if (accessor === null) {
     throw new Error(`no static setter for ${member} on ${name}`);
   }
-  new BoundMethod(accessorPlan(accessor.address, accessor.type, "setter"), { self: receiver.handle }).call(value);
+  new BoundMethod(accessorPlan(accessor.address, accessor.type, "setter"), { self: metatypeSelf(receiver) }).call(value);
 }
 
 // Setter self is inout (mutating), so it stays indirect.

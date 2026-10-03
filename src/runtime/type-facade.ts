@@ -28,6 +28,7 @@ import {
   splitSelector,
   initializerLookup,
   findMethod,
+  resolveMethod,
   findMember,
   FoundMember,
   bindConformanceMethod,
@@ -43,6 +44,7 @@ import {
   ClassType,
   StructType,
   EnumType,
+  ObjCClassWrapperType,
   MemberLookupOptions,
   SwiftMember,
   metadataOf,
@@ -364,6 +366,37 @@ export class SwiftClass extends SwiftTypeFacade {
       }));
     this.initializers.set(modules, candidates);
     return candidates;
+  }
+}
+
+export class SwiftObjCClass extends SwiftTypeFacade {
+  declare readonly $type: ObjCClassWrapperType;
+
+  $typeMethod(selector: string, selectorOptions: MemberLookupOptions = {}): SwiftBoundMethod {
+    const { name, options } = splitSelector(selector, selectorOptions);
+    const type = this.$type;
+    const raw = lowerResolveOptions({ ...options, static: true });
+    const resolved = findMethod(type.name, name, raw);
+    if (resolved === null) {
+      return genericMember(type.name, name, raw) ?? narrowBoundMethod(bindResolved(resolveMethod(type.name, name, raw), type.objcClass));
+    }
+    return narrowBoundMethod(bindResolved(resolved, type.objcClass));
+  }
+
+  $initializer(): never {
+    throw this.noInitializer();
+  }
+
+  init(): never {
+    throw this.noInitializer();
+  }
+
+  protected hasInitializer(): boolean {
+    return false;
+  }
+
+  private noInitializer(): Error {
+    return new Error(`${this.$type.name} is an Objective-C class; construct it through the Objective-C runtime`);
   }
 }
 
