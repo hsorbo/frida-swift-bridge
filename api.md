@@ -288,7 +288,11 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
   `query` is `{ inherited? }`.
 - `info.instanceMethod(name, options?)`, `info.typeMethod(name, options?)`,
   `info.initializer(options?)`: find one member of that kind by name, without
-  an instance or type arguments. See [Calling methods](#calling-methods).
+  an instance or type arguments. See [Calling methods](#calling-methods). A
+  member has an `address`, a `selector`, an `origin`, `isGeneric` and a
+  `signature`: `{ labels, argTypeNames, returnTypeName, throws, thrownTypeName,
+  isAsync, genericParams }`, the types spelled as the symbol spells them, so a
+  generic member's read `"A"` and the names paste into `{ argTypes }`.
 - `info.properties`: the properties as `{ name, typeName, isStatic, writable }`.
 - `info.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
 
@@ -515,9 +519,20 @@ robot.$method("move", { labels: ["by"] }).call(5);   // move(by:)
 robot.$method("pick", { returnType: "Swift.Int" }).call();   // pick() -> Int
 ```
 
-A bound method has `address`, `call(...)`, and `origin`, which says where the
-member was found. A type's own member wins over one another module adds, and
-both win over a protocol extension's:
+A bound method has `address`, `call(...)`, `signature` and `origin`. The
+signature is the member's with its types resolved: `argTypes` and `returnType`
+are reflection objects (`null` for a closure parameter or a type that stays
+generic), beside the names, labels and effects:
+
+```js
+const move = robot.$method("move", { labels: ["to"] });
+move.signature.labels;                     // ["to"]
+move.signature.argTypes.map(t => t.name);  // ["Swift.Int"]
+move.signature.throws;                     // false
+```
+
+`origin` says where the member was found. A type's own member wins over one
+another module adds, and both win over a protocol extension's:
 
 ```js
 robot.$method("greet").origin;   // { kind: "own", type: "MyApp.Robot", module: "MyApp" }
@@ -959,6 +974,22 @@ your callbacks the **decoded** Swift arguments and return value — structs
 exploded to objects, strings as JS strings, class returns and values holding
 references (an Array, say) as live facades, existentials projected to their
 dynamic value. A closure argument is its two words, `{ function, context }`.
+
+`target` is an address, a member found through a type's reflection, or a bound
+method (hooked as its member; the receiver it was bound to plays no part). An
+address is symbolicated to learn the signature; a member carries the signature
+it was found with, so it needs no symbol at its address. The arguments arrive
+positionally; the member's labels name them:
+
+```js
+const greet = robot.$method("greet");
+Swift.Interceptor.attach(greet, {
+    onEnter(args) {
+        const named = Object.fromEntries(greet.signature.labels.map((l, i) => [l ?? i, args[i]]));
+        console.log(JSON.stringify(named));
+    },
+});
+```
 
 ```js
 const listener = Swift.Interceptor.attach(addr, {

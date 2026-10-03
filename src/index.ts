@@ -113,12 +113,15 @@ export {
   SwiftAsyncCallbacks,
   SwiftInvocationContext,
   SwiftInterceptorOptions,
+  HookableTarget,
 } from "./runtime/interceptor.js";
 export { isSwiftObject } from "./runtime/method.js";
 export type { SwiftMemberFunction, SwiftAsyncMemberFunction } from "./runtime/qualified-function.js";
 export type { ModuleRegistry, ModuleNamespace, ModuleMember } from "./runtime/module-namespace.js";
 export type {
   SwiftBoundMethod,
+  SwiftMemberSignature,
+  SwiftBoundSignature,
   MemberOrigin,
   SwiftBoundInitializer,
   SwiftFunction,

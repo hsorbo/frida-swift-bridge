@@ -12,6 +12,10 @@ import {
   CallResult,
   ValueMethodResolveOptions,
   MemberOrigin,
+  SwiftMemberSignature,
+  memberSignature,
+  withHookTarget,
+  hookTargetOf,
   PropertyInfo,
   callMarshalled,
   enumerateMethods,
@@ -49,6 +53,7 @@ export interface SwiftMember {
   readonly selector: string;
   readonly isGeneric: boolean;
   readonly origin: MemberOrigin;
+  readonly signature: SwiftMemberSignature;
 }
 
 export interface SwiftInstanceMethod extends SwiftMember {
@@ -192,7 +197,7 @@ export abstract class NominalType extends SwiftType {
 
   instanceMethod(name: string, options: MemberLookupOptions = {}): SwiftInstanceMethod {
     const member = this.member(name, { ...options, static: false }, `instance method ${name}`);
-    return { ...member, bind: (receiver) => receiver.$method(name, options) };
+    return withHookTarget({ ...member, bind: (receiver) => receiver.$method(name, options) }, hookTargetOf(member) ?? null);
   }
 
   typeMethod(name: string, options: MemberLookupOptions = {}): SwiftMember {
@@ -213,7 +218,10 @@ export abstract class NominalType extends SwiftType {
     if (found === null) {
       throw new Error(`no ${description} on ${this.name}`);
     }
-    return { address: found.address, selector: found.selector, isGeneric: found.generic, origin: found.origin };
+    return withHookTarget(
+      { address: found.address, selector: found.selector, isGeneric: found.generic, origin: found.origin, signature: memberSignature(found.signature) },
+      { address: found.address, signature: found.signature, witnessDispatched: false }
+    );
   }
 
   private selectors(isStatic: boolean, { inherited = true }: MethodQuery): string[] {

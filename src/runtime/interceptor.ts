@@ -39,7 +39,9 @@ import { findType } from "../reflection/registry.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject } from "./object-facade.js";
-import { CallResult, SelfOwnership, witnessTableCount } from "./method.js";
+import { CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod } from "./method.js";
+import type { SwiftMember } from "./swift-type.js";
+import type { ParsedSwiftSignature } from "./symbolication.js";
 import { SWIFTCC, FP_ARG_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
 export type SwiftInvocationContext = InvocationContext & { self?: CallResult; typeArguments?: string[] };
@@ -355,7 +357,29 @@ function carriedMetadata(
   return new Metadata(handle);
 }
 
-function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = false): CallShape {
+export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod;
+
+interface HookEntry {
+  address: NativePointer;
+  parsed: ParsedSwiftSignature | null; // null: read off the symbol at the address
+}
+
+// A member carries the signature it was found with, so hooking it never symbolicates its address.
+function hookEntry(target: HookableTarget): HookEntry {
+  if (target instanceof NativePointer) {
+    return { address: target, parsed: null };
+  }
+  const member = typeof target === "object" && target !== null ? hookTargetOf(target) : undefined;
+  if (member === undefined) {
+    throw new Error("hook target must be an address, a member found through a type's reflection, or a bound method");
+  }
+  if (member.witnessDispatched) {
+    throw new Error(`${member.signature.kind === "function" ? member.signature.selector : "member"} is dispatched through a protocol witness; hook its address`);
+  }
+  return { address: member.address, parsed: member.signature };
+}
+
+function parsedSignatureAt(target: NativePointer): ParsedSwiftSignature {
   const symbol = symbolicate(target);
   if (symbol === null) {
     throw new Error(`no Swift symbol at ${target}`);
@@ -364,10 +388,15 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
   if (parsed === null) {
     throw new Error(`could not parse signature: ${symbol.demangled}`);
   }
+  return parsed;
+}
+
+function callShape({ address: target, parsed: known }: HookEntry, ownership?: SelfOwnership, isAsync = false): CallShape {
+  const parsed = known ?? parsedSignatureAt(target);
 
   if (parsed.kind === "function") {
     if (parsed.genericParams.length > 0 && !parsed.simpleGenerics) {
-      throw new Error(`unsupported generic signature: ${symbol.demangled}`);
+      throw new Error(`unsupported generic signature: ${parsed.context}.${parsed.selector}`);
     }
     let generics = genericEnvironment(parsed, ownership);
     const gp = generics.params;
@@ -397,7 +426,7 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
 
   const memberType = resolveParsedType(parsed.type, () => null);
   if (memberType === null) {
-    throw new Error(`could not resolve accessor type: ${symbol.demangled}`);
+    throw new Error(`could not resolve accessor type: ${parsed.typeName}`);
   }
   const member: TypePlan = { kind: "concrete", metadata: memberType };
   const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null };
@@ -894,8 +923,10 @@ interface SwiftInvocationState {
   thrownSlot?: NativePointer;
 }
 
-function attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
-  const shape = callShape(target, options.self);
+function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
+  const entry = hookEntry(hookable);
+  const target = entry.address;
+  const shape = callShape(entry, options.self);
   if (shape.coroutine) {
     return attachModify(target, shape, callbacks);
   }
@@ -1327,12 +1358,13 @@ function writeX64CompletionTrampoline(slot: NativePointer, pc: NativePointer): v
   w.flush();
 }
 
-function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
+function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
   if (callbacks.onEnter === undefined && callbacks.onFirstSuspend === undefined && callbacks.onComplete === undefined) {
     throw new Error("attachAsync requires onEnter, onFirstSuspend, or onComplete");
   }
-  const code = resolveAsyncEntry(target);
-  const shape = callShape(code, options.self, true);
+  const entry = hookEntry(hookable);
+  const code = entry.parsed === null ? resolveAsyncEntry(entry.address) : entry.address;
+  const shape = callShape({ address: code, parsed: entry.parsed }, options.self, true);
   const { args, ret, generics: environment, throws } = shape;
   const genericParams = environment.params;
 
@@ -1434,8 +1466,8 @@ function attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, opti
 }
 
 export interface SwiftInterceptorApi {
-  attach(target: NativePointer, callbacks: SwiftInvocationCallbacks, options?: SwiftInterceptorOptions): InvocationListener;
-  attachAsync(target: NativePointer, callbacks: SwiftAsyncCallbacks, options?: SwiftInterceptorOptions): InvocationListener;
+  attach(target: HookableTarget, callbacks: SwiftInvocationCallbacks, options?: SwiftInterceptorOptions): InvocationListener;
+  attachAsync(target: HookableTarget, callbacks: SwiftAsyncCallbacks, options?: SwiftInterceptorOptions): InvocationListener;
 }
 
 export const SwiftInterceptor: SwiftInterceptorApi = { attach, attachAsync };

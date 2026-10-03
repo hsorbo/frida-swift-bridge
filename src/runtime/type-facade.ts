@@ -31,6 +31,10 @@ import {
   findMember,
   FoundMember,
   bindConformanceMethod,
+  SwiftBoundSignature,
+  HookTarget,
+  hookTargetOf,
+  unboundSignature,
 } from "./method.js";
 import { findNestedType, nestedTypeNamesOf } from "../reflection/registry.js";
 import { POISON, isBridgeMember, invokeOptions, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
@@ -359,13 +363,18 @@ type LookupOptions = ReturnType<typeof lowerResolveOptions>;
 interface SwiftAddressOnly {
   readonly address: NativePointer;
   readonly origin: MemberOrigin;
+  readonly signature: SwiftBoundSignature;
+  readonly hookTarget: HookTarget;
   call(...args: CallArg[]): never;
 }
 
 function addressOnly(member: SwiftMember | FoundMember, refusal: string): SwiftAddressOnly {
+  const parsed = "generic" in member ? member.signature : hookTargetOf(member)!.signature;
   return {
     address: member.address,
     origin: member.origin,
+    signature: unboundSignature(parsed),
+    hookTarget: { address: member.address, signature: parsed, witnessDispatched: false },
     call: () => {
       throw new Error(refusal);
     },

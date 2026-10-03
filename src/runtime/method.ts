@@ -86,7 +86,7 @@ import { WitnessTable } from "../abi/witness-table.js";
 import { genericRequirements, hasFixedLayoutInGenericContext, keyGenericArguments } from "../abi/generic-instantiation.js";
 import type { SwiftType } from "./swift-type.js";
 import type { SwiftTypeFacade } from "./type-facade.js";
-import { metadataOf } from "./swift-type.js";
+import { metadataOf, typeOf } from "./swift-type.js";
 
 export type MethodKind = "method" | "init";
 
@@ -104,27 +104,99 @@ export type MemberOrigin =
   | { kind: "own" | "extension"; type: string; module: string }
   | { kind: "protocolExtension"; protocol: string; module: string };
 
+// What a member was declared with, as its symbol spells it: the names round-trip into the
+// { argTypes } and { returnType } lookup filters.
+export interface SwiftMemberSignature {
+  readonly labels: (string | null)[];
+  readonly argTypeNames: string[];
+  readonly returnTypeName: string | null;
+  readonly throws: boolean;
+  readonly thrownTypeName: string | null;
+  readonly isAsync: boolean;
+  readonly genericParams: string[];
+}
+
+// A bound member's types are resolved; a parameter the bridge builds no metadata for (a closure)
+// and a type that is still generic read as null.
+export interface SwiftBoundSignature extends SwiftMemberSignature {
+  readonly argTypes: (SwiftType | null)[];
+  readonly returnType: SwiftType | null;
+}
+
+export function memberSignature(signature: SwiftFunctionSignature): SwiftMemberSignature {
+  return {
+    labels: signature.argLabels,
+    argTypeNames: signature.argTypeNames,
+    returnTypeName: signature.returnTypeName,
+    throws: signature.throws,
+    thrownTypeName: signature.thrownType?.text ?? null,
+    isAsync: signature.async,
+    genericParams: signature.genericParams,
+  };
+}
+
+export function boundSignature(signature: SwiftFunctionSignature, argTypes: (Metadata | null)[], returnType: Metadata | null): SwiftBoundSignature {
+  return {
+    ...memberSignature(signature),
+    argTypes: argTypes.map((m) => (m === null ? null : typeOf(m))),
+    returnType: returnType === null ? null : typeOf(returnType),
+  };
+}
+
+// The types a member's symbol names, where the bridge can build them without type arguments.
+export function unboundSignature(signature: SwiftFunctionSignature): SwiftBoundSignature {
+  const concrete = (type: TypeExpr): Metadata | null => resolveParsedType(type, () => null);
+  return boundSignature(signature, signature.params.map((p) => concrete(p.type)), signature.result === null ? null : concrete(signature.result));
+}
+
+// What a hook plans from when it is handed a member instead of an address.
+export interface HookTarget {
+  address: NativePointer;
+  signature: SwiftFunctionSignature;
+  witnessDispatched: boolean;
+}
+
+const hookTargets = new WeakMap<object, HookTarget>();
+
+export function hookTargetOf(member: object): HookTarget | undefined {
+  return hookTargets.get(member);
+}
+
+export function withHookTarget<T extends object>(member: T, target: HookTarget | null): T {
+  if (target !== null) {
+    hookTargets.set(member, target);
+  }
+  return member;
+}
+
 export interface SwiftBoundMethod {
   readonly address: NativePointer;
   readonly origin: MemberOrigin;
+  readonly signature: SwiftBoundSignature;
   call(...args: CallArg[]): CallResult | Promise<CallResult>;
 }
 
 interface ResolvedBoundMethod {
   readonly address: NativePointer;
   readonly origin?: MemberOrigin;
+  readonly signature: SwiftBoundSignature;
+  readonly hookTarget: HookTarget | null;
   call(...args: CallArg[]): CallResult | Promise<CallResult>;
 }
 
 export function narrowBoundMethod(binder: ResolvedBoundMethod, receiver?: RawInstance): SwiftBoundMethod {
-  return {
-    address: binder.address,
-    origin: binder.origin!,
-    call: (...args) => {
-      receiver?.checkLive(); // roots the receiver past its GC release and rejects a disposed one
-      return binder.call(...args);
+  return withHookTarget(
+    {
+      address: binder.address,
+      origin: binder.origin!,
+      signature: binder.signature,
+      call: (...args) => {
+        receiver?.checkLive(); // roots the receiver past its GC release and rejects a disposed one
+        return binder.call(...args);
+      },
     },
-  };
+    binder.hookTarget
+  );
 }
 
 export interface SwiftBoundInitializer {
@@ -179,6 +251,7 @@ export interface ResolvedMethod {
   thrown?: ThrownType;
   isStatic: boolean;
   selector: string;
+  signature?: SwiftFunctionSignature;
   async?: boolean;
   asyncFunctionPointer?: AsyncFunctionPointer;
   witnessSelf?: WitnessTable;
@@ -1142,6 +1215,7 @@ export interface FoundMember {
   isStatic: boolean;
   async: boolean;
   origin: MemberOrigin;
+  signature: SwiftFunctionSignature;
 }
 
 // Finds a member by name and overload filters alone. No type is resolved, so unlike findMethod it
@@ -1170,6 +1244,7 @@ export function findMember(
     isStatic,
     async: signature.async,
     origin: memberOrigin(address, fullName),
+    signature,
   };
 }
 
@@ -1210,7 +1285,7 @@ function resolveMethodIn(
       asyncFunctionPointer = afp;
     }
     const origin = memberOrigin(address, className);
-    return { address, argTypes, returnType, throws: signature.throws, thrown, isStatic, selector: signature.selector, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin };
+    return { address, argTypes, returnType, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin };
   }
   return null;
 }
@@ -1257,6 +1332,8 @@ function planOf(resolved: ResolvedMethod): CallPlan {
     witnessTables: implicit.witnessTables ?? [],
     argConventions: resolved.argConventions ?? resolved.argTypes.map(() => "borrowed"),
     origin: resolved.origin,
+    signature: resolved.signature,
+    witnessDispatched: resolved.witnessSelf !== undefined,
   };
 }
 
@@ -1394,6 +1471,20 @@ export class BoundMethod {
 
   get isAsync(): boolean {
     return this.plan.async;
+  }
+
+  get signature(): SwiftBoundSignature {
+    const { plan } = this;
+    if (plan.signature === undefined) {
+      throw new Error(`${this.selector} was bound without a signature`);
+    }
+    const metadataOrNull = (argPlan: ArgPlan | null): Metadata | null => (argPlan === null || argPlan.kind === "closure" ? null : argPlan.metadata);
+    return boundSignature(plan.signature, plan.argPlans.map(metadataOrNull), metadataOrNull(plan.returnPlan));
+  }
+
+  get hookTarget(): HookTarget | null {
+    const { plan } = this;
+    return plan.signature === undefined ? null : { address: plan.address, signature: plan.signature, witnessDispatched: plan.witnessDispatched === true };
   }
 
   get asyncFunctionPointer(): AsyncFunctionPointer {
@@ -1771,6 +1862,7 @@ function resolveSyncSymbol(module: Module, mangled: string, signature: SwiftFunc
     throws: signature.throws,
     isStatic: false,
     selector: signature.selector,
+    signature,
     async: false,
   };
 }
@@ -1786,6 +1878,7 @@ function resolveAsyncSymbol(module: Module, mangled: string, signature: SwiftFun
     throws: signature.throws,
     isStatic: false,
     selector: signature.selector,
+    signature,
     async: true,
     asyncFunctionPointer: afp,
   };
@@ -2200,6 +2293,8 @@ export interface CallPlan {
   witnessTables: NativePointer[];
   argConventions: ParamConvention[];
   origin?: MemberOrigin;
+  signature?: SwiftFunctionSignature;
+  witnessDispatched?: boolean;
 }
 
 interface PlannedArgs {
@@ -2350,7 +2445,7 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     }
   }
   const origin = memberOrigin(address, fullName);
-  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, thrown, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin };
+  return { address, selector: signature.selector, argPlans, returnPlan, throws: signature.throws, thrown, async: signature.async, asyncFunctionPointer, typeArguments: resolvedTypeArguments, witnessTables, argConventions: params.conventions, origin, signature };
 }
 
 function planThrownType(signature: SwiftFunctionSignature, typeParams: string[], typeArguments: Metadata[]): ThrownType | undefined {
@@ -2522,6 +2617,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     witnessTables: [],
     argConventions: params.conventions,
     origin: memberOrigin(address, unboundName),
+    signature,
   };
 }
 
@@ -3062,6 +3158,7 @@ export function resolveWitnessMethod(table: WitnessTable, methodName: string): R
     address,
     ...resolveWitnessSignature(table, signature, new Set()),
     isStatic: !requirement.isInstance,
+    signature,
     // An async requirement's slot holds the …Tu record (GenProto.cpp getAddrOfAsyncFunctionPointer).
     async: requirement.isAsync,
     asyncFunctionPointer: requirement.isAsync ? new AsyncFunctionPointer(address) : undefined,
@@ -3123,6 +3220,7 @@ function resolveExtensionMethod(
     address,
     ...resolveWitnessSignature(table, signature, classBound),
     isStatic,
+    signature,
     async: signature.async,
     asyncFunctionPointer,
     witnessSelf: table,
