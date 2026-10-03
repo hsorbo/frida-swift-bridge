@@ -987,6 +987,19 @@ Swift.Interceptor.attach(addr, {
 });
 ```
 
+An `inout` argument is the caller's storage, so it arrives as a value facade
+over that address rather than a snapshot: `$fields` reads it, `$field(name)`
+writes a field through it, and `$handle` is the address itself. The facade
+stays valid through `onLeave`, where it reads what the callee wrote:
+
+```js
+let n;
+Swift.Interceptor.attach(robot.$method("doubled").address, {   // func doubled(_ n: inout Int)
+    onEnter(args) { n = args[0]; console.log("before", n.$fields); },
+    onLeave() { console.log("after", n.$fields); },
+});
+```
+
 A method's or accessor's receiver is `this.self` in both callbacks: a facade
 for a class, and decoded like an argument for a value. For a mutating method,
 `onLeave` sees the updated value:
@@ -1292,9 +1305,9 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
   receiver.
 - **Existential argument and result types in `Swift.swiftFunction`.** Both must
   be concrete.
-- **Hooking.** `Swift.Interceptor` refuses a function with an `inout` parameter,
-  a generic signature it can't plan, and on x86-64 any floating-point argument
-  or result when Frida's CPU context does not carry the XMM registers.
+- **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan,
+  and on x86-64 any floating-point argument or result when Frida's CPU context
+  does not carry the XMM registers.
 - **`FixedArray` and `Borrow` metadata.** The metadata kinds behind
   `InlineArray` and borrowed values have no reflection wrapper and throw
   `unsupported metadata kind`.

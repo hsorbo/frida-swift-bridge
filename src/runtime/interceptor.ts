@@ -58,7 +58,17 @@ type TypePlan =
   | { kind: "param"; paramIndex: number }
   | { kind: "use"; expr: TypeExpr; indirect: boolean } // param-referencing expression: A?, [A], Array<A>
   | { kind: "metatype" } // T.Type: one GP holding the metadata pointer directly (loadable POD)
-  | { kind: "closure" }; // a thick function value: two GPs, the function then its context
+  | { kind: "closure" } // a thick function value: two GPs, the function then its context
+  | { kind: "inout"; target: ValuePlan }; // the caller's storage by address, whatever its layout
+
+type ValuePlan = Exclude<TypePlan, { kind: "metatype" } | { kind: "closure" } | { kind: "inout" }>;
+
+function inoutPlan(target: TypePlan, text: string): TypePlan {
+  if (target.kind === "metatype" || target.kind === "closure" || target.kind === "inout") {
+    throw new Error(`unsupported inout parameter type: ${text}`);
+  }
+  return { kind: "inout", target };
+}
 
 // A small loadable value's self trails the formal args unless the method mutates it; any other
 // self is in swiftself. trailing is null when neither the symbol nor the callee's code tells. A
@@ -124,7 +134,7 @@ interface CallShape {
 // Where a typed error lands: the result registers it shares with the result, or the buffer the
 // caller passes after the generic arguments.
 interface ThrownLowering {
-  plan: Exclude<TypePlan, { kind: "metatype" } | { kind: "closure" }>;
+  plan: ValuePlan;
   placed: PlacedResultScalar[] | null;
 }
 
@@ -132,7 +142,7 @@ function thrownLowering({ thrown, ret }: CallShape, onResume: boolean): ThrownLo
   if (thrown === null) {
     return null;
   }
-  if (thrown.kind === "metatype" || thrown.kind === "closure") {
+  if (thrown.kind === "metatype" || thrown.kind === "closure" || thrown.kind === "inout") {
     throw new Error(`unsupported thrown type: ${thrown.kind}`);
   }
   if (thrown.kind === "concrete" && !returnIsIndirect(ret) && typedErrorReturnsDirectly(thrown.metadata)) {
@@ -182,12 +192,10 @@ function planType(type: TypeExpr, genericParams: string[]): TypePlan {
   throw new Error(`could not resolve type: ${type.text}`);
 }
 
-function planMetadata(
-  plan: Exclude<TypePlan, { kind: "metatype" } | { kind: "closure" }>,
-  generics: Metadata[],
-  genericParams: string[]
-): Metadata {
+function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, generics: Metadata[], genericParams: string[]): Metadata {
   switch (plan.kind) {
+    case "inout":
+      return planMetadata(plan.target, generics, genericParams);
     case "concrete":
       return plan.metadata;
     case "param":
@@ -206,9 +214,9 @@ function planMetadata(
 }
 
 // param values and uses storing one inline are address-only → passed indirectly (one GP pointer, or
-// x8 for a return); other uses are a single reference.
+// x8 for a return); other uses are a single reference. An inout argument is its address.
 function isIndirectPlan(plan: TypePlan): boolean {
-  return plan.kind === "param" || (plan.kind === "use" && plan.indirect);
+  return plan.kind === "param" || plan.kind === "inout" || (plan.kind === "use" && plan.indirect);
 }
 
 // After the formal arguments and a trailing self, IRGen passes an address-only value self's Self
@@ -363,11 +371,7 @@ function callShape(target: NativePointer, ownership?: SelfOwnership, isAsync = f
     }
     let generics = genericEnvironment(parsed, ownership);
     const gp = generics.params;
-    const inout = parsed.params.find((p) => p.convention === "inout");
-    if (inout !== undefined) {
-      throw new Error(`cannot hook ${parsed.selector}: inout parameter ${inout.text} is unsupported`);
-    }
-    const args = parsed.params.map((p) => planType(p.type, gp));
+    const args = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, gp), p.text) : planType(p.type, gp)));
     const ownWords = parsed.genericParams.length + witnessTableCount(parsed);
     const probe = (metadata: Metadata, typeKeyArguments = 0): SelfOwnership | null =>
       ownership ??
@@ -749,6 +753,9 @@ function materializeArgs(
         return decodeClosure(s.address.readPointer(), s.address.add(Process.pointerSize).readPointer());
       }
       const metadata = planMetadata(s.plan, generics, environment.params);
+      if (s.plan.kind === "inout") {
+        return decodeInoutArgument(metadata, s.address);
+      }
       return metadata.kind === MetadataKind.Class
         ? readValue(metadata, s.address)
         : decodeBorrowedValue(metadata, s.address);
@@ -804,6 +811,18 @@ function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent:
     return asSwiftObject(ValueInstance.borrow(metadata, address, parent));
   }
   return readValue(metadata, address);
+}
+
+// The caller's storage itself, as a facade whose writes the callee and then the caller see; a
+// class reference is the object it holds.
+function decodeInoutArgument(metadata: Metadata, address: NativePointer): CallResult {
+  if (metadata.kind === MetadataKind.Class) {
+    return asSwiftObject(new ClassInstance(address.readPointer()));
+  }
+  if (metadata.kind === MetadataKind.ObjCClassWrapper) {
+    return address.readPointer();
+  }
+  return asSwiftObject(ValueInstance.borrow(metadata, address));
 }
 
 function materializeReturn(
