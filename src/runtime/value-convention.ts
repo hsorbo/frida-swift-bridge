@@ -251,6 +251,27 @@ export function probeSelfOwnership(method: NativePointer, directOnly: RegisterRa
   return readsSelfRegister ? "mutating" : "borrowing";
 }
 
+// A callee built before Swift 6.1 takes a buffer for a loadable typed error in the argument register
+// past its formal and generic arguments and stores the error through it; one returning the error in
+// the result registers never reads that register. null when the trace cannot tell, or the register
+// is on the stack.
+export function probeTypedErrorBuffer(fn: NativePointer, slotRegister: number): boolean | null {
+  const arch = ARCH_PROBES[Process.arch];
+  if (arch === undefined) {
+    return null;
+  }
+  const register = arch.argumentRegisters.filter((r) => !/^(v|xmm)\d/.test(r))[slotRegister];
+  if (register === undefined) {
+    return null;
+  }
+  const uses = new Map<string, RegisterUse>();
+  const outcome = guarded(() => traceEntryRegisterUses(arch, fn, uses, 0, { left: MAX_INSTRUCTIONS }));
+  if (uses.get(register) === "read") {
+    return true;
+  }
+  return outcome === "returned" ? false : null;
+}
+
 function demangledTypeName(token: string): string | null {
   return demangle(`$s${token}Mn`)?.replace(/^nominal type descriptor for /, "") ?? null;
 }

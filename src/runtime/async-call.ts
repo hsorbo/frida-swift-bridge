@@ -5,6 +5,7 @@ import { SwiftError } from "./thrown-error.js";
 import { LIBSWIFT_CORE_NAME, ensureSwiftHost } from "./platform.js";
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
 import type { RegisterLocation, PlacedResultScalar } from "./calling-convention.js";
+import { typedErrorLeftInBuffer } from "./calling-convention.js";
 import { FloatClass, SWIFTCC, GP_ARG_REGISTERS, GP_RESULT_REGISTERS, FP_RESULT_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
 export type { FloatClass };
@@ -54,9 +55,14 @@ export interface SerialExecutorRef {
   implementation: NativePointer;
 }
 
-// A typed error's value: read from the resume registers it shares with the result, or taken from
-// the buffer passed to the callee after the implicit arguments.
-export type AsyncTypedError = { type: Metadata } & ({ placed: PlacedResultScalar[] } | { slot: NativePointer });
+// A typed error's value: taken from the buffer passed to the callee after the implicit arguments,
+// or, when the callee left the buffer's sentinel in place, read from the resume registers it shares
+// with the result.
+export interface AsyncTypedError {
+  type: Metadata;
+  slot: NativePointer;
+  placed: PlacedResultScalar[] | null;
+}
 
 export interface AsyncCallOptions {
   receiver?: NativePointer;
@@ -182,7 +188,7 @@ function synthesizeAsyncCall(afp: AsyncFunctionPointer, args: NativePointer[], o
   const done = Memory.alloc(Process.pointerSize);
 
   const typedError = options.typedError ?? null;
-  if (typedError !== null && "placed" in typedError && shape.kind !== "scalars") {
+  if (typedError?.placed != null && shape.kind !== "scalars") {
     throw new Error("a typed error in the resume registers needs a scalars result shape");
   }
   const continuationCtx: ContinuationCtx = {
@@ -525,7 +531,7 @@ function takeResult(call: SynthesizedCall): NativePointer {
       throw new SwiftError(thrown, true);
     }
     const value = Memory.alloc(Math.max(typed.type.typeLayout.stride, 1));
-    if ("placed" in typed) {
+    if (typed.placed !== null && !typedErrorLeftInBuffer(typed.slot, typed.type)) {
       copyPlaced(typed.placed, call.result, value);
     } else {
       Memory.copy(value, typed.slot, typed.type.valueWitnesses.size);

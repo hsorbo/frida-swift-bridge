@@ -1209,7 +1209,10 @@ is the thrown value's own storage and `e.value` decodes it by `E`: a payload-les
 enum reads as its case name, a struct as its fields, a class as an object. A
 hook's `onLeave` / `onComplete` error argument is decoded the same way.
 `Swift.NativeFunction` reads `throws(E)` off the symbol too; a stripped address
-needs `/abi`'s `makeSwiftNativeFunction` with `{ errorType }`. A typed throw
+needs `/abi`'s `makeSwiftNativeFunction` with `{ errorType }`. Code built with
+Swift 6.0 returns every typed error through a buffer, later compilers return a
+loadable one in the result registers: a call passes the buffer either way and
+reads whichever the callee used, and a hook reads the callee's code to tell. A typed throw
 through a protocol witness is supported only when the error rides the result
 registers (a loadable integer/pointer error beside a direct result).
 

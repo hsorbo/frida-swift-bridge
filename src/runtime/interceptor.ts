@@ -21,7 +21,7 @@ import {
   typedErrorReturnsDirectly,
   PlacedResultScalar,
 } from "./calling-convention.js";
-import { probeSelfOwnership } from "./value-convention.js";
+import { probeSelfOwnership, probeTypedErrorBuffer } from "./value-convention.js";
 import { AsyncFunctionPointer, isAsyncFunctionPointerSymbol } from "../abi/async-function-pointer.js";
 import { AsyncContext } from "../abi/async-context.js";
 import {
@@ -127,6 +127,7 @@ interface CallShape {
   args: TypePlan[];
   ret: TypePlan | null;
   thrown: TypePlan | null; // throws(E)
+  witnessWords: number; // witness tables after the generic metadata, ahead of a typed error's buffer
   generics: GenericEnvironment;
   throws: boolean;
   receiver: Receiver | null;
@@ -140,7 +141,10 @@ interface ThrownLowering {
   placed: PlacedResultScalar[] | null;
 }
 
-function thrownLowering({ thrown, ret }: CallShape, onResume: boolean): ThrownLowering | null {
+// A loadable error rides the result registers since Swift 6.1; a callee built earlier takes the
+// buffer for it too, which only its code tells, by reading the buffer's register.
+function thrownLowering(shape: CallShape, onResume: boolean, target: NativePointer, startReg: number): ThrownLowering | null {
+  const { thrown, ret } = shape;
   if (thrown === null) {
     return null;
   }
@@ -148,9 +152,30 @@ function thrownLowering({ thrown, ret }: CallShape, onResume: boolean): ThrownLo
     throw new Error(`unsupported thrown type: ${thrown.kind}`);
   }
   if (thrown.kind === "concrete" && !returnIsIndirect(ret) && typedErrorReturnsDirectly(thrown.metadata)) {
-    return { plan: thrown, placed: placeTypedErrorScalars(directResultScalars(ret), thrown.metadata, onResume) };
+    const slotRegister = thrownSlotRegister(shape, startReg);
+    if (slotRegister === null || probeTypedErrorBuffer(target, slotRegister) !== true) {
+      return { plan: thrown, placed: placeTypedErrorScalars(directResultScalars(ret), thrown.metadata, onResume) };
+    }
   }
   return { plan: thrown, placed: null };
+}
+
+// The argument register past the formal arguments, a trailing self and the generic words; null
+// when a trailing self's routing is unknown or the register would be on the stack.
+function thrownSlotRegister({ args, receiver, generics, witnessWords }: CallShape, startReg: number): number | null {
+  const argTypes = args.map((plan) =>
+    plan.kind === "concrete" ? plan.metadata : plan.kind === "closure" ? { closure: true as const } : { genericParam: 0 }
+  );
+  if (receiver !== null && receiver.trailing !== false) {
+    const lowering = receiverLowering(receiver);
+    if (receiver.trailing === null || lowering === null) {
+      return null;
+    }
+    argTypes.push(lowering);
+  }
+  const passedWords = generics.sources.filter((s) => s.kind === "passed").length + (generics.passesSelfMetadata ? 1 : 0);
+  const gp = startReg + argumentRegisterUse(argTypes, passedWords + witnessWords).gp;
+  return gp < SWIFTCC.gpArgs.length ? gp : null;
 }
 
 // A direct result's scalars: a metatype or a single-reference generic use is one word, a thick
@@ -425,6 +450,7 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
       args,
       ret: accessor === "setter" ? null : element,
       thrown: parsed.thrownType === null ? null : planType(parsed.thrownType, gp),
+      witnessWords: witnessTableCount(parsed),
       generics,
       throws: parsed.throws,
       receiver,
@@ -440,11 +466,11 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
   const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null };
   switch (parsed.kind) {
     case "getter":
-      return { args: [], ret: member, thrown: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
+      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
     case "setter":
-      return { args: [member], ret: null, thrown: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
+      return { args: [member], ret: null, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
     default:
-      return { args: [], ret: member, thrown: null, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: true };
+      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: true };
   }
 }
 
@@ -721,7 +747,7 @@ function materializeArgs(
   environment: GenericEnvironment,
   startReg = 0,
   receiver: Receiver | null = null,
-  takesThrownSlot = false
+  thrownSlotAfterWords: number | null = null // the witness-table words it follows; null: no buffer
 ): MaterializedArgs {
   const cursor = new ArgumentCursor(context, startReg);
   const slots: { plan: TypePlan; address: NativePointer }[] = [];
@@ -779,7 +805,13 @@ function materializeArgs(
     const { type } = receiver.metadata;
     selfMetadata = buildGenericMetadata(type, generics.slice(0, typeParams(type).names.length));
   }
-  const thrownSlot = takesThrownSlot ? cursor.gp() : null;
+  let thrownSlot: NativePointer | null = null;
+  if (thrownSlotAfterWords !== null) {
+    for (let i = 0; i < thrownSlotAfterWords; i++) {
+      cursor.gp();
+    }
+    thrownSlot = cursor.gp();
+  }
 
   const values = (): SwiftValue[] =>
     slots.map((s) => {
@@ -940,7 +972,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
   }
   const { args, ret, generics: environment, throws } = shape;
   const genericParams = environment.params;
-  const thrown = thrownLowering(shape, false);
+  const thrown = thrownLowering(shape, false, target, 0);
   const captureIndirect = returnIsIndirect(ret);
   const returnNeedsGenerics = (needsGenerics(ret) || needsGenerics(shape.thrown)) && genericParams.length > 0;
   const decodesArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
@@ -960,7 +992,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
             state.indirectReturn = indirectResultRegister(context);
           }
           if (wantsArgs) {
-            const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, environment, 0, receiver, takesThrownSlot);
+            const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, environment, 0, receiver, takesThrownSlot ? shape.witnessWords : null);
             state.generics = generics;
             exposeTypeArguments(this, generics);
             if (trailingSelf !== null) {
@@ -1377,10 +1409,10 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
   const genericParams = environment.params;
 
   const wantsCompletion = callbacks.onComplete !== undefined;
-  const thrown = thrownLowering(shape, true);
-  const takesThrownSlot = thrown !== null && thrown.placed === null;
   const indirectReturn = returnIsIndirect(ret);
   const argRegBase = indirectReturn ? 1 : 0; // an @out result takes x0
+  const thrown = thrownLowering(shape, true, code, argRegBase);
+  const takesThrownSlot = thrown !== null && thrown.placed === null;
   const returnNeedsGenerics = wantsCompletion && (needsGenerics(ret) || needsGenerics(shape.thrown)) && genericParams.length > 0;
   const wantsArgs = callbacks.onEnter !== undefined || returnNeedsGenerics || (wantsCompletion && takesThrownSlot);
   const receiver = knownReceiver(shape, wantsArgs);
@@ -1423,7 +1455,7 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
           let generics: Metadata[] | null = null;
           let thrownSlot: NativePointer | null = null;
           if (wantsArgs || capturesGenerics) {
-            const materialized = materializeArgs(context, args, environment, argRegBase, receiver, takesThrownSlot);
+            const materialized = materializeArgs(context, args, environment, argRegBase, receiver, takesThrownSlot ? shape.witnessWords : null);
             generics = materialized.generics;
             thrownSlot = materialized.thrownSlot;
             exposeTypeArguments(this, generics);

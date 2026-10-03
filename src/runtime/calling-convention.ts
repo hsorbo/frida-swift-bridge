@@ -634,23 +634,38 @@ export interface SwiftNativeFunctionOptions {
   consumedArgs?: number[];
 }
 
+// A callee built before Swift 6.1 takes the buffer even for an error that a later compiler returns
+// in the registers, and the symbol does not say which, so the buffer is always passed. It is filled
+// with a sentinel first: a callee that stores the error through it leaves the error there, one that
+// returns it in registers leaves the sentinel.
 interface TypedErrorLowering {
   metadata: Metadata;
-  direct: PlacedScalar[] | null; // null: the callee initializes `slot`
-  slot: NativePointer | null;
+  direct: PlacedScalar[] | null; // the register form, when the error could ride the result registers
+  slot: NativePointer;
 }
+
+const TYPED_ERROR_SENTINEL = 0xa5;
 
 function lowerTypedError(errorType: Metadata | AbstractIndirect, result: ResultLowering | null, returnType: SwiftArgType | null): TypedErrorLowering {
   const metadata = errorType instanceof Metadata ? errorType : errorType.metadata;
+  const slot = Memory.alloc(Math.max(metadata.typeLayout.stride, 1));
   const resultIsDirect = result === null || (result.sret === null && result.leading.length === 0);
   if (errorType instanceof Metadata && resultIsDirect && typedErrorReturnsDirectly(metadata)) {
     if (returnType !== null && isDestructuredTuple(returnType)) {
       throw new Error("a typed throw beside a destructured tuple result is unsupported");
     }
     const resultScalars = returnType instanceof Metadata && result!.size > 0 ? loweredScalars(returnType) : [];
-    return { metadata, direct: placeTypedErrorScalars(resultScalars, metadata, false), slot: null };
+    return { metadata, direct: placeTypedErrorScalars(resultScalars, metadata, false), slot };
   }
-  return { metadata, direct: null, slot: Memory.alloc(Math.max(metadata.typeLayout.stride, 1)) };
+  return { metadata, direct: null, slot };
+}
+
+export function fillTypedErrorSentinel(slot: NativePointer, metadata: Metadata): void {
+  slot.writeByteArray(new Array<number>(metadata.valueWitnesses.size).fill(TYPED_ERROR_SENTINEL));
+}
+
+export function typedErrorLeftInBuffer(slot: NativePointer, metadata: Metadata): boolean {
+  return new Uint8Array(slot.readByteArray(metadata.valueWitnesses.size)!).some((b) => b !== TYPED_ERROR_SENTINEL);
 }
 
 export type SwiftNativeFunction = (...args: NativePointer[]) => NativePointer | null;
@@ -720,7 +735,7 @@ export function makeSwiftNativeFunction(
   );
   // trailing implicit args after the formal ones: a type-metadata pointer per param, then witnesses,
   // then the buffer a typed error is returned through
-  const implicitArgs = [...typeArguments.map((m) => m.handle), ...witnessTables, ...(typedError?.slot === null || typedError === null ? [] : [typedError.slot])];
+  const implicitArgs = [...typeArguments.map((m) => m.handle), ...witnessTables, ...(typedError === null ? [] : [typedError.slot])];
   const implicitLocations = implicitArgs.map(() => allocator.gp());
   const stackWords = Math.ceil(allocator.stackSize / 8);
   const fridaArgTypes: NativeFunctionArgumentType[] = [
@@ -796,6 +811,9 @@ export function makeSwiftNativeFunction(
       }
     }
     implicitArgs.forEach((arg, k) => frame.add(frameOffset(implicitLocations[k])).writePointer(arg));
+    if (typedError?.direct !== null && typedError !== null) {
+      fillTypedErrorSentinel(typedError.slot, typedError.metadata);
+    }
     result?.leading.forEach((buffer, k) => frame.add(frameOffset(leadingResultLocations[k])).writePointer(buffer));
 
     const physical: NativeFunctionArgumentValue[] = [];
@@ -827,10 +845,10 @@ export function makeSwiftNativeFunction(
 // The callee's +1 error value, taken into storage of its own so the trampoline's buffers are free.
 function takeTypedError({ metadata, direct, slot }: TypedErrorLowering, registerDump: NativePointer): NativePointer {
   const value = Memory.alloc(Math.max(metadata.typeLayout.stride, 1));
-  if (direct !== null) {
+  if (direct !== null && !typedErrorLeftInBuffer(slot, metadata)) {
     copyDirect(direct, registerDump, value);
   } else {
-    Memory.copy(value, slot!, metadata.valueWitnesses.size);
+    Memory.copy(value, slot, metadata.valueWitnesses.size);
   }
   return value;
 }

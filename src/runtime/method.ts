@@ -43,6 +43,8 @@ import {
   placeAsyncResultScalars,
   placeTypedErrorScalars,
   typedErrorReturnsDirectly,
+  fillTypedErrorSentinel,
+  PlacedResultScalar,
   indirect,
 } from "./calling-convention.js";
 import { probeSelfOwnership, RegisterRange } from "./value-convention.js";
@@ -1620,15 +1622,16 @@ export class BoundMethod {
     }
     if (plan.thrown !== undefined) {
       const { metadata } = plan.thrown;
+      const slot = Memory.alloc(Math.max(metadata.typeLayout.stride, 1));
+      lowered.pushWord(slot);
+      let placed: PlacedResultScalar[] | null = null;
       if (thrownRidesResultRegisters(plan.thrown, this.result === null ? null : planMetadata(plan.returnPlan!), this.result?.kind === "indirect")) {
         const resultScalars = this.result?.kind === "scalars" ? loweredScalars(planMetadata(plan.returnPlan!)) : [];
         options.result = { kind: "scalars", placed: this.result?.kind === "scalars" ? this.result.placed : [], stride: this.result?.kind === "scalars" ? this.result.stride : 0 };
-        options.typedError = { type: metadata, placed: placeTypedErrorScalars(resultScalars, metadata, true) };
-      } else {
-        const slot = Memory.alloc(Math.max(metadata.typeLayout.stride, 1));
-        lowered.pushWord(slot);
-        options.typedError = { type: metadata, slot };
+        placed = placeTypedErrorScalars(resultScalars, metadata, true);
+        fillTypedErrorSentinel(slot, metadata);
       }
+      options.typedError = { type: metadata, slot, placed };
     }
     const { gp, fp } = lowered;
     if (fp.length > 0) {

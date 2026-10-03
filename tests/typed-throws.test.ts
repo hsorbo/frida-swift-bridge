@@ -19,8 +19,8 @@ function thrownBy(call: () => unknown): SwiftError {
   try {
     call();
   } catch (e) {
-    expect(e instanceof SwiftError).toBe(true);
-    return e as SwiftError;
+    if (!(e instanceof SwiftError)) throw e;
+    return e;
   }
   throw new Error("did not throw");
 }
@@ -29,8 +29,8 @@ async function rejectedWith(promise: Promise<unknown>): Promise<SwiftError> {
   try {
     await promise;
   } catch (e) {
-    expect(e instanceof SwiftError).toBe(true);
-    return e as SwiftError;
+    if (!(e instanceof SwiftError)) throw e;
+    return e;
   }
   throw new Error("did not reject");
 }
@@ -157,7 +157,7 @@ describe("typed throws", () => {
     const seen: { ret: CallResult; error: CallResult | undefined }[] = [];
     const module = loadFixture();
     const listeners = [THROWS_CODED_ASYNC, THROWS_WIDE_ASYNC].map((name) =>
-      SwiftInterceptor.attachAsync(module.getExportByName(`${name}Tu`), {
+      SwiftInterceptor.attachAsync(module.getExportByName(name), {
         onComplete(ret, error) {
           seen.push({ ret, error });
         },
