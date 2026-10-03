@@ -15,6 +15,8 @@ import {
   RegisterLocation,
   FloatClass,
   argumentRegisterUse,
+  placeResultScalars,
+  placeAsyncResultScalars,
 } from "./calling-convention.js";
 import { probeSelfOwnership } from "./value-convention.js";
 import { AsyncFunctionPointer, isAsyncFunctionPointerSymbol } from "../abi/async-function-pointer.js";
@@ -522,6 +524,12 @@ function gpResult(context: CpuContext, n: number): NativePointer {
   return gpName(context)[SWIFTCC.gpResults[n]];
 }
 
+// The arm64 completion spill carries every argument register under its own name; x86-64's is
+// remapped onto the result names in spillContext.
+function resumeGp(context: CpuContext, n: number): NativePointer {
+  return gpName(context)[ARCH === "arm64" ? SWIFTCC.gpArgs[n] : SWIFTCC.gpResults[n]];
+}
+
 function fpArg(context: CpuContext, n: number, cls: "double" | "float"): number {
   if (ARCH === "arm64") {
     return (context as unknown as Record<string, number>)[SWIFTCC.fpArg(cls, n)];
@@ -730,7 +738,8 @@ function materializeReturn(
   ret: TypePlan | null,
   indirectReturn: NativePointer | null,
   generics: Metadata[],
-  genericParams: string[]
+  genericParams: string[],
+  onResume = false
 ): CallResult {
   if (ret === null) {
     return null;
@@ -772,13 +781,13 @@ function materializeReturn(
   // Direct multi-register return: the bytes live only in the result registers, so a non-POD value is
   // borrowed over this private reassembly — readable/callable in the callback, not write-through.
   const scratch = Memory.alloc(Math.max(words(returnType), 1) * 8);
-  const allocator = new ArgumentAllocator(0, true);
-  for (const scalar of loweredScalars(returnType)) {
+  const placed = onResume ? placeAsyncResultScalars(returnType) : placeResultScalars(returnType);
+  for (const { scalar, location } of placed) {
     writeRegisterScalar(
       scratch,
       scalar,
-      allocator.scalar(scalar) as RegisterLocation,
-      (n) => gpResult(context, n),
+      location,
+      (n) => (onResume ? resumeGp(context, n) : gpResult(context, n)),
       (n, cls) => fpResult(context, n, cls)
     );
   }
@@ -947,7 +956,7 @@ function fireCompletion(entry: CompletionEntry, context: CpuContext, self: Invoc
   }
   entry.callbacks.onComplete!.call(
     self,
-    materializeReturn(context, entry.ret, entry.outBuffer, entry.generics, entry.genericParams)
+    materializeReturn(context, entry.ret, entry.outBuffer, entry.generics, entry.genericParams, true)
   );
 }
 

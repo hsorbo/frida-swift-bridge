@@ -2,7 +2,7 @@ import { test, expect, describe } from "@frida/injest/agent";
 import { requireDarwin, requireSwift } from "./swift.js";
 import { loadFixture } from "./fixtures/load.js";
 
-import { AsyncFunctionPointer, driveAsyncCall, metadataFor, typeOf, type ClassType } from "../src/abi.js";
+import { AsyncFunctionPointer, driveAsyncCall, metadataFor, typeOf, ValueInstance, type ClassType } from "../src/abi.js";
 import { lookUpObjCClass } from "../src/runtime/objc.js";
 
 import { Swift, type SwiftObject } from "../src/index.js";
@@ -20,6 +20,7 @@ const CALC_ECHO_ASYNC = "$s7fixture9AsyncCalcC04echoB0yxxYalF";
 const MAKE_LINK = "$s7fixture8makeLinkyAA0C0VSSF";
 const RESOLVE_LINK_ASYNC = "$s7fixture16resolveLinkAsyncyAA0C0V_AA4HostCtADYaF";
 const PAIR_LINK_ASYNC = "$s7fixture13pairLinkAsyncyAA0C0V_So8NSObjectCtAD_AFtYaF";
+const FLIP_FRAMED_INT128_ASYNC = "$s7fixture21flipFramedInt128AsyncyAA0cD0VADYaF";
 
 function driver(module: Module): (x: number) => number {
   const fn = new NativeFunction(module.getExportByName(DRIVE), "long", ["long"]);
@@ -187,6 +188,32 @@ describe("async interceptor", () => {
       expect(quad).toBeDefined();
       expect(quad!.a).toEqual(int64(10));
       expect(quad!.e).toEqual(int64(14));
+    } finally {
+      listener.detach();
+    }
+  });
+
+  test("onComplete decodes an Int128 framed by integers from the resume's argument registers", async (ctx) => {
+    requireSwift();
+    const module = loadFixture();
+    const Framed = metadataFor("fixture.FramedInt128");
+    if (Framed === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
+    const framed = Memory.alloc(Framed!.typeLayout.stride);
+    framed.writeU64(1);
+    framed.add(16).writeU64(3);
+    framed.add(24).writeU64(2);
+    framed.add(32).writeU64(4);
+
+    let result: unknown;
+    const listener = Swift.Interceptor.attachAsync(module.getExportByName(FLIP_FRAMED_INT128_ASYNC), {
+      onComplete(retval) {
+        result = retval;
+      },
+    });
+    try {
+      const flipFramedInt128Async = Swift.asyncFunction(module, FLIP_FRAMED_INT128_ASYNC);
+      await flipFramedInt128Async.call(ValueInstance.borrow(Framed!, framed));
+      expect(result).toEqual({ head: int64(4), wide: (2n << 64n) | 4n, tail: int64(1) });
     } finally {
       listener.detach();
     }

@@ -380,6 +380,11 @@ export interface PlacedResultScalar {
 // an i128 at an even register on its own; a sync result and Darwin pack them.
 const ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER = I128_STARTS_AT_EVEN_REGISTER;
 
+export function placeResultScalars(metadata: Metadata): PlacedResultScalar[] {
+  const allocator = new ArgumentAllocator(0, true);
+  return loweredScalars(metadata).map((scalar) => ({ scalar, location: allocator.scalar(scalar) as RegisterLocation }));
+}
+
 export function placeAsyncResultScalars(metadata: Metadata): PlacedResultScalar[] {
   const allocator = new ArgumentAllocator(0, true);
   return loweredScalars(metadata).flatMap((scalar) => {
