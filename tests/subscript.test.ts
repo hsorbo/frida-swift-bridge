@@ -47,7 +47,7 @@ describe("subscripts", () => {
     expect(rowColumn.signature.labels).toEqual(["row", "column"]);
     expect(rowColumn.signature.returnTypeName).toBe("Swift.Int");
     const setter = Grid.$type.subscript("subscript(_:)", { accessor: "setter" });
-    expect(setter.address.equals(fixtureExport("fixture.Grid.subscript.setter : (Swift.Int)"))).toBe(true);
+    expect(setter.address.equals(fixtureExport("fixture.Grid.subscript.setter : (Swift.Int)").strip())).toBe(true);
     expect(Grid.$type.typeSubscript({ labels: ["unit"] }).signature.argTypeNames).toEqual(["Swift.Int"]);
     expect(Grid.$type.subscript({ labels: ["scaled"] }).isGeneric).toBe(true);
   });
