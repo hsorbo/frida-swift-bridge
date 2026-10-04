@@ -1,13 +1,10 @@
 import { getSwiftCoreApi } from "./api.js";
 import { markScriptOwnedErrorBox } from "./thrown-error.js";
+import { ARM64E_ABI } from "../basic/pac.js";
 
 const ARCH = Process.arch;
 
 const CLOSURE_KEY: PointerAuthenticationKey = "ia";
-
-// Swift authenticates a closure's function pointer (blraa) only under the arm64e ABI; on a plain
-// arm64/x86 runtime the call is a bare blr and signing would leave PAC bits that fault the branch.
-const ARM64E_ABI = Process.platform === "darwin" && Process.arch === "arm64";
 
 // HeapObject header: [metadata, refCounts]. swift_allocObject installs strong count 1.
 const HEAP_HEADER_SIZE = Process.pointerSize * 2;
