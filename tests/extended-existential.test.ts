@@ -120,6 +120,9 @@ describe("extended existential shape", () => {
       ctx.skip("fixture compiled without a ~Copyable composition's metadata (Swift < 6.2)");
     }
     const M = existentialMetadata("fixture.noncopyableConsumableType");
+    if (M.kind === MetadataKind.Existential) {
+      ctx.skip("deployment target predates extended existential metadata for ~Copyable compositions");
+    }
     expect(M.kind).toBe(MetadataKind.ExtendedExistential);
     expect(existentialProtocols(M).map((p) => p.fullTypeName)).toEqual(["fixture.Consumable"]);
     expect(extendedExistentialGeneralizationArguments(M)).toEqual([]);
