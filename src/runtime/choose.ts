@@ -12,8 +12,12 @@ export interface ChooseOptions {
   subclasses?: boolean;
 }
 
-// Strips PAC and nonpointer-isa bits, so an isa or metadata word compares as the plain address.
-const ISA_MASK = ptr("0x00007ffffffffff8");
+// Strips PAC and nonpointer-isa bits, so an isa or metadata word compares as the plain address. The
+// nonpointer layout differs per platform and ABI, so libobjc's exported mask is the authority.
+const ISA_MASK =
+  Process.platform === "darwin"
+    ? Module.getGlobalExportByName("objc_debug_isa_class_mask").readPointer()
+    : ptr("0x00007ffffffffff8");
 
 export function choose(cls: SwiftClass, options: ChooseOptions = {}): SwiftClassObject[] {
   if (!(cls?.$type instanceof ClassType)) {
