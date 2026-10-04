@@ -1288,6 +1288,16 @@ import CoreGraphics
 public func foreignClassType() -> UnsafeRawPointer { unsafeBitCast(CGColor.self, to: UnsafeRawPointer.self) }
 #endif
 
+import cfixture
+public struct ImportedCValues {
+    public var point = CFixturePoint(x: 1, y: 2)
+    public var mode = CFixtureMode.on
+    public var flags: CFixtureFlags = [.bold, .italic]
+}
+extension CFixturePoint {
+    public func sum() -> Int32 { x + y }
+}
+
 #if canImport(ObjectiveC)
 import ObjectiveC
 public final class ObjCConformer: NSObject {}

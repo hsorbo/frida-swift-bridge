@@ -682,23 +682,26 @@ function describeOverloads(candidates: MethodCandidate[]): string {
     .join(", ");
 }
 
+// A type imported from C declares no Swift members: every one is an extension member.
 function memberOrigin(address: NativePointer, type: string): MemberOrigin {
   const module = imageName(address);
-  const owner = isImportedObjCClass(type) ? null : imageName(findType(type)!.handle);
+  const owner = type.startsWith(OBJC_MODULE_PREFIX) ? null : imageName(findType(type)!.handle);
   return { kind: module === owner ? "own" : "extension", type, module };
 }
 
 const OBJC_MODULE_PREFIX = "__C.";
 const OBJC_CLASS_IDENTIFIER = /^[A-Za-z_]\w*$/;
 
-function isImportedObjCClass(fullName: string): boolean {
-  return fullName.startsWith(OBJC_MODULE_PREFIX);
+// __C is the module of everything imported from C. An imported ObjC class is the one kind with no
+// Swift descriptor; a C struct or enum under __C has one in the importing binary.
+export function isImportedObjCClass(fullName: string): boolean {
+  return fullName.startsWith(OBJC_MODULE_PREFIX) && importedObjCClassName(fullName) !== null;
 }
 
 // The demangler spells an imported ObjC class __C.<name>; a bare name is accepted when no Swift type
 // claims it. Its Swift members are all extension members, led by the class's So<len><name>C token.
 export function importedObjCClassName(name: string): string | null {
-  const ident = isImportedObjCClass(name) ? name.slice(OBJC_MODULE_PREFIX.length) : name;
+  const ident = name.startsWith(OBJC_MODULE_PREFIX) ? name.slice(OBJC_MODULE_PREFIX.length) : name;
   if (Process.platform !== "darwin" || !OBJC_CLASS_IDENTIFIER.test(ident) || lookUpObjCClass(ident) === null) {
     return null;
   }
@@ -761,8 +764,12 @@ function classChainNames(fullName: string): string[] {
   if (descriptor === null || descriptor.kind !== ContextDescriptorKind.Class || descriptor.isGeneric) {
     return [fullName];
   }
+  const metadata = getMetadata(descriptor);
+  if (metadata.kind !== MetadataKind.Class) {
+    return [fullName];
+  }
   const names: string[] = [];
-  let cls: ClassMetadata | null = new ClassMetadata(getMetadata(descriptor).handle);
+  let cls: ClassMetadata | null = new ClassMetadata(metadata.handle);
   while (cls !== null && cls.isTypeMetadata) {
     const name = cls.description.fullTypeName;
     if (name === null) {

@@ -26,6 +26,7 @@ import {
   initializerLookup,
   findMember,
   importedObjCClassName,
+  isImportedObjCClass,
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
 import { metatypeInstanceType } from "../abi/metatype.js";
@@ -598,7 +599,7 @@ export function nominalTypeNamed(name: string): NominalType | null {
     const type = metadata === null ? null : typeOf(metadata);
     return type instanceof NominalType ? type : null;
   }
-  const descriptor = name.startsWith("__C.") ? null : findType(name);
+  const descriptor = isImportedObjCClass(name) ? null : findType(name);
   if (descriptor !== null) {
     return typeFromDescriptor(descriptor);
   }

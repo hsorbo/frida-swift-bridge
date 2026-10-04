@@ -8,6 +8,7 @@ import { getExistentialTypeMetadata } from "../abi/existential.js";
 import { resolveTypeByMangledName } from "../abi/field-descriptor.js";
 import { getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
 import { TypeExpr, parseTypeExpr, SwiftFunctionSignature } from "./type-expr.js";
+import { lookUpObjCClass, lookUpObjCProtocol } from "./objc.js";
 
 export {
   TypeExpr,
@@ -109,8 +110,9 @@ export function resolveFunctionSignature(
 }
 
 export function resolveType(name: string): Metadata | null {
-  if (name.startsWith("__C.")) {
-    return resolveObjCType(name);
+  const objcType = name.startsWith("__C.") ? resolveObjCType(name) : null;
+  if (objcType !== null) {
+    return objcType;
   }
   const descriptor = findType(name);
   if (descriptor !== null) {
@@ -123,15 +125,21 @@ export function resolveType(name: string): Metadata | null {
   return resolveProtocolExistential(name);
 }
 
-// A __C type has no Swift descriptor; resolve it through its `So<len><name>C` (class) or
-// `So<len><name>_p` (protocol existential) mangling.
+// An ObjC class or protocol has no Swift descriptor; resolve it through its `So<len><name>C` (class)
+// or `So<len><name>_p` (protocol existential) mangling. A C struct or enum under __C has a descriptor.
 function resolveObjCType(name: string): Metadata | null {
   const ident = name.slice("__C.".length);
-  if (!/^[A-Za-z_]\w*$/.test(ident)) {
+  if (Process.platform !== "darwin" || !/^[A-Za-z_]\w*$/.test(ident)) {
     return null;
   }
   const prefix = `So${ident.length}${ident}`;
-  return resolveMangled(`${prefix}C`) ?? resolveMangled(`${prefix}_p`);
+  if (lookUpObjCClass(ident) !== null) {
+    return resolveMangled(`${prefix}C`);
+  }
+  if (lookUpObjCProtocol(ident) !== null) {
+    return resolveMangled(`${prefix}_p`);
+  }
+  return null;
 }
 
 function resolveMangled(mangled: string): Metadata | null {

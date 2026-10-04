@@ -1,0 +1,4 @@
+module cfixture {
+    header "cfixture.h"
+    export *
+}

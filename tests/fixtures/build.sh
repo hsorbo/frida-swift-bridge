@@ -81,7 +81,7 @@ case "$platform" in
       for mod in fixture fixturesyms; do
         xcrun -sdk iphoneos swiftc -target "${arch}-apple-ios${dep}" \
           -emit-library -emit-module -module-name "$mod" "$fixtures/fixture.swift" $objc_without_foundation \
-          -I "$work/$arch" "$work/$arch/resilient.dylib" -o "$work/$arch/$mod.dylib" \
+          -I "$fixtures" -I "$work/$arch" "$work/$arch/resilient.dylib" -o "$work/$arch/$mod.dylib" \
           -emit-module-path "$work/$arch/$mod.swiftmodule" \
           -Xlinker -install_name -Xlinker "@rpath/$mod.dylib" \
           -Xlinker -rpath -Xlinker @loader_path
@@ -90,7 +90,7 @@ case "$platform" in
       for mod in nometadata conformance retroactive; do
         xcrun -sdk iphoneos swiftc -target "${arch}-apple-ios${dep}" \
           -emit-library -module-name "$mod" "$fixtures/$mod.swift" \
-          -I "$work/$arch" "$work/$arch/fixture.dylib" "$work/$arch/resilient.dylib" \
+          -I "$fixtures" -I "$work/$arch" "$work/$arch/fixture.dylib" "$work/$arch/resilient.dylib" \
           -o "$work/$arch/$mod.dylib" \
           -Xlinker -install_name -Xlinker "@rpath/$mod.dylib" \
           -Xlinker -rpath -Xlinker @loader_path
