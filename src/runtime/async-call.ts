@@ -78,22 +78,8 @@ export interface AsyncCallOptions {
 const CONCURRENCY_MODULE = Process.platform === "darwin" ? "libswift_Concurrency.dylib" : "libswift_Concurrency.so";
 const DISPATCH_MODULE = Process.platform === "darwin" ? "libdispatch.dylib" : "libdispatch.so";
 
-// find/getExportByName crash on libswift_Concurrency under Frida 17/Linux; cache enumerateExports instead.
-const moduleExportTables = new Map<string, Map<string, NativePointer>>();
 function moduleExport(moduleName: string, symbol: string): NativePointer {
-  let exports = moduleExportTables.get(moduleName);
-  if (exports === undefined) {
-    exports = new Map();
-    for (const e of Process.getModuleByName(moduleName).enumerateExports()) {
-      exports.set(e.name, e.address);
-    }
-    moduleExportTables.set(moduleName, exports);
-  }
-  const p = exports.get(symbol);
-  if (p === undefined) {
-    throw new Error(`${moduleName}: no export ${symbol}`);
-  }
-  return p;
+  return Process.getModuleByName(moduleName).getExportByName(symbol);
 }
 
 function concExport(name: string): NativePointer {

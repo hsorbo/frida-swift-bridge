@@ -1,4 +1,4 @@
-const MINIMUM_FRIDA = [17, 22, 0];
+const MINIMUM_FRIDA = [17, 22, 1];
 
 let resolver: ApiResolver | null = null;
 let resolverModuleCount = -1;
