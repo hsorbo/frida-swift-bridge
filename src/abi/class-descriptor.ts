@@ -1,4 +1,4 @@
-import { ContextDescriptor } from "./context-descriptor.js";
+import { ContextDescriptor, ContextDescriptorKind } from "./context-descriptor.js";
 import { ClassMetadata } from "./class-metadata.js";
 import { getClassMetadataBounds } from "./class-metadata-bounds.js";
 import { genericContextEnd } from "./generic-instantiation.js";
@@ -49,9 +49,20 @@ const OFFSETOF_VTABLE_SIZE = 0x4;
 const OFFSETOF_METHOD_DESCRIPTORS = 0x8;
 const OFFSETOF_IMPL = 0x4;
 
+const OFFSETOF_EXTRA_CLASS_FLAGS = 0x1c;
+const VTABLE_DESCRIPTOR_HEADER_SIZE = 8;
+const OVERRIDE_TABLE_HEADER_SIZE = 4;
+const METHOD_OVERRIDE_DESCRIPTOR_SIZE = 12;
+const OBJC_RESILIENT_CLASS_STUB_INFO_SIZE = 4;
+const METADATA_LIST_COUNT_SIZE = 4;
+const METADATA_LIST_ENTRY_SIZE = 4;
+
 const KIND_FLAGS_SHIFT = 16;
 const CLASS_HAS_VTABLE = 1 << 15;
+const CLASS_HAS_OVERRIDE_TABLE = 1 << 14;
 const CLASS_HAS_RESILIENT_SUPERCLASS = 1 << 13;
+const HAS_CANONICAL_METADATA_PRESPECIALIZATIONS = 1 << 3;
+const EXTRA_CLASS_HAS_OBJC_RESILIENT_CLASS_STUB = 1;
 const CLASS_ARE_IMMEDIATE_MEMBERS_NEGATIVE = 1 << 12;
 const CLASS_IS_DEFAULT_ACTOR = 1 << 8;
 const CLASS_IS_ACTOR = 1 << 7;
@@ -167,6 +178,45 @@ export function readVTable(descriptor: ContextDescriptor): VTableEntry[] {
     });
   }
   return entries;
+}
+
+// The compiler's own specializations of a generic type, emitted in its defining module's image
+// data. They trail the generic context, the metadata initialization record and, for a class, the
+// vtable, the override table and the ObjC resilient class stub.
+export function canonicalPrespecializedMetadata(descriptor: ContextDescriptor): NativePointer[] {
+  if (!descriptor.isGeneric || (kindFlags(descriptor) & HAS_CANONICAL_METADATA_PRESPECIALIZATIONS) === 0) {
+    return [];
+  }
+  const isClass = descriptor.kind === ContextDescriptorKind.Class;
+  const base = descriptor.handle;
+  let offset = genericContextEnd(descriptor);
+  if (isClass && hasResilientSuperclass(descriptor)) {
+    offset += RESILIENT_SUPERCLASS_SIZE;
+  }
+  switch (metadataInitializationKind(descriptor)) {
+    case MetadataInitializationKind.Foreign:
+      offset += FOREIGN_METADATA_INITIALIZATION_SIZE;
+      break;
+    case MetadataInitializationKind.Singleton:
+      offset += SINGLETON_METADATA_INITIALIZATION_SIZE;
+      break;
+    case MetadataInitializationKind.None:
+      break;
+  }
+  if (isClass) {
+    if ((kindFlags(descriptor) & CLASS_HAS_VTABLE) !== 0) {
+      offset += VTABLE_DESCRIPTOR_HEADER_SIZE + base.add(offset + OFFSETOF_VTABLE_SIZE).readU32() * METHOD_DESCRIPTOR_SIZE;
+    }
+    if ((kindFlags(descriptor) & CLASS_HAS_OVERRIDE_TABLE) !== 0) {
+      offset += OVERRIDE_TABLE_HEADER_SIZE + base.add(offset).readU32() * METHOD_OVERRIDE_DESCRIPTOR_SIZE;
+    }
+    if (hasResilientSuperclass(descriptor) && (base.add(OFFSETOF_EXTRA_CLASS_FLAGS).readU32() & EXTRA_CLASS_HAS_OBJC_RESILIENT_CLASS_STUB) !== 0) {
+      offset += OBJC_RESILIENT_CLASS_STUB_INFO_SIZE;
+    }
+  }
+  const count = base.add(offset).readU32();
+  const entries = base.add(offset + METADATA_LIST_COUNT_SIZE);
+  return Array.from({ length: count }, (_, i) => RelativeDirectPointer.resolve(entries.add(i * METADATA_LIST_ENTRY_SIZE))!);
 }
 
 // A class's slots keep a fixed metadata offset in every subclass, so a base slot addresses the

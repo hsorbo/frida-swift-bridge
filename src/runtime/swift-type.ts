@@ -253,7 +253,7 @@ export abstract class NominalType extends SwiftType {
     return protocolsForType(descriptorOf(this).handle);
   }
 
-  // A scan answers each call: the specializations built so far, whether or not any instance lives.
+  // Answered afresh on each call: the specializations built so far, whether or not any instance lives.
   specializations(): SwiftTypeFacade[] {
     if (!isUnboundGeneric(this)) {
       throw new Error(`${this.name} is not a generic type named without its arguments`);
