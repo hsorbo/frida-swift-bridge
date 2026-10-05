@@ -61,7 +61,7 @@ describe("async call", () => {
     const module = loadFixture();
     const x = Memory.alloc(8).writeDouble(21);
     const result = driveAsyncCall(afp(module, COMPUTE_DOUBLE_ASYNC_AFP), [], {
-      floatArgs: [{ bytes: x, cls: "double" }],
+      floatArgs: [{ bytes: x, cls: "double", index: 0 }],
       result: { kind: "float", cls: "double", count: 1 },
     });
     expect(result.readDouble()).toBe(42);

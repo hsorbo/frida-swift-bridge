@@ -4,6 +4,7 @@ import { requireSwift, SWIFTCORE_MODULE } from "./swift.js";
 import { Swift } from "../src/index.js";
 import { readString } from "../src/abi/string.js";
 import { readValue } from "../src/abi/instance.js";
+import { makeTwoWordResultFunction } from "../src/runtime/swiftcc.js";
 
 import { metadataFor } from "../src/abi.js";
 // Build a small-string _StringObject (ASCII, <= 15 bytes) in 16 bytes.
@@ -40,15 +41,15 @@ describe("readString", () => {
     } catch (e) {
       throw new Error("_typeName not exported under the expected mangling");
     }
-    const fn = new NativeFunction(typeNameFn, ["uint64", "uint64"], ["pointer", "bool"]);
+    const fn = makeTwoWordResultFunction(typeNameFn, ["pointer", "size_t"], ["pointer", "bool"]);
     const dict = metadataFor("Swift.Dictionary", [
       metadataFor("Swift.String")!,
       metadataFor("Swift.Int")!,
     ])!;
-    const ret = fn(dict.handle, 1) as unknown as [UInt64, UInt64];
+    const ret = fn(dict.handle, 1);
 
     const storage = Memory.alloc(16);
-    storage.writeU64(ret[0]);
+    storage.writePointer(ret[0]);
     storage.add(8).writeU64(ret[1]);
     const name = readString(storage)!;
     expect(name.length).toBeGreaterThan(15); // proves it took the large path

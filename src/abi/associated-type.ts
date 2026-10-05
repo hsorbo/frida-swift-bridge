@@ -48,7 +48,7 @@ function findAssociatedType(table: WitnessTable, name: string): Metadata | null 
   const requirement = readProtocolRequirements(protocol).filter(
     (r) => r.kind === ProtocolRequirementKind.AssociatedTypeAccessFunction
   )[index];
-  const [value] = getSwiftCoreApi().swift_getAssociatedTypeWitness(
+  const value = getSwiftCoreApi().swift_getAssociatedTypeWitness(
     REQUEST_BLOCKING_COMPLETE,
     table.handle,
     table.conformingType.handle,

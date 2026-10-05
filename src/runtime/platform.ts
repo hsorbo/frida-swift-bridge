@@ -1,6 +1,6 @@
 export const SWIFT_HOST_SUPPORTED =
   (Process.arch === "arm64" || Process.arch === "x64") &&
-  (Process.platform === "darwin" || Process.platform === "linux" || (Process.platform === "windows" && Process.arch === "arm64"));
+  (Process.platform === "darwin" || Process.platform === "linux" || Process.platform === "windows");
 
 export function runtimeLibraryName(stem: string): string {
   switch (Process.platform) {

@@ -308,8 +308,8 @@ export function initializeExistentialWithCopy(
     if (witnesses.isInlineStorage) {
       witnesses.initializeWithCopy(container, src);
     } else {
-      const [box, storage] = getSwiftCoreApi().swift_allocBox(type.handle);
-      witnesses.initializeWithCopy(storage, src);
+      const box = getSwiftCoreApi().swift_allocBox(type.handle);
+      witnesses.initializeWithCopy(getSwiftCoreApi().swift_projectBox(box), src);
       container.writePointer(box);
     }
     container.add(TYPE_OFFSET).writePointer(type.handle);

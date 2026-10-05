@@ -435,6 +435,7 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     const indices = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, gp), p.text) : planType(p.type, gp)));
     const element = parsed.result === null ? null : planType(parsed.result, gp);
     const args = accessor === "setter" ? [element!, ...indices] : indices;
+    const ret = accessor === "setter" ? null : element;
     const ownWords = parsed.genericParams.length + witnessTableCount(parsed);
     const probe = (metadata: Metadata, typeKeyArguments = 0): SelfOwnership | null =>
       ownership ??
@@ -443,14 +444,14 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
         : probedOwnership(target, args, metadata, {
             trailingSelf: ownWords + typeKeyArguments,
             selfInRegister: ownWords + (typeKeyArguments > 0 ? 1 : 0),
-          }));
+          }, syncArgumentSlotBase(ret)));
     const receiver = receiverOf(parsed.context, probe, parsed.name === "init", ownership);
     if (receiver !== null && isFixedLayoutReceiver(receiver.metadata) && receiver.trailing !== null) {
       generics = genericEnvironment(parsed, receiver.trailing ? "borrowing" : "mutating", true);
     }
     const shape: CallShape = {
       args,
-      ret: accessor === "setter" ? null : element,
+      ret,
       thrown: parsed.thrownType === null ? null : planType(parsed.thrownType, gp),
       witnessWords: witnessTableCount(parsed),
       generics,
@@ -566,13 +567,14 @@ function probedOwnership(
   target: NativePointer,
   args: TypePlan[],
   receiver: Metadata,
-  implicitWords: { trailingSelf: number; selfInRegister: number }
+  implicitWords: { trailingSelf: number; selfInRegister: number },
+  startReg: number
 ): SelfOwnership | null {
   const argTypes = args.map((plan) =>
     plan.kind === "concrete" ? plan.metadata : plan.kind === "closure" ? { closure: true as const } : { genericParam: 0 }
   );
-  const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf);
-  const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister);
+  const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf, startReg);
+  const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister, startReg);
   return probeSelfOwnership(target, { gp: [inRegister.gp, trailing.gp], fp: [inRegister.fp, trailing.fp] });
 }
 
@@ -593,6 +595,12 @@ function decodeMetatype(metadataPointer: NativePointer): SwiftValue {
 
 function decodeClosure(fn: NativePointer, context: NativePointer): SwiftValue {
   return { function: fn.strip(), context };
+}
+
+// An async indirect result's pointer takes the first argument slot everywhere; a sync one only where
+// the convention passes it as an argument.
+function syncArgumentSlotBase(ret: TypePlan | null): number {
+  return SWIFTCC.indirectResultIsArgument && returnIsIndirect(ret) ? 1 : 0;
 }
 
 function returnIsIndirect(ret: TypePlan | null): boolean {
@@ -680,7 +688,7 @@ class ArgumentCursor {
   }
 
   private stackSlot(stackOffset: number): NativePointer {
-    const base = ARCH === "arm64" ? this.context.sp : this.context.sp.add(8);
+    const base = ARCH === "arm64" ? this.context.sp : this.context.sp.add(8 + SWIFTCC.homeAreaSize);
     return base.add(stackOffset);
   }
 }
@@ -974,7 +982,8 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
   }
   const { args, ret, generics: environment, throws } = shape;
   const genericParams = environment.params;
-  const thrown = thrownLowering(shape, false, target, 0);
+  const argRegBase = syncArgumentSlotBase(ret);
+  const thrown = thrownLowering(shape, false, target, argRegBase);
   const captureIndirect = returnIsIndirect(ret);
   const returnNeedsGenerics = (needsGenerics(ret) || needsGenerics(shape.thrown)) && genericParams.length > 0;
   const decodesArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
@@ -994,7 +1003,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
             state.indirectReturn = indirectResultRegister(context);
           }
           if (wantsArgs) {
-            const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, environment, 0, receiver, takesThrownSlot ? shape.witnessWords : null);
+            const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, environment, argRegBase, receiver, takesThrownSlot ? shape.witnessWords : null);
             state.generics = generics;
             exposeTypeArguments(this, generics);
             if (trailingSelf !== null) {
@@ -1119,15 +1128,22 @@ function getResumeTrampoline(): NativePointer {
       w.flush();
     } else {
       const w = new X86Writer(slot, { pc: page });
-      w.putPushReg("rdi");
-      w.putPushReg("rsi");
+      const [buffer, isUnwind] = SWIFTCC.gpArgs as X86Register[];
+      w.putPushReg(buffer);
+      w.putPushReg(isUnwind);
       w.putPushReg("rbp"); // 16-align rsp across the call
+      if (SWIFTCC.homeAreaSize > 0) {
+        w.putSubRegImm("rsp", SWIFTCC.homeAreaSize);
+      }
       w.putMovRegAddress("r11", resumeBridge!);
       w.putCallReg("r11");
+      if (SWIFTCC.homeAreaSize > 0) {
+        w.putAddRegImm("rsp", SWIFTCC.homeAreaSize);
+      }
       w.putMovRegReg("r11", "rax");
       w.putPopReg("rbp");
-      w.putPopReg("rsi");
-      w.putPopReg("rdi");
+      w.putPopReg(isUnwind);
+      w.putPopReg(buffer);
       w.putJmpReg("r11");
       w.flush();
     }
@@ -1376,25 +1392,32 @@ function writeArm64CompletionTrampoline(slot: NativePointer, pc: NativePointer):
 const X64_RESULT_ARG_REGS = SWIFTCC.gpArgs as X86Register[];
 
 // r13/r14 are callee-saved so the bridge preserves them; caller-saved result regs are spilled/restored.
+// The spill sits above the bridge's home area, addressed through r10.
 function writeX64CompletionTrampoline(slot: NativePointer, pc: NativePointer): void {
   const w = new X86Writer(slot, { pc });
+  const homeArea = SWIFTCC.homeAreaSize;
+  const [asyncContext, spillPtr] = SWIFTCC.gpArgs as X86Register[];
   w.putPushReg("rbp"); // 16-align rsp across the call
-  w.putSubRegImm("rsp", X64_SPILL_SIZE);
-  X64_RESULT_ARG_REGS.forEach((r, i) => w.putMovRegOffsetPtrReg("rsp", i * 8, r));
+  w.putSubRegImm("rsp", homeArea + X64_SPILL_SIZE);
+  w.putMovRegReg("r10", "rsp");
+  w.putAddRegImm("r10", homeArea);
+  X64_RESULT_ARG_REGS.forEach((r, i) => w.putMovRegOffsetPtrReg("r10", i * 8, r));
   for (let k = 0; k < 8; k++) {
-    putSseScalarMove(w, "store", "double", k, "rsp", X64_SPILL_XMM + k * 8);
+    putSseScalarMove(w, "store", "double", k, "r10", X64_SPILL_XMM + k * 8);
   }
-  w.putMovRegOffsetPtrReg("rsp", X64_SPILL_ERROR, "r13");
-  w.putMovRegReg("rdi", "r14"); // bridge(asyncContext, spillPtr)
-  w.putMovRegReg("rsi", "rsp");
+  w.putMovRegOffsetPtrReg("r10", X64_SPILL_ERROR, "r13");
+  w.putMovRegReg(asyncContext, "r14"); // bridge(asyncContext, spillPtr)
+  w.putMovRegReg(spillPtr, "r10");
   w.putMovRegAddress("r11", completionBridge!);
   w.putCallReg("r11");
   w.putMovRegReg("r11", "rax"); // r11 = original ResumeParent
-  X64_RESULT_ARG_REGS.forEach((r, i) => w.putMovRegRegOffsetPtr(r, "rsp", i * 8));
+  w.putMovRegReg("r10", "rsp");
+  w.putAddRegImm("r10", homeArea);
+  X64_RESULT_ARG_REGS.forEach((r, i) => w.putMovRegRegOffsetPtr(r, "r10", i * 8));
   for (let k = 0; k < 8; k++) {
-    putSseScalarMove(w, "load", "double", k, "rsp", X64_SPILL_XMM + k * 8);
+    putSseScalarMove(w, "load", "double", k, "r10", X64_SPILL_XMM + k * 8);
   }
-  w.putAddRegImm("rsp", X64_SPILL_SIZE);
+  w.putAddRegImm("rsp", homeArea + X64_SPILL_SIZE);
   w.putPopReg("rbp");
   w.putJmpReg("r11");
   w.flush();

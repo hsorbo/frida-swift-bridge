@@ -50,7 +50,7 @@ describe("thrown error box ownership", () => {
     const errorObj = Memory.alloc(Process.pointerSize).writePointer(ptr(0xabc));
 
     const discriminator = closureDiscriminator(closureHashString(["$sSW"], [INDIRECT]));
-    const closure = SwiftClosure.overBytes(() => errorObj, discriminator, { throws: true });
+    const closure = SwiftClosure.overBytes(() => errorObj, discriminator, { throws: true, indirectResult: true });
     const invoke = makeSwiftNativeFunction(fixtureExport("invokeGeneric"), null, [Int, Int, { closure: true }], {
       typeArguments: [Int],
       throws: true,

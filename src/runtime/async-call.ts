@@ -6,7 +6,15 @@ import { LIBSWIFT_CORE_NAME, ensureSwiftHost, runtimeLibraryName } from "./platf
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
 import type { RegisterLocation, PlacedResultScalar } from "./calling-convention.js";
 import { typedErrorLeftInBuffer } from "./calling-convention.js";
-import { FloatClass, SWIFTCC, GP_ARG_REGISTERS, GP_RESULT_REGISTERS, FP_RESULT_REGISTERS, putSseScalarMove } from "./swiftcc.js";
+import {
+  FloatClass,
+  SWIFTCC,
+  GP_ARG_REGISTERS,
+  FP_ARG_REGISTERS,
+  GP_RESULT_REGISTERS,
+  FP_RESULT_REGISTERS,
+  putSseScalarMove,
+} from "./swiftcc.js";
 
 export type { FloatClass };
 
@@ -27,7 +35,7 @@ const NUM_ARG_REGS = GP_ARG_REGISTERS;
 // A four-word scalar result reaches x6 once AAPCS64 even-aligns each i128 half, so capture every argument register.
 const NUM_GP_RESULT_REGS = ARCH === "arm64" ? GP_ARG_REGISTERS : GP_RESULT_REGISTERS;
 const NUM_FP_RESULT_REGS = FP_RESULT_REGISTERS;
-const MAX_FLOAT_REGS = 8;
+const MAX_FLOAT_REGS = FP_ARG_REGISTERS;
 
 const COPY_TASK_LOCALS = 1 << 10;
 const ENQUEUE_JOB = 1 << 12;
@@ -48,6 +56,7 @@ export type AsyncResultShape =
 export interface AsyncFloatArg {
   bytes: NativePointer;
   cls: FloatClass;
+  index: number; // the floating-point argument register it loads
 }
 
 export interface SerialExecutorRef {
@@ -324,9 +333,9 @@ function writeArm64Operation(slot: NativePointer, pc: NativePointer, o: Operatio
     w.putLdrRegAddress("x0", o.result); // @out rides x0, not x8 as in sync swiftcc
   }
   o.args.forEach((a, i) => w.putLdrRegAddress(ARG_REGS_ARM64[o.gpBase + i], a));
-  o.floatArgs.forEach((fa, i) => {
+  o.floatArgs.forEach((fa) => {
     w.putLdrRegAddress("x14", fa.bytes);
-    w.putLdrRegRegOffset(fpReg(fa.cls, i), "x14", 0);
+    w.putLdrRegRegOffset(fpReg(fa.cls, fa.index), "x14", 0);
   });
   if (o.receiver !== undefined) {
     w.putLdrRegAddress("x20", o.receiver);
@@ -344,9 +353,16 @@ function writeArm64Operation(slot: NativePointer, pc: NativePointer, o: Operatio
   w.flush();
 }
 
+// The C calls take their argument in the first swiftcc argument register on both x86-64 ABIs.
+const C_ARG0_X64 = ARG_REGS_X64[0];
+const HOME_AREA_X64 = SWIFTCC.homeAreaSize;
+
 function writeX64Continuation(slot: NativePointer, pc: NativePointer, c: ContinuationCtx): void {
   const w = new X86Writer(slot, { pc });
   w.putPushReg("r15"); // callee-saved: carries the parent context across the call, and 16-aligns rsp
+  if (HOME_AREA_X64 > 0) {
+    w.putSubRegImm("rsp", HOME_AREA_X64);
+  }
   if (c.shape.kind === "gp") {
     w.putMovRegAddress("r10", c.result);
     for (let i = 0; i < c.shape.words; i++) {
@@ -371,7 +387,7 @@ function writeX64Continuation(slot: NativePointer, pc: NativePointer, c: Continu
     w.putMovRegPtrReg("r10", "r13"); // error rides swiftself (r13), mirroring arm64 x20
   }
   w.putMovRegRegOffsetPtr("r15", "r14", OFFSETOF_PARENT);
-  w.putMovRegReg("rdi", "r14");
+  w.putMovRegReg(C_ARG0_X64, "r14");
   w.putMovRegAddress("r11", c.swift_task_dealloc);
   w.putCallReg("r11");
   w.putMovRegReg("r14", "r15");
@@ -379,9 +395,12 @@ function writeX64Continuation(slot: NativePointer, pc: NativePointer, c: Continu
   w.putMovRegU64("r10", 1);
   w.putMovRegPtrReg("r11", "r10");
   if (c.dispatch_semaphore_signal !== null) {
-    w.putMovRegAddress("rdi", c.signalSemaphore!);
+    w.putMovRegAddress(C_ARG0_X64, c.signalSemaphore!);
     w.putMovRegAddress("r11", c.dispatch_semaphore_signal);
     w.putCallReg("r11");
+  }
+  if (HOME_AREA_X64 > 0) {
+    w.putAddRegImm("rsp", HOME_AREA_X64);
   }
   w.putPopReg("r15");
   w.putMovRegRegOffsetPtr("r11", "r14", OFFSETOF_RESUME_PARENT);
@@ -393,9 +412,15 @@ function writeX64Operation(slot: NativePointer, pc: NativePointer, o: OperationC
   const w = new X86Writer(slot, { pc });
   w.putPushReg("r15"); // callee-saved: holds the task context across swift_task_alloc, and 16-aligns rsp
   w.putMovRegReg("r15", "r14");
-  w.putMovRegAddress("rdi", ptr(o.afp.expectedContextSize));
+  if (HOME_AREA_X64 > 0) {
+    w.putSubRegImm("rsp", HOME_AREA_X64);
+  }
+  w.putMovRegAddress(C_ARG0_X64, ptr(o.afp.expectedContextSize));
   w.putMovRegAddress("r11", o.swift_task_alloc);
   w.putCallReg("r11");
+  if (HOME_AREA_X64 > 0) {
+    w.putAddRegImm("rsp", HOME_AREA_X64);
+  }
   w.putMovRegOffsetPtrReg("rax", OFFSETOF_PARENT, "r15");
   w.putMovRegAddress("r10", o.continuation);
   w.putMovRegOffsetPtrReg("rax", OFFSETOF_RESUME_PARENT, "r10");
@@ -404,18 +429,19 @@ function writeX64Operation(slot: NativePointer, pc: NativePointer, o: OperationC
     w.putMovRegAddress(ARG_REGS_X64[0], o.result); // @out rides arg0, not rax as in sync swiftcc
   }
   o.args.forEach((a, i) => w.putMovRegAddress(ARG_REGS_X64[o.gpBase + i], a));
-  o.floatArgs.forEach((fa, i) => {
+  o.floatArgs.forEach((fa) => {
     w.putMovRegAddress("r11", fa.bytes);
-    putSseScalarMove(w, "load", fa.cls, i, "r11", 0);
+    putSseScalarMove(w, "load", fa.cls, fa.index, "r11", 0);
   });
   if (o.receiver !== undefined) {
     w.putMovRegAddress("r13", o.receiver); // swiftself
   }
   w.putPopReg("r15");
   if (o.stackArgs.length > 0) {
-    // swifttailcc pops alignTo(K + 8, 16) - 8 bytes of stack args, 8 even with none, so the return
-    // address moves down by the difference and the args sit above it.
-    const drop = alignTo(o.stackArgs.length * 8 + 8, 16) - 16;
+    // swifttailcc pops alignTo(H + K + 8, 16) - 8 bytes of stack args, H being the home area (8 with
+    // none on SysV, 40 on Win64), so the return address moves down by the difference and the args
+    // sit above it and the home area.
+    const drop = alignTo(HOME_AREA_X64 + o.stackArgs.length * 8 + 8, 16) - alignTo(HOME_AREA_X64 + 8, 16);
     w.putMovRegRegOffsetPtr("r10", "rsp", 0);
     if (drop > 0) {
       w.putSubRegImm("rsp", drop);
@@ -423,7 +449,7 @@ function writeX64Operation(slot: NativePointer, pc: NativePointer, o: OperationC
     w.putMovRegOffsetPtrReg("rsp", 0, "r10");
     o.stackArgs.forEach((word, i) => {
       w.putMovRegAddress("r10", word);
-      w.putMovRegOffsetPtrReg("rsp", 8 + i * 8, "r10");
+      w.putMovRegOffsetPtrReg("rsp", 8 + HOME_AREA_X64 + i * 8, "r10");
     });
   }
   w.putMovRegAddress("r11", o.afp.code);
@@ -438,7 +464,7 @@ type CreateTask = (
   operation: NativePointer,
   closureContext: NativePointer,
   contextSize: number
-) => NativePointer[];
+) => NativePointer;
 
 interface DriveApi {
   create: CreateTask;
@@ -455,7 +481,7 @@ function getDriveApi(): DriveApi {
   ensureSwiftHost();
   const g = (name: string) => moduleExport(DISPATCH_MODULE, name);
   driveApi = {
-    create: new NativeFunction(concExport("swift_task_create_common"), ["pointer", "pointer"], [
+    create: new NativeFunction(concExport("swift_task_create_common"), "pointer", [
       "size_t", "pointer", "pointer", "pointer", "pointer", "size_t",
     ]) as unknown as CreateTask,
     release: new NativeFunction(moduleExport(LIBSWIFT_CORE_NAME, "swift_release"), "void", ["pointer"]),
@@ -491,7 +517,7 @@ function startCall(afp: AsyncFunctionPointer, args: NativePointer[], options: As
   if (retained.length > RETAINED_CALLS) {
     retained.shift();
   }
-  const task = api.create(ENQUEUE_JOB | COPY_TASK_LOCALS, call.option ?? NULL, NULL, signCode(call.operation), NULL, OPERATION_CONTEXT_SIZE)[0];
+  const task = api.create(ENQUEUE_JOB | COPY_TASK_LOCALS, call.option ?? NULL, NULL, signCode(call.operation), NULL, OPERATION_CONTEXT_SIZE);
   if (task.isNull()) {
     throw new Error("swift_task_create_common failed");
   }

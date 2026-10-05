@@ -1,4 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
+import { requireTrailingSelfInRegisters } from "./swift.js";
 import { loadFixture, loadFixtureSyms, loadOptimized, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftObject, type CallResult, SwiftClass, SwiftStruct } from "../src/index.js";
@@ -92,7 +93,8 @@ describe("Interceptor self", () => {
     expect(seen).toEqual({ a: int64(1), b: int64(2), c: int64(3), d: int64(4), e: int64(5) });
   });
 
-  test("a generic method's arguments decode past a trailing self", () => {
+  test("a generic method's arguments decode past a trailing self", (ctx) => {
+    requireTrailingSelfInRegisters(ctx);
     const Int = Swift.type("Swift.Int")!;
     const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 10 });
     const method = box.$method("scaledBy", { typeArguments: [Int] });

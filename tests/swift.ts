@@ -44,9 +44,9 @@ function fridaVersionIsNewerThan(major: number, minor: number, patch: number): b
 export function requireSwiftHost(): void {
   const ok =
     (Process.arch === "arm64" || Process.arch === "x64") &&
-    (Process.platform === "darwin" || Process.platform === "linux" || (Process.platform === "windows" && Process.arch === "arm64"));
+    (Process.platform === "darwin" || Process.platform === "linux" || Process.platform === "windows");
   if (!ok) {
-    throw new Error(`needs arm64/x64 Darwin or Linux, or arm64 Windows, got ${Process.arch}/${Process.platform}`);
+    throw new Error(`needs arm64/x64 Darwin, Linux or Windows, got ${Process.arch}/${Process.platform}`);
   }
 }
 
@@ -77,6 +77,14 @@ export function loadOnoneSupport(): Module {
 export function requireSymbolTable(ctx: { skip: (reason?: string) => void }): void {
   if (Process.platform === "windows") {
     ctx.skip("PE images carry no symbol table");
+  }
+}
+
+// Win64 has four argument slots; a trailing self placed past them is on the stack, where the
+// self-ownership probe cannot see it being read.
+export function requireTrailingSelfInRegisters(ctx: { skip: (reason?: string) => void }): void {
+  if (Process.platform === "windows" && Process.arch === "x64") {
+    ctx.skip("a trailing self past the four Win64 argument registers is out of the probe's sight");
   }
 }
 

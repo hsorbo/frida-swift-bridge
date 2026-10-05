@@ -40,6 +40,7 @@ import {
   ArgumentAllocator,
   LoweredScalar,
   argumentRegisterUse,
+  argumentSlotBase,
   placeAsyncResultScalars,
   placeTypedErrorScalars,
   typedErrorReturnsDirectly,
@@ -1832,7 +1833,7 @@ class AsyncArgs {
     }
     const bytes = value.add(scalar.offset);
     if (location.register === "fp") {
-      this.fp.push({ bytes, cls: scalar.cls as FloatClass });
+      this.fp.push({ bytes, cls: scalar.cls as FloatClass, index: location.index });
       return;
     }
     for (let w = 0; w < scalar.size; w += 8) {
@@ -2147,7 +2148,7 @@ export function bindValueMethod(
 // buffer: (UnsafeRawBufferPointer) -> @out, via an asm trampoline. loadable: register params and
 // result. loadableIndirect: register params, @out result (e.g. (Int) -> R).
 type ClosureShape =
-  | { mode: "buffer" }
+  | { mode: "buffer"; indirectResult: boolean }
   | { mode: "loadable"; params: LoadableScalar[]; result: LoadableScalar | null; throws: boolean }
   | { mode: "loadableIndirect"; params: LoadableScalar[]; resultMetadata: Metadata; throws: boolean };
 
@@ -2241,7 +2242,7 @@ function planClosureType(
   if ((params.length === 0 || takesBuffer) && (resultIsVoid || resultIsGeneric)) {
     const paramTokens = takesBuffer ? [RAW_BUFFER_TOKEN] : [];
     const resultTokens = resultIsGeneric ? [INDIRECT] : [];
-    return closurePlan(paramTokens, resultTokens, { mode: "buffer" });
+    return closurePlan(paramTokens, resultTokens, { mode: "buffer", indirectResult: resultIsGeneric });
   }
 
   const loadable = params.map((p) => LOADABLE_SCALARS[p] ?? null);
@@ -2519,7 +2520,7 @@ function marshalClosure(plan: { discriminator: number; shape: ClosureShape }, ar
       { throws: shape.throws }
     );
   }
-  return SwiftClosure.overBytes(arg.body as ClosureBody, plan.discriminator);
+  return SwiftClosure.overBytes(arg.body as ClosureBody, plan.discriminator, { indirectResult: shape.indirectResult });
 }
 
 function inferClosureTypeArguments(signature: SwiftFunctionSignature): Metadata[] {
@@ -2650,8 +2651,9 @@ function probedSelfOwnership(
   implicitWords: { trailingSelf: number; selfInRegister: number }
 ): SelfOwnership | undefined {
   const argTypes = plan.argPlans.map(swiftArgType);
-  const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf);
-  const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister);
+  const startReg = plan.async || plan.returnPlan === null ? 0 : argumentSlotBase(swiftArgType(plan.returnPlan));
+  const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf, startReg);
+  const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister, startReg);
   const key = `${plan.address}:${trailing.gp}:${trailing.fp}:${inRegister.gp}:${inRegister.fp}`;
   if (!probedSelfOwnerships.has(key)) {
     const directOnly: RegisterRange = { gp: [inRegister.gp, trailing.gp], fp: [inRegister.fp, trailing.fp] };

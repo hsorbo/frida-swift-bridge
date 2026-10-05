@@ -4,7 +4,7 @@ import { fixtureExport, existentialMetadata, loadFixture, loadFixtureSyms } from
 import { Swift, type SwiftValue, type SwiftObject, type CallResult } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { SwiftInterceptor, type SwiftInvocationContext } from "../src/runtime/interceptor.js";
-import { requireFpRegisterHooks, requireSymbolTable } from "./swift.js";
+import { requireFpRegisterHooks, requireSymbolTable, requireTrailingSelfInRegisters } from "./swift.js";
 
 import { metadataFor, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
 
@@ -660,7 +660,8 @@ describe("SwiftInterceptor.attach", () => {
 });
 
 describe("SwiftInterceptor.attach on closure-taking methods", () => {
-  test("decodes a closure argument to its function and context; the generic result's metadata follows it", () => {
+  test("decodes a closure argument to its function and context; the generic result's metadata follows it", (ctx) => {
+    requireTrailingSelfInRegisters(ctx);
     loadFixture();
     const ByteSource = metadataFor("fixture.ByteSource")!;
     const source = asSwiftObject(ValueInstance.borrow(ByteSource, Memory.alloc(ByteSource.valueWitnesses.stride)));

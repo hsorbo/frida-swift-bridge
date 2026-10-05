@@ -1,4 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
+import { requireTrailingSelfInRegisters } from "./swift.js";
 import { loadFixture, loadOptimized } from "./fixtures/load.js";
 
 import { ValueInstance, metadataFor } from "../src/abi.js";
@@ -16,7 +17,8 @@ describe("generic methods on value receivers", () => {
     expect(box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int], self: "borrowing" }).call(7)).toEqual(int64(7));
   });
 
-  test("small loadable receiver: a borrowing self is inferred from the callee reading the trailing args", () => {
+  test("small loadable receiver: a borrowing self is inferred from the callee reading the trailing args", (ctx) => {
+    requireTrailingSelfInRegisters(ctx);
     const Int = metadataFor("Swift.Int")!;
     expect(box("fixture.SmallGenericBox", { base: 5 }).method("echo", { typeArguments: [Int] }).call(7)).toEqual(int64(7));
     expect(box("fixture.SmallGenericBox", { base: 10 }).method("scaledBy", { typeArguments: [Int] }).call(3, 7)).toEqual(int64(31));

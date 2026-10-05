@@ -307,16 +307,19 @@ export type ArgLocation = RegisterLocation | { stackOffset: number };
 // the stack. Stack offsets are relative to the first stack-passed argument.
 export class ArgumentAllocator {
   private ngrn: number;
-  private nsrn = 0;
+  private nsrn: number;
+  private readonly sharesSlots: boolean;
   stackSize = 0;
 
   constructor(startReg = 0, private readonly placesResult = false) {
+    this.sharesSlots = SWIFTCC.sharesArgumentSlots && !placesResult;
     this.ngrn = startReg;
+    this.nsrn = this.sharesSlots ? startReg : 0;
   }
 
   gp(width = 8): ArgLocation {
     if (this.ngrn < GP_ARG_REGISTERS) {
-      return { register: "gp", index: this.ngrn++ };
+      return this.take("gp");
     }
     return this.stackSlot(width);
   }
@@ -333,7 +336,8 @@ export class ArgumentAllocator {
     }
     if (this.ngrn < GP_ARG_REGISTERS - 1) {
       const index = this.ngrn;
-      this.ngrn += 2;
+      this.take("gp");
+      this.take("gp");
       return { register: "gp", index };
     }
     this.ngrn = GP_ARG_REGISTERS;
@@ -347,9 +351,17 @@ export class ArgumentAllocator {
 
   fp(width: number): ArgLocation {
     if (this.nsrn < FP_ARG_REGISTERS) {
-      return { register: "fp", index: this.nsrn++ };
+      return this.take("fp");
     }
     return this.stackSlot(width);
+  }
+
+  private take(register: "gp" | "fp"): RegisterLocation {
+    const index = register === "gp" ? this.ngrn++ : this.nsrn++;
+    if (this.sharesSlots) {
+      this.ngrn = this.nsrn = index + 1;
+    }
+    return { register, index };
   }
 
   scalar({ size, cls }: LoweredScalar): ArgLocation {
@@ -389,7 +401,7 @@ export function placeAsyncResultScalars(metadata: Metadata): PlacedResultScalar[
 }
 
 function placeScalars(scalars: LoweredScalar[], forAsync: boolean): PlacedResultScalar[] {
-  const allocator = new ArgumentAllocator(0, true);
+  const allocator = new ArgumentAllocator(0, !forAsync);
   return scalars.flatMap((scalar) => {
     if (forAsync && ASYNC_RESULT_I128_HALVES_START_AT_EVEN_REGISTER && scalar.cls === "int" && scalar.size === 16) {
       return [0, 8].map((half) => ({
@@ -511,8 +523,8 @@ function lowerArg(arg: SwiftArgType): LoweredArg {
 }
 
 // The GP and FP argument registers taken by argTypes followed by implicitWords metadata/witness pointers.
-export function argumentRegisterUse(argTypes: SwiftArgType[], implicitWords: number): { gp: number; fp: number } {
-  const allocator = new ArgumentAllocator();
+export function argumentRegisterUse(argTypes: SwiftArgType[], implicitWords: number, startReg = 0): { gp: number; fp: number } {
+  const allocator = new ArgumentAllocator(startReg);
   for (const arg of argTypes.map(lowerArg)) {
     if (arg.indirect) {
       allocator.gp();
@@ -526,9 +538,20 @@ export function argumentRegisterUse(argTypes: SwiftArgType[], implicitWords: num
   return allocator.registersUsed;
 }
 
+// The argument slot the formal arguments start at, past an indirect result's pointer where that is an argument.
+export function argumentSlotBase(returnType: SwiftArgType | null): number {
+  if (!SWIFTCC.indirectResultIsArgument || returnType === null || isDestructuredTuple(returnType) || isClosureRef(returnType)) {
+    return 0;
+  }
+  const indirect = returnType instanceof Metadata ? returnType.valueWitnesses.size > 0 && shouldPassIndirectly(returnType) : true;
+  return indirect ? 1 : 0;
+}
+
 // The arguments are laid out in a frame of every argument register, GP then FP, followed by the
 // stack-passed bytes. libffi loads the registers from as many uint64/double arguments and copies the
 // trailing uint64 words to the stack verbatim, so placement follows ArgumentAllocator exactly.
+// Where arguments share slots, libffi fills one slot per argument, so the register arguments are
+// the slots, each a double where the allocator placed an FP scalar and a uint64 otherwise.
 const REGISTER_FRAME_SIZE = (GP_ARG_REGISTERS + FP_ARG_REGISTERS) * 8;
 
 function frameOffset(location: ArgLocation): number {
@@ -536,6 +559,24 @@ function frameOffset(location: ArgLocation): number {
     return REGISTER_FRAME_SIZE + location.stackOffset;
   }
   return (location.register === "gp" ? location.index : GP_ARG_REGISTERS + location.index) * 8;
+}
+
+function physicalArgumentTypes(locations: ArgLocation[], stackWords: number): NativeFunctionArgumentType[] {
+  const fpSlots = new Set(locations.filter((l) => "register" in l && l.register === "fp").map((l) => (l as RegisterLocation).index));
+  const registers: NativeFunctionArgumentType[] = SWIFTCC.sharesArgumentSlots
+    ? Array.from({ length: GP_ARG_REGISTERS }, (_, i) => (fpSlots.has(i) ? "double" : "uint64"))
+    : [...new Array<NativeFunctionArgumentType>(GP_ARG_REGISTERS).fill("uint64"), ...new Array<NativeFunctionArgumentType>(FP_ARG_REGISTERS).fill("double")];
+  return [...registers, ...new Array<NativeFunctionArgumentType>(stackWords).fill("uint64")];
+}
+
+function physicalArgumentOffset(index: number, type: NativeFunctionArgumentType): number {
+  if (!SWIFTCC.sharesArgumentSlots) {
+    return index * 8;
+  }
+  if (index >= GP_ARG_REGISTERS) {
+    return REGISTER_FRAME_SIZE + (index - GP_ARG_REGISTERS) * 8;
+  }
+  return frameOffset({ register: type === "double" ? "fp" : "gp", index });
 }
 
 interface PlacedScalar {
@@ -563,14 +604,15 @@ function copyDirect(direct: PlacedScalar[], registerDump: NativePointer, out: Na
   }
 }
 
+// A generic callee takes the result pointer even for an empty type.
 function lowerResult(metadata: Metadata, forcedIndirect: boolean): ResultLowering {
   const { size, stride } = metadata.valueWitnesses;
-  if (size === 0) {
+  if (size === 0 && !forcedIndirect) {
     return { size, stride, sret: null, leading: [], direct: [], assemble: () => {} };
   }
   // indirect before HFA, as in lowerArg
   if (forcedIndirect || shouldPassIndirectly(metadata)) {
-    const sret = Memory.alloc(stride);
+    const sret = Memory.alloc(Math.max(stride, 1));
     return { size, stride, sret, leading: [], direct: [], assemble: (out) => Memory.copy(out, sret, size) };
   }
   const direct = placeDirect(metadata);
@@ -729,6 +771,7 @@ export function makeSwiftNativeFunction(
     }
   }
   const allocator = new ArgumentAllocator();
+  const indirectResultLocation = SWIFTCC.indirectResultIsArgument && result?.sret != null ? allocator.gp() : null;
   const leadingResultLocations = (result?.leading ?? []).map(() => allocator.gp());
   const argLocations = loweredArgs.map((arg) =>
     arg.indirect ? [allocator.gp()] : arg.pieces.map((piece) => allocator.scalar(piece))
@@ -738,11 +781,7 @@ export function makeSwiftNativeFunction(
   const implicitArgs = [...typeArguments.map((m) => m.handle), ...witnessTables, ...(typedError === null ? [] : [typedError.slot])];
   const implicitLocations = implicitArgs.map(() => allocator.gp());
   const stackWords = Math.ceil(allocator.stackSize / 8);
-  const fridaArgTypes: NativeFunctionArgumentType[] = [
-    ...new Array<NativeFunctionArgumentType>(GP_ARG_REGISTERS).fill("uint64"),
-    ...new Array<NativeFunctionArgumentType>(FP_ARG_REGISTERS).fill("double"),
-    ...new Array<NativeFunctionArgumentType>(stackWords).fill("uint64"),
-  ];
+  const fridaArgTypes = physicalArgumentTypes(argLocations.flat(), stackWords);
 
   // The returned closure captures `resources`, keeping the trampoline's baked buffers alive
   // (Frida frees a Memory.alloc when its NativePointer is collected). self/error/result and the
@@ -760,7 +799,7 @@ export function makeSwiftNativeFunction(
     target: address.strip(),
     selfBuffer,
     errorBuffer,
-    indirectResultBuffer: result?.sret ?? null,
+    indirectResultBuffer: indirectResultLocation === null ? result?.sret ?? null : null,
     resultBuffer: registerDump,
     resultRegisters: dumpedRegisters,
   });
@@ -815,12 +854,14 @@ export function makeSwiftNativeFunction(
       fillTypedErrorSentinel(typedError.slot, typedError.metadata);
     }
     result?.leading.forEach((buffer, k) => frame.add(frameOffset(leadingResultLocations[k])).writePointer(buffer));
-
-    const physical: NativeFunctionArgumentValue[] = [];
-    for (let i = 0; i < fridaArgTypes.length; i++) {
-      const slot = frame.add(i * 8);
-      physical.push(fridaArgTypes[i] === "double" ? slot.readDouble() : slot.readU64());
+    if (indirectResultLocation !== null) {
+      frame.add(frameOffset(indirectResultLocation)).writePointer(result!.sret!);
     }
+
+    const physical = fridaArgTypes.map((type, i) => {
+      const slot = frame.add(physicalArgumentOffset(i, type));
+      return type === "double" ? slot.readDouble() : slot.readU64();
+    });
     resources.invoke(...physical);
 
     if (throws) {

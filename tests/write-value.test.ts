@@ -139,10 +139,10 @@ describe("writeValue", () => {
   test("writes into a freshly allocated box", () => {
     const Int = metadataFor("Swift.Int")!;
     const { swift_allocBox, swift_release } = getSwiftCoreApi();
-    const [object, buffer] = swift_allocBox(Int.handle);
+    const object = swift_allocBox(Int.handle);
+    const buffer = projectBox(object);
     writeValue(Int, buffer, 99);
     expect(readValue(Int, buffer)).toEqual(int64(99));
-    expect(projectBox(object).equals(buffer)).toBe(true);
     swift_release(object);
   });
 });

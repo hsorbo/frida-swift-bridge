@@ -24,8 +24,11 @@ describe("enum instances", () => {
     expect(noneCase.isIndirect).toBeFalsy();
   });
 
-  test("reads a boxed payload via projectBox (the indirect-case mechanism)", () => {
+  test("reads a boxed payload via projectBox (the indirect-case mechanism)", (ctx) => {
     requireSwift();
+    if (Process.platform === "windows" && Process.arch === "x64") {
+      ctx.skip("the Win64 C ABI returns a two-word struct through memory, not in the swiftcc result registers");
+    }
     const lib = Process.getModuleByName(SWIFTCORE_MODULE);
     const allocBox = new NativeFunction(
       lib.getExportByName("swift_allocBox"),

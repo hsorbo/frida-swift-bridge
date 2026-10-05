@@ -1,4 +1,5 @@
 import { ensureSwiftHost, LIBSWIFT_CORE_NAME } from "./platform.js";
+import { makeTwoWordResultFunction, TwoWordResult } from "./swiftcc.js";
 
 const LIBSWIFT_CORE_CANDIDATES =
   Process.platform === "darwin"
@@ -42,13 +43,13 @@ export interface SwiftCoreApi {
     void,
     [NativePointerValue, NativePointerValue, NativePointerValue]
   >;
-  swift_getTypeName: NativeFunction<[NativePointer, UInt64], [NativePointerValue, number]>;
-  swift_getMangledTypeName: NativeFunction<[NativePointer, UInt64], [NativePointerValue]>;
+  swift_getTypeName: (type: NativePointerValue, qualified: number) => TwoWordResult<NativePointer, UInt64>;
+  swift_getMangledTypeName: (type: NativePointerValue) => TwoWordResult<NativePointer, UInt64>;
   swift_allocObject: NativeFunction<
     NativePointer,
     [NativePointerValue, number | UInt64, number | UInt64]
   >;
-  swift_allocBox: NativeFunction<[NativePointer, NativePointer], [NativePointerValue]>;
+  swift_allocBox: NativeFunction<NativePointer, [NativePointerValue]>;
   swift_deallocObject: NativeFunction<
     void,
     [NativePointerValue, number | UInt64, number | UInt64]
@@ -76,7 +77,7 @@ export interface SwiftCoreApi {
     [number | UInt64, number | UInt64, NativePointerValue, NativePointerValue, NativePointerValue]
   >;
   swift_getAssociatedTypeWitness: NativeFunction<
-    [NativePointer, NativePointer],
+    NativePointer,
     [number | UInt64, NativePointerValue, NativePointerValue, NativePointerValue, NativePointerValue]
   >;
   swift_getAssociatedConformanceWitness: NativeFunction<
@@ -129,12 +130,12 @@ export function getSwiftCoreApi(): SwiftCoreApi {
       "void",
       ["pointer", "pointer", "pointer"]
     ),
-    swift_getTypeName: new NativeFunction(
+    swift_getTypeName: makeTwoWordResultFunction(
       lib.getExportByName("swift_getTypeName"),
       ["pointer", "size_t"],
       ["pointer", "bool"]
     ),
-    swift_getMangledTypeName: new NativeFunction(
+    swift_getMangledTypeName: makeTwoWordResultFunction(
       lib.getExportByName("swift_getMangledTypeName"),
       ["pointer", "size_t"],
       ["pointer"]
@@ -146,7 +147,7 @@ export function getSwiftCoreApi(): SwiftCoreApi {
     ),
     swift_allocBox: new NativeFunction(
       lib.getExportByName("swift_allocBox"),
-      ["pointer", "pointer"],
+      "pointer",
       ["pointer"]
     ),
     swift_deallocObject: new NativeFunction(
@@ -215,7 +216,7 @@ export function getSwiftCoreApi(): SwiftCoreApi {
     ),
     swift_getAssociatedTypeWitness: new NativeFunction(
       lib.getExportByName("swift_getAssociatedTypeWitness"),
-      ["pointer", "pointer"],
+      "pointer",
       ["size_t", "pointer", "pointer", "pointer", "pointer"]
     ),
     swift_getAssociatedConformanceWitness: new NativeFunction(

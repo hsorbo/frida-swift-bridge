@@ -64,7 +64,7 @@ describe("closure as a Swift argument", () => {
     let seen: number[] | null = null;
     const closure = SwiftClosure.overBytes((buf) => {
       seen = Array.from(new Uint8Array(buf.readBytes()));
-    }, discriminator);
+    }, discriminator, { indirectResult: true });
 
     const invoke = makeSwiftNativeFunction(
       fixtureExport("invokeGeneric"),
@@ -99,7 +99,7 @@ describe("closure result and error routing", () => {
     const discriminator = closureDiscriminator(closureHashString(["$sSW"], [INDIRECT]));
     const closure = SwiftClosure.overBytes((buf, result) => {
       result.writeU64(0x1234 + buf.count);
-    }, discriminator);
+    }, discriminator, { indirectResult: true });
 
     const invoke = makeSwiftNativeFunction(
       fixtureExport("invokeReturning"),
@@ -128,7 +128,7 @@ describe("closure result and error routing", () => {
     const errorObj = Memory.alloc(Process.pointerSize);
 
     const discriminator = closureDiscriminator(closureHashString(["$sSW"], [INDIRECT]));
-    const closure = SwiftClosure.overBytes(() => errorObj, discriminator, { throws: true });
+    const closure = SwiftClosure.overBytes(() => errorObj, discriminator, { throws: true, indirectResult: true });
 
     const invoke = makeSwiftNativeFunction(
       fixtureExport("invokeGeneric"),

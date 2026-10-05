@@ -1,7 +1,7 @@
 import { swiftExportsOfTokens } from "./symbol-index.js";
 import { demangle } from "./demangle.js";
 import { resolveType } from "./symbolication.js";
-import { SWIFTCC } from "./swiftcc.js";
+import { SWIFTCC, FP_ARG_REGISTERS } from "./swiftcc.js";
 
 export type ValueConvention = "direct" | "indirect";
 
@@ -132,8 +132,9 @@ const x64: ArchProbe = {
   selfRegister: SWIFTCC.self,
   asyncContextRegister: SWIFTCC.asyncContext,
   indirectResultRegister: SWIFTCC.indirectResult,
-  argumentRegisters: ["rdi", "rsi", "rdx", "rcx", "r8", "r9", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"],
-  calleeSavedRegisters: new Set(["rbx", "rbp", "r12", "r13", "r14", "r15"]),
+  argumentRegisters: [...SWIFTCC.gpArgs, ...Array.from({ length: FP_ARG_REGISTERS }, (_, i) => `xmm${i}`)],
+  // rdi and rsi are callee-saved where they carry no argument
+  calleeSavedRegisters: new Set(["rbx", "rbp", "r12", "r13", "r14", "r15", ...["rdi", "rsi"].filter((r) => !SWIFTCC.gpArgs.includes(r))]),
   trapMnemonics: new Set(["ud0", "ud1", "ud2", "int3", "hlt"]),
   canonicalRegister(name) {
     let match = /^r(\d+)[dwb]?$/.exec(name);
@@ -177,8 +178,11 @@ const x64: ArchProbe = {
       return { kind, target: ptr(operand.value.toString()) };
     }
     if (operand?.type === "mem" && operand.value.base === "rip" && operand.value.index === undefined) {
-      const slot = insn.next.add(operand.value.disp);
-      return resolvedFlow(kind, insn, { value: slot.readPointer(), loaded: true });
+      const target = insn.next.add(operand.value.disp).readPointer();
+      if (kind === "jump" && importsMemoryFill(target)) {
+        return { kind: "return" };
+      }
+      return resolvedFlow(kind, insn, { value: target, loaded: true });
     }
     return { kind: "stop" };
   },
@@ -288,10 +292,15 @@ function instanceGetters(members: OwnMember[], fullName: string): Getter[] {
   });
 }
 
-// Throwing and async functions can return without writing a result, or take it elsewhere.
+// Throwing and async functions can return without writing a result, or take it elsewhere. Where the
+// indirect result pointer shares its register with the first argument, only a static producer
+// without parameters tells the two apart.
+const STATIC_PRODUCER = SWIFTCC.indirectResultIsArgument ? "static " : "(static )?";
+const PRODUCER_PARAMS = SWIFTCC.indirectResultIsArgument ? "\\(\\)" : "\\(.*\\)";
+
 function resultProducers(members: OwnMember[], fullName: string): OwnMember[] {
   const name = escapeRegExp(fullName);
-  const producer = new RegExp(`^(static )?${name}\\.[^.(]+\\(.*\\) -> ${name}$|^static ${name}\\.[^.(]+\\.getter : ${name}$`);
+  const producer = new RegExp(`^${STATIC_PRODUCER}${name}\\.[^.(]+${PRODUCER_PARAMS} -> ${name}$|^static ${name}\\.[^.(]+\\.getter : ${name}$`);
   return members.filter((m) => producer.test(m.demangled) && !/ (throws|async)\b/.test(m.demangled));
 }
 
@@ -301,7 +310,7 @@ function foreignResultProducers(image: Module, token: string, fullName: string):
   if (identifier === undefined) {
     return [];
   }
-  const producer = new RegExp(`(\\) -> |\\.getter : )${escapeRegExp(fullName)}$`);
+  const producer = new RegExp(`^${STATIC_PRODUCER}.*(${PRODUCER_PARAMS} -> |\\.getter : )${escapeRegExp(fullName)}$`);
   return image
     .enumerateExports()
     .filter((e) => e.name.includes(identifier) && !e.name.startsWith(ownPrefix))
@@ -418,20 +427,29 @@ function resolvedFlow(kind: "jump" | "call", insn: Instruction, constant: Consta
   return { kind, target: constant!.value };
 }
 
+const MEMORY_FILL_NAMES = ["memset", "bzero"];
+
 let memoryFillAddresses: Set<string> | null = null;
 
 function memoryFills(): Set<string> {
   if (memoryFillAddresses === null) {
-    const addresses = Process.platform === "windows" ? [Module.findGlobalExportByName("memset") ?? NULL] : dlsymMemoryFills();
+    const addresses = Process.platform === "windows" ? [] : dlsymMemoryFills();
     memoryFillAddresses = new Set(addresses.filter((a) => !a.isNull()).map((a) => a.strip().toString()));
   }
   return memoryFillAddresses;
 }
 
+// A Windows image calls the memset of whichever C runtime it imports, reached through an import
+// thunk. The export table Frida reads for that runtime does not always carry it, so the target is
+// named through the debug symbols instead.
+function importsMemoryFill(target: NativePointer): boolean {
+  return Process.platform === "windows" && MEMORY_FILL_NAMES.includes(DebugSymbol.fromAddress(target).name ?? "");
+}
+
 function dlsymMemoryFills(): NativePointer[] {
   const dlsym = new NativeFunction(Module.getGlobalExportByName("dlsym"), "pointer", ["pointer", "pointer"]);
   const defaultHandle = Process.platform === "darwin" ? NULL.sub(2) : NULL;
-  return ["memset", "bzero"].map((name) => dlsym(defaultHandle, Memory.allocUtf8String(name)) as NativePointer);
+  return MEMORY_FILL_NAMES.map((name) => dlsym(defaultHandle, Memory.allocUtf8String(name)) as NativePointer);
 }
 
 // A frame saves each callee-saved register once; storing its entry value again spills it as data
