@@ -47,6 +47,32 @@ jobs:
       - name: Test
         run: SDKROOT=$(xcrun --show-sdk-path) npm run test:macos-arm64e
 
+  # QuickJS on arm64 Windows evaluates Infinity as NaN (Frida 17.22.1), which breaks the runner's
+  # deep equality on zeros, so this job tests on V8.
+  windows-arm64:
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: compnerd/gha-setup-swift@main
+        with:
+          swift-version: swift-6.4.0-release
+          swift-build: 6.4.0-RELEASE
+          build_arch: arm64
+
+      - run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm run test:v8
+
   linux:
     strategy:
       fail-fast: false
