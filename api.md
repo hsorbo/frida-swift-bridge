@@ -322,7 +322,8 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
 - `info.specializations()`: on a generic type named without its arguments, the
   facades of every specialization built so far, the compiler's prespecialized
   ones included, whether or not an instance lives. A memory scan answers each
-  call, like `Swift.choose`; nothing is cached.
+  call, like `Swift.choose`; nothing is cached. See
+  [Known limitations](#known-limitations).
 
 Listing is exploratory, so the lists stay shallow by default: the type's own
 module, with inherited members. `{ deep: true }` sweeps every loaded module for
@@ -1394,6 +1395,16 @@ corrupts memory instead of failing cleanly.
   descriptor. Escaping closures wrapped in a reabstraction thunk are unwrapped
   by their structure. When a capture's type can't be resolved, the bridge
   doesn't expose the captures.
+- **Every specialization of a generic type.** `specializations()` lists the
+  metadata that exist in the process: the canonical prespecializations the
+  compiler recorded on the type's descriptor, and the ones the runtime has built
+  so far, found by scanning writable memory. A generic type's specializations
+  are open-ended, so no complete list exists anywhere: one that no code has used
+  yet is absent, and naming it, as `Swift.type("Module.Generic<Arg>")` does,
+  builds it, so it is listed from then on. A specialization the runtime adopted
+  from read-only image data is missed too: another module's prespecialized
+  record of the type, or one served by the shared cache's prespecialization
+  library.
 - **Module unloading.** A type found by name and its wrapper are kept for the
   life of the script, since a descriptor never changes. If a module is unloaded
   and another mapped at the same address, the old wrapper is stale.
