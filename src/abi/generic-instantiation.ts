@@ -57,6 +57,9 @@ const SIZEOF_SINGLETON_METADATA_INITIALIZATION = 0xc;
 const SIZEOF_METADATA_LIST_COUNT = 0x4;
 const SIZEOF_METADATA_LIST_ENTRY = 0x4;
 const SIZEOF_METADATA_CACHING_ONCE_TOKEN = 0x4;
+const OFFSETOF_INSTANTIATION_CACHE_BEFORE_GENERIC_HEADER = -0x8;
+const OFFSETOF_CACHE_ELEMENT_COUNT = 0x4;
+const OFFSETOF_CACHE_ELEMENTS = 0x8;
 
 const INVERTED_PROTOCOLS_SUBJECT_FORM = 0xffff;
 const INVERTIBLE_PROTOCOL_NAMES = ["Copyable", "Escapable"];
@@ -73,6 +76,25 @@ function popcount16(bits: number): number {
     count += n & 1;
   }
   return count;
+}
+
+// The runtime keeps every metadata it hands out for a generic type in a hash map built lazily in the
+// descriptor's InstantiationCache private data: its dense element array holds one GenericCacheEntry
+// pointer per specialization. Null when the descriptor carries no cache and the runtime uses its
+// global map instead.
+export function genericCacheEntries(descriptor: ContextDescriptor): NativePointer[] | null {
+  const header = descriptor.handle.add(genericHeaderOffset(descriptor));
+  const cache = RelativeDirectPointer.resolve(header.add(OFFSETOF_INSTANTIATION_CACHE_BEFORE_GENERIC_HEADER));
+  if (cache === null) {
+    return null;
+  }
+  const count = cache.add(OFFSETOF_CACHE_ELEMENT_COUNT).readU32();
+  const elements = cache.add(OFFSETOF_CACHE_ELEMENTS).readPointer();
+  if (count === 0 || elements.isNull()) {
+    return [];
+  }
+  const entries = elements.add(Process.pointerSize);
+  return Array.from({ length: count }, (_, i) => entries.add(i * Process.pointerSize).readPointer());
 }
 
 // Trailing order past the requirements array: GenericPackShapeHeader/Descriptors (parameter

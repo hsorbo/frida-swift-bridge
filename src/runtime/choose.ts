@@ -1,5 +1,6 @@
 import { ClassMetadata, OFFSETOF_SUPERCLASS, OFFSETOF_DESCRIPTION } from "../abi/class-metadata.js";
 import { canonicalPrespecializedMetadata } from "../abi/class-descriptor.js";
+import { genericCacheEntries } from "../abi/generic-instantiation.js";
 import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { LIBSWIFT_CORE_NAME } from "./platform.js";
@@ -101,14 +102,12 @@ function hasLiveRefcount(address: NativePointer): boolean {
   return (refCountsHigh & 0x80000000) !== 0 || ((refCountsLow & 0xfffffffe) !== 0 && (refCountsHigh & 1) === 0);
 }
 
-// Every metadata built so far for a generic declaration. The compiler's specializations are listed
-// on the descriptor; the runtime builds the rest in writable memory, where each names the
-// descriptor at a fixed word, so one scan finds them all, validated by shape and by that word read
-// back exactly. Read-only memory is not scanned: it holds nothing else but other modules'
-// non-canonical copies of the compiler's records.
+// Every metadata built so far for a generic declaration: the compiler's specializations listed on
+// the descriptor, and the runtime's generic metadata cache, through which every metadata it hands
+// out for the type passes, read-only records adopted from other images included. A descriptor
+// without a cache of its own, or a cache entry laid out unlike the runtime's, falls back to a scan
+// of writable memory for metadata naming the descriptor at its fixed word.
 export function specializedMetadataOf(descriptor: ContextDescriptor): Metadata[] {
-  const isClass = descriptor.kind === ContextDescriptorKind.Class;
-  const wordOffset = isClass ? OFFSETOF_DESCRIPTION : Process.pointerSize;
   const seen = new Set<string>();
   const found: Metadata[] = [];
   const add = (candidate: NativePointer) => {
@@ -118,14 +117,42 @@ export function specializedMetadataOf(descriptor: ContextDescriptor): Metadata[]
     }
   };
   canonicalPrespecializedMetadata(descriptor).forEach(add);
+  const cached = genericCacheEntries(descriptor)?.map((entry) => cacheEntryMetadata(descriptor, entry));
+  if (cached !== undefined && cached.every((candidate) => candidate !== null)) {
+    cached.forEach((candidate) => add(candidate!));
+    return found;
+  }
+  const wordOffset = descriptor.kind === ContextDescriptorKind.Class ? OFFSETOF_DESCRIPTION : Process.pointerSize;
   for (const { address } of findWordsEqualTo(Process.enumerateRanges("rw-"), [descriptor.handle])) {
-    const candidate = address.sub(wordOffset);
-    const metadata = isClass ? classMetadataAt(candidate) : valueMetadataAt(candidate);
-    if (metadata !== null && address.readPointer().strip().equals(descriptor.handle)) {
+    const candidate = metadataNaming(descriptor, address.sub(wordOffset));
+    if (candidate !== null) {
       add(candidate);
     }
   }
   return found;
+}
+
+// The entry's Value word follows its tracking state, signature layout and hash, and precedes its key
+// arguments, so the first word reading as the type's own metadata is the value.
+const CACHE_ENTRY_HEADER_WORDS = 8;
+
+function cacheEntryMetadata(descriptor: ContextDescriptor, entry: NativePointer): NativePointer | null {
+  for (let i = 0; i < CACHE_ENTRY_HEADER_WORDS; i++) {
+    const candidate = metadataNaming(descriptor, entry.add(i * Process.pointerSize).readPointer());
+    if (candidate !== null) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function metadataNaming(descriptor: ContextDescriptor, candidate: NativePointer): NativePointer | null {
+  const isClass = descriptor.kind === ContextDescriptorKind.Class;
+  if ((isClass ? classMetadataAt(candidate) : valueMetadataAt(candidate)) === null) {
+    return null;
+  }
+  const wordOffset = isClass ? OFFSETOF_DESCRIPTION : Process.pointerSize;
+  return candidate.add(wordOffset).readPointer().strip().equals(descriptor.handle) ? candidate : null;
 }
 
 function valueMetadataAt(address: NativePointer): Metadata | null {

@@ -3,6 +3,17 @@ import { loadFixture } from "./fixtures/load.js";
 
 import { Swift } from "../src/index.js";
 import { metadataOf } from "../src/abi.js";
+import { descriptorOf } from "../src/runtime/swift-type.js";
+import { canonicalPrespecializedMetadata } from "../src/abi/class-descriptor.js";
+
+const LIB_PRESPECIALIZED_CANDIDATES = [
+  "Swift.Array<Swift.Int>",
+  "Swift.Array<Swift.String>",
+  "Swift.ContiguousArray<Swift.Int>",
+  "Swift.Dictionary<Swift.String, Swift.Int>",
+  "Swift.Set<Swift.Int>",
+  "Swift.Optional<Swift.String>",
+];
 
 describe("NominalType.specializations", () => {
   beforeEach(() => { loadFixture(); });
@@ -29,6 +40,18 @@ describe("NominalType.specializations", () => {
     const range = Process.findRangeByAddress(metadataOf(OptionalInt.$type).handle)!;
     if (range.protection !== "r--") ctx.skip("Optional<Int> is not prespecialized on this host");
     expect(Swift.enum("Swift.Optional")!.$type.specializations()).toContain(OptionalInt);
+  });
+
+  test("lists a specialization the runtime adopted from read-only data off the descriptor's canonical list", (ctx) => {
+    const adopted = LIB_PRESPECIALIZED_CANDIDATES.map((name) => Swift.type(name)!).find((type) => {
+      const metadata = metadataOf(type.$type).handle;
+      const generic = descriptorOf(type.$type);
+      return Process.findRangeByAddress(metadata)!.protection === "r--" &&
+        !canonicalPrespecializedMetadata(generic).some((canonical) => canonical.equals(metadata));
+    });
+    if (adopted === undefined) ctx.skip("no specialization served from a prespecialization library on this host");
+    const generic = Swift.type(descriptorOf(adopted!.$type).fullTypeName!)!;
+    expect(generic.$type.specializations()).toContain(adopted);
   });
 
   test("a specialization or a non-generic type has none to list", () => {
