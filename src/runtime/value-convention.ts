@@ -422,12 +422,16 @@ let memoryFillAddresses: Set<string> | null = null;
 
 function memoryFills(): Set<string> {
   if (memoryFillAddresses === null) {
-    const dlsym = new NativeFunction(Module.getGlobalExportByName("dlsym"), "pointer", ["pointer", "pointer"]);
-    const defaultHandle = Process.platform === "darwin" ? NULL.sub(2) : NULL;
-    const addresses = ["memset", "bzero"].map((name) => dlsym(defaultHandle, Memory.allocUtf8String(name)) as NativePointer);
+    const addresses = Process.platform === "windows" ? [Module.findGlobalExportByName("memset") ?? NULL] : dlsymMemoryFills();
     memoryFillAddresses = new Set(addresses.filter((a) => !a.isNull()).map((a) => a.strip().toString()));
   }
   return memoryFillAddresses;
+}
+
+function dlsymMemoryFills(): NativePointer[] {
+  const dlsym = new NativeFunction(Module.getGlobalExportByName("dlsym"), "pointer", ["pointer", "pointer"]);
+  const defaultHandle = Process.platform === "darwin" ? NULL.sub(2) : NULL;
+  return ["memset", "bzero"].map((name) => dlsym(defaultHandle, Memory.allocUtf8String(name)) as NativePointer);
 }
 
 // A frame saves each callee-saved register once; storing its entry value again spills it as data

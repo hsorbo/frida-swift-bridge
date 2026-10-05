@@ -53,18 +53,18 @@ function getRegisteredSwiftSection(module: Module, name: string): SwiftSection |
   return size === 0 ? null : { address: range.readPointer(), size };
 }
 
-// Sections the ELF runtime leaves out of MetadataSections; read by ELF name from the loaded image.
-const ELF_SECTION_NAMES: Record<string, string> = {
-  __swift5_types2: "swift5_type_metadata_2",
+// Sections the ELF and COFF runtimes leave out of MetadataSections; read by image section name.
+const IMAGE_SECTION_NAMES: Record<string, string> = {
+  __swift5_types2: Process.platform === "windows" ? ".sw5tym2" : "swift5_type_metadata_2",
 };
 
-function getElfSectionByName(module: Module, name: string): SwiftSection | null {
-  const elfName = ELF_SECTION_NAMES[name];
-  if (elfName === undefined) {
+function getImageSectionByName(module: Module, name: string): SwiftSection | null {
+  const imageName = IMAGE_SECTION_NAMES[name];
+  if (imageName === undefined) {
     return null;
   }
   for (const section of module.enumerateSections()) {
-    if (section.name === elfName) {
+    if (section.name === imageName) {
       return section.size === 0 ? null : { address: section.address, size: section.size };
     }
   }
@@ -73,7 +73,7 @@ function getElfSectionByName(module: Module, name: string): SwiftSection | null 
 
 export function getSwiftSection(module: Module, name: string): SwiftSection | null {
   if (Process.platform !== "darwin") {
-    return getRegisteredSwiftSection(module, name) ?? getElfSectionByName(module, name);
+    return getRegisteredSwiftSection(module, name) ?? getImageSectionByName(module, name);
   }
 
   const segNamePtr = Memory.allocUtf8String(SWIFT_SEGMENT);

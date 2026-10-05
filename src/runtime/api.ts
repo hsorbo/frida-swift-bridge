@@ -3,7 +3,9 @@ import { ensureSwiftHost, LIBSWIFT_CORE_NAME } from "./platform.js";
 const LIBSWIFT_CORE_CANDIDATES =
   Process.platform === "darwin"
     ? ["libswiftCore.dylib", "/usr/lib/swift/libswiftCore.dylib"]
-    : ["libswiftCore.so", "/usr/lib/swift/linux/libswiftCore.so"];
+    : Process.platform === "windows"
+      ? ["swiftCore.dll"]
+      : ["libswiftCore.so", "/usr/lib/swift/linux/libswiftCore.so"];
 
 function loadLibswiftCore(): Module {
   const existing = Process.findModuleByName(LIBSWIFT_CORE_NAME);

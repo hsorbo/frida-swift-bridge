@@ -35,8 +35,11 @@ describe("cross-module descriptor walk", () => {
     expect(named).toBe(types);
   });
 
-  test("resolves indirect type-descriptor records to named types", () => {
+  test("resolves indirect type-descriptor records to named types", (ctx) => {
     requireOnoneSupport();
+    if (Process.platform === "windows") {
+      ctx.skip("the Windows Onone-support library declares no types");
+    }
 
     const onone = Process.getModuleByName(ONONE_SUPPORT_MODULE);
     let withName = 0;

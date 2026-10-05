@@ -46,6 +46,7 @@ fi
 case "$(uname -s)" in
   Darwin) host=macos ;;
   Linux)  host=linux ;;
+  MINGW*|MSYS*|CYGWIN*) host=windows ;;
   *)      host="$(uname -s)" ;;
 esac
 platform="${PLATFORM:-$host}"
@@ -199,6 +200,35 @@ case "$platform" in
 
     # Also proves section discovery is symbol-independent.
     strip "$fixture_out" "$resilient_out" "$nometadata_out" "$optimized_out"
+
+    emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out" "$retroactive_out"
+    emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out" "$retroactive_out"
+    ;;
+  windows)
+    # swiftc and the loader want native paths; MSYS sh gives them with pwd -W. The linker emits
+    # an import library beside each DLL, and a dependent DLL is linked through that. A PE carries
+    # no symbol table, so every module here is as stripped as a release binary.
+    fixtures="$(cd "$fixtures" && pwd -W)"
+    fixture_out="$fixtures/fixture.dll"
+    resilient_out="$fixtures/resilient.dll"
+    fixturesyms_out="$fixtures/fixturesyms.dll"
+    nometadata_out="$fixtures/nometadata.dll"
+    conformance_out="$fixtures/conformance.dll"
+    optimized_out="$fixtures/optimized.dll"
+    retroactive_out="$fixtures/retroactive.dll"
+
+    swiftc -emit-library -emit-module -enable-library-evolution -module-name resilient \
+      "$fixtures/resilient.swift" -o "$resilient_out"
+
+    swiftc -emit-library -emit-module -module-name fixture "$fixtures/fixture.swift" -I "$fixtures" "$fixtures/resilient.lib" -o "$fixture_out"
+    swiftc -emit-library -module-name fixturesyms "$fixtures/fixture.swift" -I "$fixtures" "$fixtures/resilient.lib" -o "$fixturesyms_out"
+    swiftc -emit-library -module-name nometadata "$fixtures/nometadata.swift" -I "$fixtures" \
+      "$fixtures/fixture.lib" "$fixtures/resilient.lib" -o "$nometadata_out"
+    for mod in conformance retroactive; do
+      swiftc -emit-library -module-name "$mod" "$fixtures/$mod.swift" -I "$fixtures" \
+        "$fixtures/fixture.lib" "$fixtures/resilient.lib" -o "$fixtures/$mod.dll"
+    done
+    swiftc -O -emit-library -module-name optimized "$fixtures/optimized.swift" -o "$optimized_out"
 
     emit_paths "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out" "$retroactive_out"
     emit_bytes "$fixture_out" "$resilient_out" "$fixturesyms_out" "$nometadata_out" "$conformance_out" "$optimized_out" "$retroactive_out"

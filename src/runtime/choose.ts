@@ -26,8 +26,8 @@ export function choose(cls: SwiftClass, options: ChooseOptions = {}): SwiftClass
   const subclasses = options.subclasses ?? true;
   const unbound = isUnboundGeneric(cls.$type);
   const writable = Process.enumerateRanges("rw-");
-  const heap = writable.filter((range) => range.file === undefined);
-  const imageData = writable.filter((range) => range.file !== undefined);
+  const heap = writable.filter((range) => !isImageRange(range));
+  const imageData = writable.filter(isImageRange);
 
   let classes = unbound
     ? classMetadataReferencing(writable, [descriptorOf(cls.$type).handle], OFFSETOF_DESCRIPTION)
@@ -55,9 +55,15 @@ export function choose(cls: SwiftClass, options: ChooseOptions = {}): SwiftClass
   return instances.map((handle) => asSwiftObject(handle));
 }
 
+// Windows never names a range's backing file; a module's own ranges are its image data.
+function isImageRange(range: RangeDetails): boolean {
+  return range.file !== undefined || (Process.platform === "windows" && Process.findModuleByAddress(range.base) !== null);
+}
+
 // Darwin asks the allocator. Linux has no size query that is safe on an arbitrary pointer, so the glibc
 // chunk header before the block and a native refcount word that reads as live (side table, or unowned >= 1
-// and not deiniting) stand in.
+// and not deiniting) stand in. The Windows heap's queries fault on a pointer it does not own, so there the
+// refcount word alone decides, read to its full shape.
 function isInstanceBlock(address: NativePointer, instanceSize: number): boolean {
   if (Process.platform === "darwin") {
     return mallocSize(address) >= instanceSize;
@@ -66,19 +72,33 @@ function isInstanceBlock(address: NativePointer, instanceSize: number): boolean 
     return false;
   }
   try {
+    if (Process.platform === "windows") {
+      return hasNativeRefcountShape(address);
+    }
     const chunkSize = address.sub(8).readU32() & ~7;
     const chunkSizeHigh = address.sub(4).readU32();
-    const refCountsLow = address.add(8).readU32();
-    const refCountsHigh = address.add(12).readU32();
-    return (
-      chunkSizeHigh === 0 &&
-      (chunkSize & 8) === 0 &&
-      chunkSize >= instanceSize + 8 &&
-      ((refCountsHigh & 0x80000000) !== 0 || ((refCountsLow & 0xfffffffe) !== 0 && (refCountsHigh & 1) === 0))
-    );
+    return chunkSizeHigh === 0 && (chunkSize & 8) === 0 && chunkSize >= instanceSize + 8 && hasLiveRefcount(address);
   } catch {
     return false;
   }
+}
+
+// Inline refcounts of a live native object: PureSwiftDealloc set, a modest unowned count, not deiniting;
+// or a side table. A pointer or a length stored after a class pointer rarely reads that way.
+function hasNativeRefcountShape(address: NativePointer): boolean {
+  const refCountsLow = address.add(8).readU32();
+  const refCountsHigh = address.add(12).readU32();
+  if ((refCountsHigh & 0x80000000) !== 0) {
+    return true;
+  }
+  const unowned = refCountsLow >>> 1;
+  return (refCountsLow & 1) === 1 && unowned !== 0 && unowned < 0x10000 && (refCountsHigh & 1) === 0;
+}
+
+function hasLiveRefcount(address: NativePointer): boolean {
+  const refCountsLow = address.add(8).readU32();
+  const refCountsHigh = address.add(12).readU32();
+  return (refCountsHigh & 0x80000000) !== 0 || ((refCountsLow & 0xfffffffe) !== 0 && (refCountsHigh & 1) === 0);
 }
 
 // Every metadata built so far for a generic declaration. The compiler's specializations are listed

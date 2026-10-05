@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { MetadataKind, ClassType, NominalType, Protocol, ProtocolComposition, ProtocolRequirementKind, WitnessTable, readString, readValue, makeSwiftNativeFunction, metadataFor, typeOf } from "../src/abi.js";
 
@@ -88,14 +89,16 @@ describe("Protocol.conformingTypes", () => {
 describe("Protocol.namedRequirements", () => {
   beforeEach(() => { loadFixture(); });
 
-  test("names Greeter.greet, skipping the unresolvable generic Pair<T> conformance", () => {
+  test("names Greeter.greet, skipping the unresolvable generic Pair<T> conformance", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const greeter = Protocol.find("fixturesyms.Greeter")!;
     const named = greeter.namedRequirements();
     expect(named.map((r) => r.name)).toContain("greet");
   });
 
-  test("names Scalable's one requirement via whichever concrete conformer resolves first", () => {
+  test("names Scalable's one requirement via whichever concrete conformer resolves first", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const scalable = Protocol.find("fixturesyms.Scalable")!;
     const named = scalable.namedRequirements();
@@ -103,7 +106,8 @@ describe("Protocol.namedRequirements", () => {
     expect(named[0].name).toBe("scaled");
   });
 
-  test("a recovered name's requirement matches one from the raw requirements list", () => {
+  test("a recovered name's requirement matches one from the raw requirements list", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const greeter = Protocol.find("fixturesyms.Greeter")!;
     const named = greeter.namedRequirements().find((r) => r.name === "greet")!;

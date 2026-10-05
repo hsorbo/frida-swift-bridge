@@ -1,6 +1,6 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
-import { requireSwift } from "./swift.js";
+import { requireSwift, requireSymbolTable } from "./swift.js";
 
 import { Metadata, Protocol, projectExistentialValue, BoundMethod, metadataFor } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
@@ -20,7 +20,8 @@ function store(mod: Module, fn: string, metadata: Metadata): NativePointer {
 }
 
 describe("async witness-table method invocation", () => {
-  test("awaits an async protocol requirement by name (TripleScaler : AsyncScaler)", async () => {
+  test("awaits an async protocol requirement by name (TripleScaler : AsyncScaler)", async (ctx) => {
+    requireSymbolTable(ctx);
     requireSwift();
     const mod = loadFixtureSyms();
     const AsyncScaler = existentialMetadata("fixturesyms.asyncScalerType", mod);
@@ -34,7 +35,8 @@ describe("async witness-table method invocation", () => {
     expect(await (bound as BoundMethod).call(7)).toEqual(int64(21));
   });
 
-  test("awaits a default implementation from a protocol extension (TripleScaler : AsyncScaler)", async () => {
+  test("awaits a default implementation from a protocol extension (TripleScaler : AsyncScaler)", async (ctx) => {
+    requireSymbolTable(ctx);
     requireSwift();
     const mod = loadFixtureSyms();
     const AsyncScaler = existentialMetadata("fixturesyms.asyncScalerType", mod);

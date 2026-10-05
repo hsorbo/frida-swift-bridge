@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { Swift, ClassType, StructType, SwiftClassObject } from "../src/index.js";
 import { ValueInstance, metadataFor, typeOf } from "../src/abi.js";
@@ -43,7 +44,8 @@ describe("stable object boundary", () => {
     expect(() => f.write("D2")).toThrow(/disposed/);
   });
 
-  test("initializer() returns a narrow view without resolution internals", () => {
+  test("initializer() returns a narrow view without resolution internals", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const init = (typeOf(metadataFor("fixturesyms.Point")!) as StructType).facade.$initializer() as any;
     expect(typeof init.call).toBe("function");

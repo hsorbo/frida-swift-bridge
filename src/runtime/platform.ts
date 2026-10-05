@@ -1,9 +1,19 @@
 export const SWIFT_HOST_SUPPORTED =
   (Process.arch === "arm64" || Process.arch === "x64") &&
-  (Process.platform === "darwin" || Process.platform === "linux");
+  (Process.platform === "darwin" || Process.platform === "linux" || (Process.platform === "windows" && Process.arch === "arm64"));
 
-export const LIBSWIFT_CORE_NAME =
-  Process.platform === "darwin" ? "libswiftCore.dylib" : "libswiftCore.so";
+export function runtimeLibraryName(stem: string): string {
+  switch (Process.platform) {
+    case "darwin":
+      return `lib${stem}.dylib`;
+    case "windows":
+      return `${stem}.dll`;
+    default:
+      return `lib${stem}.so`;
+  }
+}
+
+export const LIBSWIFT_CORE_NAME = runtimeLibraryName("swiftCore");
 
 export function ensureSwiftHost(): void {
   if (!SWIFT_HOST_SUPPORTED) {

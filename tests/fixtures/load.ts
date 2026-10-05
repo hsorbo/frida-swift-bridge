@@ -4,7 +4,7 @@ import { FIXTURE_DYLIB, RESILIENT_DYLIB, FIXTURESYMS_DYLIB, NOMETADATA_DYLIB, CO
 import { FIXTURE_B64, RESILIENT_B64, FIXTURESYMS_B64, NOMETADATA_B64, CONFORMANCE_B64, OPTIMIZED_B64, RETROACTIVE_B64 } from "./bytes.js";
 import { Metadata, makeSwiftNativeFunction, metadataFor } from "../../src/abi.js";
 import { Swift } from "../../src/index.js";
-const EXT = Process.platform === "darwin" ? "dylib" : "so";
+const EXT = Process.platform === "darwin" ? "dylib" : Process.platform === "windows" ? "dll" : "so";
 export const FIXTURE_MODULE = `fixture.${EXT}`;
 export const RESILIENT_MODULE = `resilient.${EXT}`;
 export const FIXTURESYMS_MODULE = `fixturesyms.${EXT}`;

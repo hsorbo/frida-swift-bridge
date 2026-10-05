@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { Protocol, ProtocolConformance, BoundMethod, ProtocolRequirementKind, readProtocolRequirements, readAssociatedTypeNames, ValueInstance, metadataFor, typeName } from "../src/abi.js";
 
@@ -20,7 +21,8 @@ describe("associated type / associated conformance resolution", () => {
     expect(typeName(table.associatedType("Item"))).toBe("Swift.Int");
   });
 
-  test("dispatches a named getter whose type is an associated type (Container.item on IntBox)", () => {
+  test("dispatches a named getter whose type is an associated type (Container.item on IntBox)", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const container = Protocol.find("fixturesyms.Container")!;
     const intBox = metadataFor("fixturesyms.IntBox")!;
@@ -44,7 +46,8 @@ describe("associated type / associated conformance resolution", () => {
     expect(() => table.associatedType("Bogus")).toThrow(/no associated type/);
   });
 
-  test("resolves an associated conformance and dispatches through the nested witness table (ConstrainedContainer.Item: Scalable on ScalableBox)", () => {
+  test("resolves an associated conformance and dispatches through the nested witness table (ConstrainedContainer.Item: Scalable on ScalableBox)", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const constrained = Protocol.find("fixturesyms.ConstrainedContainer")!;
     const scalableBox = metadataFor("fixturesyms.ScalableBox")!;
@@ -70,7 +73,8 @@ describe("associated type / associated conformance resolution", () => {
     expect(nested.method(item.handle, "scaled").call(3)).toEqual(int64(84));
   });
 
-  test("a setter of a generic struct over Item takes it indirectly even when the instantiation is loadable", () => {
+  test("a setter of a generic struct over Item takes it indirectly even when the instantiation is loadable", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
@@ -79,7 +83,8 @@ describe("associated type / associated conformance resolution", () => {
     expect((value.read() as { value: number }).value).toEqual(int64(12));
   });
 
-  test("an Item? setter takes it indirectly", () => {
+  test("an Item? setter takes it indirectly", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
@@ -88,7 +93,8 @@ describe("associated type / associated conformance resolution", () => {
     expect((value.read() as { value: number }).value).toEqual(int64(9));
   });
 
-  test("an [Item] getter returns directly", () => {
+  test("an [Item] getter returns directly", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
@@ -96,7 +102,8 @@ describe("associated type / associated conformance resolution", () => {
     expect((table.get(value.handle, "items") as SwiftObject).$container!()).toEqual([int64(5), int64(5)]);
   });
 
-  test("a requirement passes and returns Self indirectly for a loadable conformer", () => {
+  test("a requirement passes and returns Self indirectly for a loadable conformer", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
@@ -104,7 +111,8 @@ describe("associated type / associated conformance resolution", () => {
     expect(table.method(value.handle, "merged").call({ value: 7 })).toEqual({ value: int64(12) });
   });
 
-  test("a requirement passes and returns an associated type indirectly for a loadable conformer", () => {
+  test("a requirement passes and returns an associated type indirectly for a loadable conformer", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
@@ -112,7 +120,8 @@ describe("associated type / associated conformance resolution", () => {
     expect(table.method(value.handle, "shifted").call(4)).toEqual(int64(9));
   });
 
-  test("an async requirement passes and returns an associated type indirectly for a loadable conformer", async () => {
+  test("an async requirement passes and returns an associated type indirectly for a loadable conformer", async (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
@@ -120,7 +129,8 @@ describe("associated type / associated conformance resolution", () => {
     expect(await (table.method(value.handle, "shiftedLater") as BoundMethod).call(4)).toEqual(int64(9));
   });
 
-  test("Self and a class-constrained associated type return directly in a class-constrained protocol", () => {
+  test("Self and a class-constrained associated type return directly in a class-constrained protocol", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const token = (typeOf(metadataFor("fixturesyms.Token")!) as ClassType).facade.init(3) as SwiftObject;
     const pack = (typeOf(metadataFor("fixturesyms.TokenPack")!) as ClassType).facade.init(token) as SwiftObject;

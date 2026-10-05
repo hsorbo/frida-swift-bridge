@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, loadOptimized } from "./fixtures/load.js";
-import { requireDarwin } from "./swift.js";
+import { requireDarwin, requireSymbolTable } from "./swift.js";
 
 import { Swift, SwiftObject, SwiftClass, SwiftStruct } from "../src/index.js";
 
@@ -56,7 +56,8 @@ describe("protocol-extension members on a conforming type", () => {
     expect(w.scaledTwice()).toEqual(int64(30));
   });
 
-  test("an async extension method resolves by naming the conformance's async witness thunks", async () => {
+  test("an async extension method resolves by naming the conformance's async witness thunks", async (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const ruler = (Swift.type("fixturesyms.Ruler") as SwiftStruct).$new({ n: 7 });
     expect(await ruler.measureTwice()).toEqual(int64(14));

@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { Protocol, conformsToProtocol, ProtocolConformance, readProtocolRequirements, WitnessTable, metadataFor } from "../src/abi.js";
 
@@ -8,7 +9,8 @@ describe("WitnessTable", () => {
   beforeEach(() => { loadFixture(); });
 
   // The thunk symbol only survives in fixturesyms, fixture's unstripped twin.
-  test("a requirement slot matches the protocol-witness-thunk symbol", () => {
+  test("a requirement slot matches the protocol-witness-thunk symbol", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const greeter = Protocol.find("fixturesyms.Greeter")!;
     const requirement = readProtocolRequirements(greeter.descriptor)[0];

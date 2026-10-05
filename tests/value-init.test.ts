@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
-import { requireLinux } from "./swift.js";
+import { requireLinux, requireSymbolTable } from "./swift.js";
 
 import { Swift, StructType, SwiftStruct } from "../src/index.js";
 
@@ -16,26 +16,30 @@ function structType(name: string): SwiftStruct {
 describe("value-type initializers (with symtab)", () => {
   beforeEach(() => { loadFixtureSyms(); });
 
-  test("init on a small loadable struct returns an owned ValueInstance", () => {
+  test("init on a small loadable struct returns an owned ValueInstance", (ctx) => {
+    requireSymbolTable(ctx);
     const v = structType("fixturesyms.Point").init(5)!;
     expect(v.$owned).toBe(true);
     expect(v.$fields).toEqual({ x: int64(5) });
     v.$dispose();
   });
 
-  test("init marshals a String arg and adopts a non-POD return", () => {
+  test("init marshals a String arg and adopts a non-POD return", (ctx) => {
+    requireSymbolTable(ctx);
     const v = structType("fixturesyms.Person").init("Ada", 36)!;
     expect(v.$fields).toEqual({ name: "Ada", age: int64(36) });
     v.$dispose();
   });
 
-  test("init adopts a large struct returned indirectly", () => {
+  test("init adopts a large struct returned indirectly", (ctx) => {
+    requireSymbolTable(ctx);
     const v = structType("fixturesyms.BigStruct").init(1, 2, 3, 4, 5)!;
     expect(v.$fields).toEqual({ a: int64(1), b: int64(2), c: int64(3), d: int64(4), e: int64(5) });
     v.$dispose();
   });
 
-  test("a bound initializer is reusable across calls", () => {
+  test("a bound initializer is reusable across calls", (ctx) => {
+    requireSymbolTable(ctx);
     const make = structType("fixturesyms.Point").$initializer();
     expect(make.call(1)!.$fields).toEqual({ x: int64(1) });
     expect(make.call(2)!.$fields).toEqual({ x: int64(2) });

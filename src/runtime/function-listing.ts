@@ -37,7 +37,7 @@ export function* swiftFunctions(filter?: NameFilter): Generator<SwiftFunctionMat
     yield withHookTarget(
       {
         address: match.address,
-        module: path.substring(path.lastIndexOf("/") + 1),
+        module: path.substring(path.search(/[^\\/]*$/)),
         name,
         kind: parsed.kind,
         signature: parsed.kind === "function" ? memberSignature(parsed) : accessorSignature(parsed),

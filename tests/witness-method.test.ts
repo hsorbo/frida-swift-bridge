@@ -1,5 +1,6 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { Metadata, Protocol, projectExistentialValue, readProtocolRequirements, bindWitnessMethodAt, metadataFor, ValueInstance } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
@@ -19,7 +20,8 @@ function store(mod: Module, fn: string, metadata: Metadata): NativePointer {
 }
 
 describe("witness-table method invocation", () => {
-  test("calls a value-existential requirement by name (opaque, PoliteGreeter : Greeter)", () => {
+  test("calls a value-existential requirement by name (opaque, PoliteGreeter : Greeter)", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const Greeter = existentialMetadata("fixturesyms.greeterType", mod);
     const container = store(mod, "fixturesyms.storeGreeter", Greeter);
@@ -30,7 +32,8 @@ describe("witness-table method invocation", () => {
     expect(table.method(value, "greet").call()).toBe("Hello, Ada");
   });
 
-  test("reads a class-existential requirement by name (Widget : Named)", () => {
+  test("reads a class-existential requirement by name (Widget : Named)", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const Named = existentialMetadata("fixturesyms.namedType", mod);
     const container = store(mod, "fixturesyms.storeNamed", Named);
@@ -41,7 +44,8 @@ describe("witness-table method invocation", () => {
     expect(table.get(value, "label")).toBe("Bee");
   });
 
-  test("dispatches one concrete value through two unrelated protocols (Person : Greeter, Aged)", () => {
+  test("dispatches one concrete value through two unrelated protocols (Person : Greeter, Aged)", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const GreeterAged = existentialMetadata("fixturesyms.greeterAgedType", mod);
     const make = makeSwiftNativeFunction(fixtureExport("fixturesyms.makeGreeterAged", mod), GreeterAged, []);

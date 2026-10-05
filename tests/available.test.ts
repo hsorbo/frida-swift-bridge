@@ -16,7 +16,7 @@ describe("Swift.available", () => {
   test("agrees with plain runtime presence on a supported host", () => {
     const hostSupported =
       (Process.arch === "arm64" || Process.arch === "x64") &&
-      (Process.platform === "darwin" || Process.platform === "linux");
+      (Process.platform === "darwin" || Process.platform === "linux" || (Process.platform === "windows" && Process.arch === "arm64"));
     expect(Swift.available).toBe(hostSupported && Process.findModuleByName(SWIFTCORE_MODULE) !== null);
   });
 });

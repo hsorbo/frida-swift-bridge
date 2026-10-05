@@ -1,24 +1,28 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { Swift } from "../src/index.js";
 
 describe("facade equals", () => {
   beforeEach(() => { loadFixture(); });
 
-  test("a POD struct compares through its synthesized ==", () => {
+  test("a POD struct compares through its synthesized ==", (ctx) => {
+    requireSymbolTable(ctx);
     const GridPoint = Swift.struct("fixture.GridPoint")!;
     expect(GridPoint.$new({ x: 1, y: 2 }).equals(GridPoint.$new({ x: 1, y: 2 }))).toBe(true);
     expect(GridPoint.$new({ x: 1, y: 2 }).equals(GridPoint.$new({ x: 2, y: 1 }))).toBe(false);
   });
 
-  test("a String-holding struct compares its contents", () => {
+  test("a String-holding struct compares its contents", (ctx) => {
+    requireSymbolTable(ctx);
     const TaggedCount = Swift.struct("fixture.TaggedCount")!;
     expect(TaggedCount.$new({ tag: "a long enough tag to live on the heap", n: 1 }).equals(TaggedCount.$new({ tag: "a long enough tag to live on the heap", n: 1 }))).toBe(true);
     expect(TaggedCount.$new({ tag: "a", n: 1 }).equals(TaggedCount.$new({ tag: "b", n: 1 }))).toBe(false);
   });
 
-  test("a custom == decides, not the storage", () => {
+  test("a custom == decides, not the storage", (ctx) => {
+    requireSymbolTable(ctx);
     const Approx = Swift.struct("fixture.Approx")!;
     const one = Approx.$new({ v: 1.0 });
     expect(one.equals(Approx.$new({ v: 1.2 }))).toBe(true);

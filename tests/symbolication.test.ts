@@ -1,6 +1,6 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
-import { requireDarwin } from "./swift.js";
+import { requireDarwin, requireSymbolTable } from "./swift.js";
 
 import { Swift } from "../src/index.js";
 import {
@@ -170,7 +170,8 @@ describe("symbolicate", () => {
     expect(sym.demangled.startsWith("fixture.addInts(")).toBe(true);
   });
 
-  test("falls back to the symbol table for a function the module does not export", () => {
+  test("falls back to the symbol table for a function the module does not export", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const hidden = mod.enumerateSymbols().find((s) => Swift.demangle(s.name)?.startsWith("fixturesyms.Dispatcher.hidden(") ?? false)!;
     expect(mod.enumerateExports().some((e) => e.name === hidden.name)).toBe(false);

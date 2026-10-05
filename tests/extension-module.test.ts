@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadNoMetadata, loadConformance, loadRetroactive, NOMETADATA_MODULE, CONFORMANCE_MODULE, RETROACTIVE_MODULE } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { Swift, StructType, SwiftClass, SwiftStruct } from "../src/index.js";
 import { enumerateMethods, enumerateProperties, resolveMethod } from "../src/runtime/method.js";
@@ -36,7 +37,8 @@ describe("a module loaded after the search has already run", () => {
     expect(Robot.init({ badge: "7" }).name).toBe("R-7");
   });
 
-  test("its conformances are missing until it loads, then reported without a flush", () => {
+  test("its conformances are missing until it loads, then reported without a flush", (ctx) => {
+    requireSymbolTable(ctx);
     const robot = Swift.type("fixture.Robot") as SwiftClass;
     const container = Protocol.find("fixture.Container")!;
     const containerNames = () => container.namedRequirements().map((r) => r.name);
@@ -131,11 +133,13 @@ describe("a stdlib protocol extended from another module", () => {
 
   const trio = () => (Swift.type("fixture.Trio") as SwiftStruct).$new({ a: 1, b: 2, c: 3 });
 
-  test("an extension of a protocol the stdlib mangles as a substitution is callable", () => {
+  test("an extension of a protocol the stdlib mangles as a substitution is callable", (ctx) => {
+    requireSymbolTable(ctx);
     expect(Number(trio().tally())).toBe(3);
   });
 
-  test("an extension of an inherited protocol reaches a type conforming only to the refinement", () => {
+  test("an extension of an inherited protocol reaches a type conforming only to the refinement", (ctx) => {
+    requireSymbolTable(ctx);
     expect(trio().$method("tally").origin).toEqual({
       kind: "protocolExtension",
       protocol: "Swift.Sequence",
@@ -143,7 +147,8 @@ describe("a stdlib protocol extended from another module", () => {
     });
   });
 
-  test("an extension property of a stdlib protocol is readable", () => {
+  test("an extension property of a stdlib protocol is readable", (ctx) => {
+    requireSymbolTable(ctx);
     expect(Number(trio().middleOffset)).toBe(1);
   });
 
@@ -191,7 +196,8 @@ describe("a module that declares conformances but no types", () => {
     expect(flyable.conformingTypes().map((t) => t.name)).toContain("fixture.Robot");
   });
 
-  test("its conformer names an async requirement, so a stripped conformer's async extension method resolves", async () => {
+  test("its conformer names an async requirement, so a stripped conformer's async extension method resolves", async (ctx) => {
+    requireSymbolTable(ctx);
     const ruler = (Swift.type("fixture.Ruler") as SwiftStruct).$new({ n: 7 });
     expect(await ruler.measureTwice()).toEqual(int64(14));
   });

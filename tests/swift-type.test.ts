@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { StructType, EnumType, ClassType, ClassMetadata, ClassInstance, TupleType, MetatypeType, FunctionType, Metadata, MetadataKind, SwiftError, resolveTypeByMangledName, typeFromDescriptor, findType, asSwiftObject, metadataFor, typeOf, metadataOf } from "../src/abi.js";
 
@@ -293,7 +294,8 @@ describe("type-level member lookups by kind", () => {
     expect(() => Vec2.$type.initializer()).toThrow(/ambiguous/);
   });
 
-  test("reflection describes a value type's initializer, at the address the facade binds", () => {
+  test("reflection describes a value type's initializer, at the address the facade binds", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const Point = Swift.struct("fixturesyms.Point")!;
     expect(Point.$type.initializer().address.equals(Point.$initializer().address)).toBe(true);

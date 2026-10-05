@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadResilient } from "./fixtures/load.js";
+import { requireResilientStdlib } from "./swift.js";
 
 import { indirect, isResilientValueType, makeSwiftNativeFunction, metadataFor } from "../src/abi.js";
 
@@ -100,7 +101,8 @@ describe("resilient calling convention (local library-evolution fixture)", () =>
 describe("the stdlib's non-frozen types", () => {
   beforeEach(() => { loadFixture(); });
 
-  test("are resilient while the stdlib's frozen ones are not", () => {
+  test("are resilient while the stdlib's frozen ones are not", (ctx) => {
+    requireResilientStdlib(ctx);
     expect(isResilientValueType(metadataFor("Swift.CodingUserInfoKey")!)).toBe(true);
     expect(isResilientValueType(metadataFor("Swift.FloatingPointRoundingRule")!)).toBe(true);
     expect(isResilientValueType(metadataFor("Swift.String")!)).toBe(false);

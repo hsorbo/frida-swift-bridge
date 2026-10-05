@@ -2,7 +2,7 @@ import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { AsyncTask } from "../abi/async-task.js";
 import { Metadata } from "../abi/metadata.js";
 import { SwiftError } from "./thrown-error.js";
-import { LIBSWIFT_CORE_NAME, ensureSwiftHost } from "./platform.js";
+import { LIBSWIFT_CORE_NAME, ensureSwiftHost, runtimeLibraryName } from "./platform.js";
 import { ARM64E_ABI, signCode } from "../basic/pac.js";
 import type { RegisterLocation, PlacedResultScalar } from "./calling-convention.js";
 import { typedErrorLeftInBuffer } from "./calling-convention.js";
@@ -75,8 +75,8 @@ export interface AsyncCallOptions {
   onActor?: SerialExecutorRef;
 }
 
-const CONCURRENCY_MODULE = Process.platform === "darwin" ? "libswift_Concurrency.dylib" : "libswift_Concurrency.so";
-const DISPATCH_MODULE = Process.platform === "darwin" ? "libdispatch.dylib" : "libdispatch.so";
+const CONCURRENCY_MODULE = runtimeLibraryName("swift_Concurrency");
+const DISPATCH_MODULE = runtimeLibraryName("dispatch");
 
 function moduleExport(moduleName: string, symbol: string): NativePointer {
   return Process.getModuleByName(moduleName).getExportByName(symbol);

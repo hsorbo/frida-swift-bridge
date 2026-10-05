@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { requireSwift } from "./swift.js";
+import { requireSwift, requireSymbolTable } from "./swift.js";
 import { fixtureExport, loadFixture, loadFixtureSyms, existentialMetadata } from "./fixtures/load.js";
 import {
   readKeyPathBuffer,
@@ -180,7 +180,8 @@ describe("resolveKeyPathNames › protocol requirements", () => {
     loadFixtureSyms();
   });
 
-  test("names a get/set protocol property past the leading method via its vtableOffset id", () => {
+  test("names a get/set protocol property past the leading method via its vtableOffset id", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const speed = readKeyPathBuffer(keyPath("fixturesyms.keyPathVehicleSpeed", mod));
     expect((speed.components[0] as ComputedKeyPathComponent).idKind).toBe("vtableOffset");
@@ -188,21 +189,24 @@ describe("resolveKeyPathNames › protocol requirements", () => {
     expect(resolveKeyPathNames(speed.components, root)).toEqual(["speed"]);
   });
 
-  test("names a get-only protocol property whose id steps over the interposed setter", () => {
+  test("names a get-only protocol property whose id steps over the interposed setter", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const wheels = readKeyPathBuffer(keyPath("fixturesyms.keyPathVehicleWheels", mod));
     const root = existentialMetadata("fixturesyms.vehicleType", mod);
     expect(resolveKeyPathNames(wheels.components, root)).toEqual(["wheels"]);
   });
 
-  test("names a property on a class-constrained protocol existential", () => {
+  test("names a property on a class-constrained protocol existential", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const label = readKeyPathBuffer(keyPath("fixturesyms.keyPathNamedLabel", mod));
     const root = existentialMetadata("fixturesyms.namedType", mod);
     expect(resolveKeyPathNames(label.components, root)).toEqual(["label"]);
   });
 
-  test("names a property on a parameterized-protocol existential root (any Holder<Int>)", () => {
+  test("names a property on a parameterized-protocol existential root (any Holder<Int>)", (ctx) => {
+    requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const tag = readKeyPathBuffer(keyPath("fixturesyms.keyPathHolderTag", mod));
     expect((tag.components[0] as ComputedKeyPathComponent).idKind).toBe("vtableOffset");

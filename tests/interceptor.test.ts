@@ -4,7 +4,7 @@ import { fixtureExport, existentialMetadata, loadFixture, loadFixtureSyms } from
 import { Swift, type SwiftValue, type SwiftObject, type CallResult } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { SwiftInterceptor, type SwiftInvocationContext } from "../src/runtime/interceptor.js";
-import { requireFpRegisterHooks } from "./swift.js";
+import { requireFpRegisterHooks, requireSymbolTable } from "./swift.js";
 
 import { metadataFor, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
 
@@ -43,7 +43,8 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toEqual(int64(42));
   });
 
-  test("attaches to a function only the symbol table names", () => {
+  test("attaches to a function only the symbol table names", (ctx) => {
+    requireSymbolTable(ctx);
     const hidden = loadFixtureSyms()
       .enumerateSymbols()
       .find((s) => Swift.demangle(s.name)?.startsWith("fixturesyms.Dispatcher.hidden(") ?? false)!;

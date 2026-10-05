@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { findType } from "../src/reflection/registry.js";
 import { Swift } from "../src/index.js";
@@ -16,7 +17,8 @@ describe("private nested type names", () => {
     expect(findType("fixture.Hidden")).toBeNull();
   });
 
-  test("resolve their methods by the same name", () => {
+  test("resolve their methods by the same name", (ctx) => {
+    requireSymbolTable(ctx);
     loadFixtureSyms();
     const hidden = Swift.struct("fixturesyms.CodableCard.Hidden")!;
     expect(hidden.init({ n: 7 })!.$fields).toEqual({ n: int64(7) });
