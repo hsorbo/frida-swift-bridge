@@ -162,13 +162,15 @@ export interface HookTarget {
   witnessDispatched: boolean;
 }
 
-const hookTargets = new WeakMap<object, HookTarget>();
+// A facade's method registers a thunk: its target resolves when first hooked or inspected.
+const hookTargets = new WeakMap<object, HookTarget | (() => HookTarget | undefined)>();
 
 export function hookTargetOf(member: object): HookTarget | undefined {
-  return hookTargets.get(member);
+  const target = hookTargets.get(member);
+  return typeof target === "function" ? target() : target;
 }
 
-export function withHookTarget<T extends object>(member: T, target: HookTarget | null): T {
+export function withHookTarget<T extends object>(member: T, target: HookTarget | (() => HookTarget | undefined) | null): T {
   if (target !== null) {
     hookTargets.set(member, target);
   }

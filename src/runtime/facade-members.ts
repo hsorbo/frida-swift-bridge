@@ -1,4 +1,16 @@
-import { CallArg, CallResult, ValueMethodResolveOptions, enumerateMethods, enumerateProperties, memberKindsInOtherModules } from "./method.js";
+import {
+  CallArg,
+  CallResult,
+  MemberOrigin,
+  SwiftBoundMethod,
+  SwiftBoundSignature,
+  ValueMethodResolveOptions,
+  enumerateMethods,
+  enumerateProperties,
+  hookTargetOf,
+  memberKindsInOtherModules,
+  withHookTarget,
+} from "./method.js";
 import { ClosureSpec } from "./closure.js";
 
 // A synthesized `then` would make a facade thenable and silently break `await`; never a member.
@@ -102,7 +114,13 @@ export function facadeMembers(typeName: () => string, isStatic: boolean): Facade
   return { own, including };
 }
 
-export type FacadeCallable = (...args: CallArg[]) => CallResult | Promise<CallResult>;
+// A facade's method: called like a function, hooked like the member it names.
+export interface FacadeCallable {
+  (...args: CallArg[]): CallResult | Promise<CallResult>;
+  readonly address: NativePointer;
+  readonly origin: MemberOrigin;
+  readonly signature: SwiftBoundSignature;
+}
 
 // What a facade's proxy needs from its target: the Swift member index and how to read, write and
 // call a member, plus its own bridge members and the keys only it answers (enum cases, nested types).
@@ -173,15 +191,31 @@ export function memberProxyHandler<T extends object>(partsOf: (target: T) => Mem
   };
 }
 
-// One function per name, so a facade's method compares equal to itself across reads.
-export function callableCache(invoke: (name: string, args: CallArg[]) => CallResult | Promise<CallResult>): (name: string) => FacadeCallable {
+// One function per name, so a facade's method compares equal to itself across reads. Calling it
+// resolves per call from the arguments; its address and signature resolve once from the bare name,
+// so an overloaded name refuses there and points at $method.
+export function callableCache(
+  invoke: (name: string, args: CallArg[]) => CallResult | Promise<CallResult>,
+  resolve: (name: string) => SwiftBoundMethod
+): (name: string) => FacadeCallable {
   const callables = new Map<string, FacadeCallable>();
   return (name) => {
     let fn = callables.get(name);
     if (fn === undefined) {
-      fn = (...args) => invoke(name, args);
+      fn = hookableCallable((...args) => invoke(name, args), () => resolve(name));
       callables.set(name, fn);
     }
     return fn;
   };
+}
+
+function hookableCallable(fn: (...args: CallArg[]) => CallResult | Promise<CallResult>, resolve: () => SwiftBoundMethod): FacadeCallable {
+  let resolved: SwiftBoundMethod | null = null;
+  const method = (): SwiftBoundMethod => (resolved ??= resolve());
+  withHookTarget(fn, () => hookTargetOf(method()));
+  return Object.defineProperties(fn, {
+    address: { get: () => method().address },
+    origin: { get: () => method().origin },
+    signature: { get: () => method().signature },
+  }) as FacadeCallable;
 }

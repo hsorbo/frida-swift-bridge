@@ -43,6 +43,7 @@ import { CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundM
 import type { SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
 import type { SwiftFunctionMatch } from "./function-listing.js";
+import type { FacadeCallable } from "./facade-members.js";
 import type { ParsedSwiftSignature } from "./symbolication.js";
 import { SWIFTCC, FP_ARG_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
@@ -384,7 +385,7 @@ function carriedMetadata(
   return new Metadata(handle);
 }
 
-export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod | SwiftFunction | SwiftMemberFunction | SwiftFunctionMatch;
+export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod | FacadeCallable | SwiftFunction | SwiftMemberFunction | SwiftFunctionMatch;
 
 interface HookEntry {
   address: NativePointer;
@@ -396,9 +397,9 @@ function hookEntry(target: HookableTarget): HookEntry {
   if (target instanceof NativePointer) {
     return { address: target, parsed: null };
   }
-  const member = typeof target === "object" && target !== null ? hookTargetOf(target) : undefined;
+  const member = typeof target === "function" || (typeof target === "object" && target !== null) ? hookTargetOf(target) : undefined;
   if (member === undefined) {
-    throw new Error("hook target must be an address, a member found through a type's reflection, a bound method, a Swift.function or an enumerated function");
+    throw new Error("hook target must be an address, a member found through a type's reflection, a bound method, a facade's method, a Swift.function or an enumerated function");
   }
   if (member.witnessDispatched) {
     throw new Error(`${member.signature.kind === "function" ? member.signature.selector : "member"} is dispatched through a protocol witness; hook its address`);

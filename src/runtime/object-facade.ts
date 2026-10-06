@@ -159,7 +159,7 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
 
   const members = facadeMembers(fullName, false);
 
-  const callable = callableCache(invoke);
+  const callable = callableCache(invoke, (name) => narrowBoundMethod(method(name), target));
 
   const has = (key: string): boolean => {
     if (RESERVED.has(key)) {

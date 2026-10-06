@@ -593,6 +593,19 @@ robot.$method("tally").origin;   // { kind: "protocolExtension", protocol: "Swif
 `module` is the image's name. An ambiguity error between extensions in
 different modules names each overload's module.
 
+The bare-name form is itself a function that carries the member's `address`,
+`signature` and `origin`, so it goes straight into `Swift.Interceptor.attach`
+or, by its address, into Frida's `Interceptor`. Calling it still picks an
+overload per call; its address is the one member the bare name denotes, so an
+overloaded name throws there and wants `$method`:
+
+```js
+robot.greet.address.equals(robot.$method("greet").address);   // true
+Swift.Interceptor.attach(robot.greet, { onEnter(args) { console.log(args[0]); } });
+Interceptor.attach(robot.greet.address, { /* raw hook */ });
+robot.at.address;    // throws: ambiguous method at on MyApp.Robot
+```
+
 Type methods are called on the type wrapper by their bare name, or with
 `$call(name, ...args)`; `$typeMethod(name, options)` looks one up as an
 explicit bound method:
@@ -1053,14 +1066,14 @@ references (an Array, say) as live facades, existentials projected to their
 dynamic value. A closure argument is its two words, `{ function, context }`.
 
 `target` is an address, a member found through a type's reflection, a bound
-method (hooked as its member; the receiver it was bound to plays no part), or a
-function from `Swift.function`. An address is
+method or a facade's bare-name method (hooked as its member; the receiver it
+was bound to plays no part), or a function from `Swift.function`. An address is
 symbolicated to learn the signature; a member or function carries the signature
 it was found with, so it needs no symbol at its address. The arguments arrive
 positionally; the member's labels name them:
 
 ```js
-const greet = robot.$method("greet");
+const greet = robot.greet;
 Swift.Interceptor.attach(greet, {
     onEnter(args) {
         const named = Object.fromEntries(greet.signature.labels.map((l, i) => [l ?? i, args[i]]));

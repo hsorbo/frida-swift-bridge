@@ -34,8 +34,8 @@ import {
   FoundMember,
   bindConformanceMethod,
   SwiftBoundSignature,
-  HookTarget,
   hookTargetOf,
+  withHookTarget,
   unboundSignature,
 } from "./method.js";
 import { findNestedType, nestedTypeNamesOf } from "../reflection/registry.js";
@@ -409,21 +409,22 @@ interface SwiftAddressOnly {
   readonly address: NativePointer;
   readonly origin: MemberOrigin;
   readonly signature: SwiftBoundSignature;
-  readonly hookTarget: HookTarget;
   call(...args: CallArg[]): never;
 }
 
 function addressOnly(member: SwiftMember | FoundMember, refusal: string): SwiftAddressOnly {
   const parsed = "generic" in member ? member.signature : (hookTargetOf(member)!.signature as SwiftFunctionSignature);
-  return {
-    address: member.address,
-    origin: member.origin,
-    signature: unboundSignature(parsed),
-    hookTarget: { address: member.address, signature: parsed, witnessDispatched: false },
-    call: () => {
-      throw new Error(refusal);
+  return withHookTarget(
+    {
+      address: member.address,
+      origin: member.origin,
+      signature: unboundSignature(parsed),
+      call: () => {
+        throw new Error(refusal);
+      },
     },
-  };
+    { address: member.address, signature: parsed, witnessDispatched: false }
+  );
 }
 
 // Every specialization shares a member's unspecialized code, so it is found without type arguments;
@@ -465,7 +466,7 @@ function typeFacadeState(target: SwiftTypeFacade): TypeFacadeState {
     state = {
       members: facadeMembers(() => target.$type.name, true),
       reserved: RESERVED,
-      callable: callableCache((method, args) => target.$typeMethod(method, invokeOptions(args)).call(...args)),
+      callable: callableCache((method, args) => target.$typeMethod(method, invokeOptions(args)).call(...args), (method) => target.$typeMethod(method)),
       cases: null,
       has: (key) => typeFacadeHas(target, key),
       bridgeMember: (t, key) => {
