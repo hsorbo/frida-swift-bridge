@@ -339,17 +339,26 @@ extension whose clause the bridge can't check is left out: one with a same-type
 (`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
 requirement on a nested associated type (`Item.Index`).
 
-A stripped binary keeps a class's vtable, so the listing still shows what the
-class dispatches. A method slot that no symbol names joins `instanceMethods()`
-or `typeMethods()` as `vtable#<offset>`, the slot's word offset in the class
-metadata: the same number in every subclass, and the one `/abi`'s
-`vtableMethod` takes. `instanceMethod("vtable#11")` finds it. Its `address` is
+A stripped binary keeps a class's vtable and every witness table, so the
+listing still shows what is dispatched. A method slot that no symbol names
+joins `instanceMethods()` or `typeMethods()` under the slot's own identity:
+`vtable#<offset>`, the slot's word offset in the class metadata (the same
+number in every subclass, and the one `/abi`'s `vtableMethod` takes), or
+`<Protocol>#<index>` such as `MyKit.Vocal#1`, the requirement's index in that
+conformance's witness table (the one `WitnessTable.requirement` takes).
+`instanceMethod("vtable#11")` finds either kind. A vtable slot's `address` is
 the implementation this class dispatches to, so a subclass's listing carries
-its override; its `origin` names the class that declares the slot; its
-`signature` is `null`, there being no symbol to read one from. Hook it with
-Frida's own `Interceptor.attach(member.address, …)`: `Swift.Interceptor` and
-`bind()` need a signature. Accessor and initializer slots are not listed, and a
-generic class named without its arguments lists no slots.
+its override, and its `origin` names the class that declares the slot. A
+witness slot's `address` is the thunk the witness table dispatches through,
+which runs only for calls made through the protocol; on a binary that keeps
+its exports, a named `speak()` and the `MyKit.Vocal#1` that calls it are
+listed side by side. A conformance another module declares is an extension
+there, so its slots join the listing with `{ deep: true }`, like the members
+it adds. Either member's `signature` is `null`, there being no
+symbol to read one from. Hook it with Frida's own
+`Interceptor.attach(member.address, …)`: `Swift.Interceptor` and `bind()` need
+a signature. Accessor and initializer slots are not listed, and a generic type
+named without its arguments lists no slots.
 
 Kind-specific members:
 

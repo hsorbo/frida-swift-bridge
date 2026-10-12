@@ -2,6 +2,9 @@ import { Metadata, MetadataKind, getMetadata } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
 import { isActor, isDefaultActor, MethodDescriptorKind, readVTable } from "../abi/class-descriptor.js";
+import { conformingProtocols, conformsToProtocol } from "../abi/protocol-conformance.js";
+import { ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
+import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
@@ -58,8 +61,8 @@ export interface MethodQuery extends MemberQuery {
 export type MemberLookupOptions = Omit<ValueMethodResolveOptions, "static">;
 
 // A member found by name alone, never by resolving its types, so it is found and hookable whether
-// or not it or its type is generic. The facades bind one to call it. A vtable slot no symbol names
-// is listed as `vtable#<offset>` and has no signature.
+// or not it or its type is generic. The facades bind one to call it. A vtable or witness slot no
+// symbol names is listed as `vtable#<offset>` or `<Protocol>#<index>` and has no signature.
 export interface SwiftMember {
   readonly address: NativePointer;
   readonly selector: string;
@@ -68,14 +71,14 @@ export interface SwiftMember {
   readonly signature: SwiftMemberSignature | null;
 }
 
-interface VTableSlot {
+interface UnnamedSlot {
   selector: string;
   isStatic: boolean;
   address: NativePointer;
   origin: MemberOrigin;
 }
 
-const VTABLE_SLOT_SELECTOR = /^vtable#\d+$/;
+const UNNAMED_SLOT_SELECTOR = /#\d+$/;
 
 export interface SwiftInstanceMethod extends SwiftMember {
   bind(receiver: SwiftObject): SwiftBoundMethod;
@@ -246,8 +249,8 @@ export abstract class NominalType extends SwiftType {
   }
 
   private member(selector: string, selectorOptions: ValueMethodResolveOptions, description: string): SwiftMember {
-    if (VTABLE_SLOT_SELECTOR.test(selector)) {
-      const slot = this.vtableSlots(true).find((s) => s.selector === selector && s.isStatic === selectorOptions.static);
+    if (UNNAMED_SLOT_SELECTOR.test(selector)) {
+      const slot = this.unnamedSlots(true, true).find((s) => s.selector === selector && s.isStatic === selectorOptions.static);
       if (slot === undefined) {
         throw new Error(`no ${description} on ${this.name}`);
       }
@@ -267,15 +270,57 @@ export abstract class NominalType extends SwiftType {
   private selectors(isStatic: boolean, { inherited = true, deep = false }: MethodQuery): string[] {
     const named = enumerateMethods(this.name, deep ? "allLoadedModules" : "definingModule", inherited ? "withSuperclasses" : "thisType");
     const namedAddresses = new Set(named.map((m) => m.address.strip().toString()));
-    const unnamedSlots = this.vtableSlots(inherited).filter((s) => s.isStatic === isStatic && !namedAddresses.has(s.address.toString()));
+    const unnamedSlots = this.unnamedSlots(inherited, deep).filter((s) => s.isStatic === isStatic && !namedAddresses.has(s.address.toString()));
     return [
       ...named.filter((m) => m.kind === "method" && m.isStatic === isStatic).map((m) => m.selector),
       ...unnamedSlots.map((s) => s.selector),
     ];
   }
 
-  protected vtableSlots(_inherited: boolean): VTableSlot[] {
+  private unnamedSlots(inherited: boolean, deep: boolean): UnnamedSlot[] {
+    return [...this.vtableSlots(inherited), ...this.witnessSlots(deep)];
+  }
+
+  protected vtableSlots(_inherited: boolean): UnnamedSlot[] {
     return [];
+  }
+
+  // The method requirements of the type's conformances whose witness no symbol names, each the
+  // thunk its witness table dispatches through. A conformance another module declares is an
+  // extension there, so it is listed only deep; that also keeps the symbol maps to one module.
+  private witnessSlots(deep: boolean): UnnamedSlot[] {
+    if (isUnboundGeneric(this) || isImportedObjCClass(this.name)) {
+      return [];
+    }
+    const metadata = metadataOf(this);
+    const descriptor = descriptorOf(this);
+    const ownImage = imageName(descriptor.handle);
+    const slots: UnnamedSlot[] = [];
+    for (const protocol of conformingProtocols(descriptor.handle)) {
+      const name = protocol.fullTypeName;
+      const table = name === null ? null : conformsToProtocol(metadata, protocol);
+      if (table === null) {
+        continue;
+      }
+      for (const requirement of readProtocolRequirements(protocol)) {
+        if (requirement.kind !== ProtocolRequirementKind.Method) {
+          continue;
+        }
+        const witness = table.add(requirement.witnessIndex * Process.pointerSize).readPointer().strip();
+        const address = requirement.isAsync ? new AsyncFunctionPointer(witness).code : witness;
+        const module = imageName(address);
+        if ((!deep && module !== ownImage) || symbolicate(address) !== null) {
+          continue;
+        }
+        slots.push({
+          selector: `${name}#${requirement.witnessIndex}`,
+          isStatic: !requirement.isInstance,
+          address,
+          origin: { kind: module === ownImage ? "own" : "extension", type: this.name, module },
+        });
+      }
+    }
+    return slots;
   }
 
   protocols(): { [name: string]: Protocol } {
@@ -349,12 +394,12 @@ export class ClassType extends NominalType {
 
   // The method-kind slots of the class and, when inherited, its Swift ancestors, each read from
   // this class's metadata so an inherited slot carries the override that runs here.
-  protected vtableSlots(inherited: boolean): VTableSlot[] {
+  protected vtableSlots(inherited: boolean): UnnamedSlot[] {
     if (descriptorOf(this).isGeneric) {
       return [];
     }
     const metadata = new ClassMetadata(metadataOf(this).handle);
-    const slots: VTableSlot[] = [];
+    const slots: UnnamedSlot[] = [];
     for (let cls: ClassMetadata | null = metadata; cls !== null && cls.isTypeMetadata; cls = inherited ? cls.superclass : null) {
       const description = cls.description;
       if (description.isGeneric) {
