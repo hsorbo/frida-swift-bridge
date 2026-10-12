@@ -673,7 +673,7 @@ function describeOverload(signature: SwiftFunctionSignature): string {
   return `${signature.selector} (${signature.argTypeNames.join(", ")}) -> ${signature.returnTypeName ?? "()"}`;
 }
 
-function imageName(address: NativePointer): string {
+export function imageName(address: NativePointer): string {
   return Process.findModuleByAddress(address.strip())?.name ?? "<unknown image>";
 }
 

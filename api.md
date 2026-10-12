@@ -313,7 +313,8 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
   member has an `address`, a `selector`, an `origin`, `isGeneric` and a
   `signature`: `{ labels, argTypeNames, returnTypeName, throws, thrownTypeName,
   isAsync, genericParams }`, the types spelled as the symbol spells them, so a
-  generic member's read `"A"` and the names paste into `{ argTypes }`.
+  generic member's read `"A"` and the names paste into `{ argTypes }`; a
+  `vtable#` slot's `signature` is `null`.
 - `info.subscript(selector?, options?)` / `info.typeSubscript(...)`: a subscript
   accessor, the getter unless `{ accessor: "setter" }`. See [Properties](#properties).
 - `info.properties(query?)`: the properties as `{ name, typeName, isStatic, writable }`;
@@ -337,6 +338,18 @@ and its members shadow the same members of a less constrained extension. An
 extension whose clause the bridge can't check is left out: one with a same-type
 (`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
 requirement on a nested associated type (`Item.Index`).
+
+A stripped binary keeps a class's vtable, so the listing still shows what the
+class dispatches. A method slot that no symbol names joins `instanceMethods()`
+or `typeMethods()` as `vtable#<offset>`, the slot's word offset in the class
+metadata: the same number in every subclass, and the one `/abi`'s
+`vtableMethod` takes. `instanceMethod("vtable#11")` finds it. Its `address` is
+the implementation this class dispatches to, so a subclass's listing carries
+its override; its `origin` names the class that declares the slot; its
+`signature` is `null`, there being no symbol to read one from. Hook it with
+Frida's own `Interceptor.attach(member.address, …)`: `Swift.Interceptor` and
+`bind()` need a signature. Accessor and initializer slots are not listed, and a
+generic class named without its arguments lists no slots.
 
 Kind-specific members:
 

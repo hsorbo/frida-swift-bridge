@@ -23,8 +23,8 @@ describe("a member's signature", () => {
       genericParams: [],
     });
     const absorb = (Swift.type("fixture.Robot") as SwiftClass).$type.instanceMethod("absorb");
-    expect(absorb.signature.argTypeNames).toEqual(["__owned fixture.Robot"]);
-    expect((Swift.type("fixture.Box") as SwiftClass).$type.instanceMethod("echo").signature.genericParams).toEqual(["A"]);
+    expect(absorb.signature!.argTypeNames).toEqual(["__owned fixture.Robot"]);
+    expect((Swift.type("fixture.Box") as SwiftClass).$type.instanceMethod("echo").signature!.genericParams).toEqual(["A"]);
   });
 
   test("a bound method resolves its signature's types", () => {
@@ -38,7 +38,7 @@ describe("a member's signature", () => {
     expect(echo.signature.argTypeNames).toEqual(["A"]);
     expect(echo.signature.argTypes[0]!.name).toBe("Swift.Int");
     const run = (Swift.type("fixture.ByteSource") as SwiftStruct).$type.instanceMethod("run");
-    expect(run.signature.argTypeNames).toEqual(["() -> ()"]);
+    expect(run.signature!.argTypeNames).toEqual(["() -> ()"]);
   });
 
   test("effects and a typed throw are part of the signature", (ctx) => {

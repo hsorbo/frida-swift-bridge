@@ -44,7 +44,7 @@ describe("Swift extension members of an imported ObjC class", () => {
     expect(member.address.equals(nometadata.getExportByName(NSOBJECT_SWIFT_TAG).strip())).toBe(true);
     expect(member.origin).toEqual({ kind: "extension", type: "__C.NSObject", module: NOMETADATA_MODULE });
     expect(member.selector).toBe("swiftTag()");
-    expect(member.signature.returnTypeName).toBe("Swift.Int");
+    expect(member.signature!.returnTypeName).toBe("Swift.Int");
     expect(() => Swift.type("__C.NSObject")!.$type.instanceMethod("swiftTag")).toThrow("ambiguous method swiftTag");
     expect(() => Swift.type("__C.NSObject")!.$type.instanceMethod("noSuchMember")).toThrow("no instance method noSuchMember on __C.NSObject");
     expect(() => findMethod("__C.NoSuchClass", "swiftTag")).toThrow("unknown type: __C.NoSuchClass");

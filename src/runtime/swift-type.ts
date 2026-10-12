@@ -1,7 +1,7 @@
 import { Metadata, MetadataKind, getMetadata } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
-import { isActor, isDefaultActor } from "../abi/class-descriptor.js";
+import { isActor, isDefaultActor, MethodDescriptorKind, readVTable } from "../abi/class-descriptor.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
@@ -25,6 +25,7 @@ import {
   splitSelector,
   initializerLookup,
   findMember,
+  imageName,
   importedObjCClassName,
   isImportedObjCClass,
 } from "./method.js";
@@ -57,14 +58,24 @@ export interface MethodQuery extends MemberQuery {
 export type MemberLookupOptions = Omit<ValueMethodResolveOptions, "static">;
 
 // A member found by name alone, never by resolving its types, so it is found and hookable whether
-// or not it or its type is generic. The facades bind one to call it.
+// or not it or its type is generic. The facades bind one to call it. A vtable slot no symbol names
+// is listed as `vtable#<offset>` and has no signature.
 export interface SwiftMember {
   readonly address: NativePointer;
   readonly selector: string;
   readonly isGeneric: boolean;
   readonly origin: MemberOrigin;
-  readonly signature: SwiftMemberSignature;
+  readonly signature: SwiftMemberSignature | null;
 }
+
+interface VTableSlot {
+  selector: string;
+  isStatic: boolean;
+  address: NativePointer;
+  origin: MemberOrigin;
+}
+
+const VTABLE_SLOT_SELECTOR = /^vtable#\d+$/;
 
 export interface SwiftInstanceMethod extends SwiftMember {
   bind(receiver: SwiftObject): SwiftBoundMethod;
@@ -207,7 +218,10 @@ export abstract class NominalType extends SwiftType {
 
   instanceMethod(name: string, options: MemberLookupOptions = {}): SwiftInstanceMethod {
     const member = this.member(name, { ...options, static: false }, `instance method ${name}`);
-    return withHookTarget({ ...member, bind: (receiver) => receiver.$method(name, options) }, hookTargetOf(member) ?? null);
+    const bind = member.signature === null
+      ? (): never => { throw new Error(`${name} on ${this.name} has no symbol to read a signature from`); }
+      : (receiver: SwiftObject): SwiftBoundMethod => receiver.$method(name, options);
+    return withHookTarget({ ...member, bind }, hookTargetOf(member) ?? null);
   }
 
   typeMethod(name: string, options: MemberLookupOptions = {}): SwiftMember {
@@ -232,6 +246,13 @@ export abstract class NominalType extends SwiftType {
   }
 
   private member(selector: string, selectorOptions: ValueMethodResolveOptions, description: string): SwiftMember {
+    if (VTABLE_SLOT_SELECTOR.test(selector)) {
+      const slot = this.vtableSlots(true).find((s) => s.selector === selector && s.isStatic === selectorOptions.static);
+      if (slot === undefined) {
+        throw new Error(`no ${description} on ${this.name}`);
+      }
+      return { address: slot.address, selector, isGeneric: false, origin: slot.origin, signature: null };
+    }
     const { name, options } = splitSelector(selector, selectorOptions);
     const found = findMember(this.name, name, lowerResolveOptions(options));
     if (found === null) {
@@ -244,9 +265,17 @@ export abstract class NominalType extends SwiftType {
   }
 
   private selectors(isStatic: boolean, { inherited = true, deep = false }: MethodQuery): string[] {
-    return enumerateMethods(this.name, deep ? "allLoadedModules" : "definingModule", inherited ? "withSuperclasses" : "thisType")
-      .filter((m) => m.kind === "method" && m.isStatic === isStatic)
-      .map((m) => m.selector);
+    const named = enumerateMethods(this.name, deep ? "allLoadedModules" : "definingModule", inherited ? "withSuperclasses" : "thisType");
+    const namedAddresses = new Set(named.map((m) => m.address.strip().toString()));
+    const unnamedSlots = this.vtableSlots(inherited).filter((s) => s.isStatic === isStatic && !namedAddresses.has(s.address.toString()));
+    return [
+      ...named.filter((m) => m.kind === "method" && m.isStatic === isStatic).map((m) => m.selector),
+      ...unnamedSlots.map((s) => s.selector),
+    ];
+  }
+
+  protected vtableSlots(_inherited: boolean): VTableSlot[] {
+    return [];
   }
 
   protocols(): { [name: string]: Protocol } {
@@ -316,6 +345,35 @@ export class ClassType extends NominalType {
 
   protected initializerSymbolName(): string {
     return "__allocating_init";
+  }
+
+  // The method-kind slots of the class and, when inherited, its Swift ancestors, each read from
+  // this class's metadata so an inherited slot carries the override that runs here.
+  protected vtableSlots(inherited: boolean): VTableSlot[] {
+    if (descriptorOf(this).isGeneric) {
+      return [];
+    }
+    const metadata = new ClassMetadata(metadataOf(this).handle);
+    const slots: VTableSlot[] = [];
+    for (let cls: ClassMetadata | null = metadata; cls !== null && cls.isTypeMetadata; cls = inherited ? cls.superclass : null) {
+      const description = cls.description;
+      if (description.isGeneric) {
+        continue;
+      }
+      const origin: MemberOrigin = { kind: "own", type: description.fullTypeName ?? this.name, module: imageName(description.handle) };
+      for (const entry of readVTable(description)) {
+        if (entry.kind !== MethodDescriptorKind.Method) {
+          continue;
+        }
+        slots.push({
+          selector: `vtable#${entry.metadataOffset}`,
+          isStatic: !entry.isInstance,
+          address: metadata.handle.add(entry.metadataOffset * Process.pointerSize).readPointer().strip(),
+          origin,
+        });
+      }
+    }
+    return slots;
   }
 }
 
