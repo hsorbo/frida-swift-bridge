@@ -31,6 +31,12 @@
     "test:macos-arm64e": "injest --target macos-arm64e",
     "pretest:ios": "PLATFORM=ios EMBED_FIXTURES=1 sh tests/fixtures/build.sh",
     "test:ios": "injest --target ios",
+    "prebench": "sh tests/fixtures/build.sh",
+    "bench": "injest --bench --baseline bench/baseline.json",
+    "prebench:update": "sh tests/fixtures/build.sh",
+    "bench:update": "injest --bench --baseline bench/baseline.json --update",
+    "prebench:cold": "ARCH=arm64e sh tests/fixtures/build.sh",
+    "bench:cold": "injest --bench --baseline bench/baseline.json --target macos-arm64e cold",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -38,7 +44,7 @@
     "typescript": "^6.0.3"
   },
   "devDependencies": {
-    "@frida/injest": "^0.1.5",
+    "@frida/injest": "^0.2.0",
     "@types/frida-gum": "^19.12.0",
     "@types/node": "^26.1.0"
   },

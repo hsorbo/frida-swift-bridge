@@ -1,0 +1,636 @@
+{
+  "darwin-arm64-qjs": {
+    "machine": "Mac.gpv4.hsorbo.no",
+    "benches": {
+      "lookup › Swift.type by qualified name": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 2,
+          "median": 2
+        }
+      },
+      "lookup › instanceMethod by name": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 69,
+          "median": 75
+        }
+      },
+      "lookup › class init": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 237,
+          "median": 245
+        }
+      },
+      "lookup › object method call": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 193,
+          "median": 198
+        }
+      },
+      "lookup › Swift.Interceptor attach and detach on a facade method": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 154,
+          "median": 155
+        }
+      },
+      "lookup › Swift.demangle of an exported symbol": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 0,
+          "median": 1
+        }
+      },
+      "listing › instanceMethods on a stripped class": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 2,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 2852,
+          "median": 2961
+        }
+      },
+      "listing › instanceMethods on a struct": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 735,
+          "median": 741
+        }
+      },
+      "listing › instanceMethods on Swift.Int, shallow": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 82,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 3201,
+          "median": 3268
+        }
+      },
+      "listing › instanceMethods on Swift.Int, deep": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 2,
+          "moduleLists": 4,
+          "pointerScans": 0,
+          "conformsToProtocol": 206,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 40943,
+          "median": 41693
+        }
+      },
+      "listing › properties on a class": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 2072,
+          "median": 2096
+        }
+      },
+      "listing › Object.keys on a type facade": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 2,
+          "moduleLists": 2,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 1028,
+          "median": 1058
+        }
+      },
+      "listing › Object.keys on an object facade": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 14,
+          "median": 14
+        }
+      },
+      "scan › Swift.choose over a class with live instances": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 2,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 225870,
+          "median": 229337
+        }
+      },
+      "scan › specializations of a generic struct": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 5,
+          "median": 5
+        }
+      },
+      "scan › enumerateFunctions with a selector glob": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 7371,
+          "median": 7539
+        }
+      },
+      "scan › enumerateTypes over one module": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 941,
+          "median": 971
+        }
+      },
+      "scan › protocols of a type": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 754,
+          "median": 767
+        }
+      },
+      "first Swift.type lookup in a fresh process": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 7568,
+          "median": 7568
+        }
+      },
+      "first instanceMethods on a stripped class in a fresh process": {
+        "counters": {
+          "symbolTables": 1,
+          "exportTables": 0,
+          "resolverQueries": 3,
+          "moduleLists": 4,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 6,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 12996,
+          "median": 12996
+        }
+      },
+      "first instanceMethods on Swift.Int in a fresh process": {
+        "counters": {
+          "symbolTables": 2,
+          "exportTables": 1,
+          "resolverQueries": 2,
+          "moduleLists": 2,
+          "pointerScans": 0,
+          "conformsToProtocol": 57,
+          "demangle": 192,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 134534,
+          "median": 134534
+        }
+      }
+    }
+  },
+  "linux-x64-qjs": {
+    "machine": "labrat",
+    "benches": {
+      "lookup › Swift.type by qualified name": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 5,
+          "median": 5
+        }
+      },
+      "lookup › instanceMethod by name": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 33,
+          "median": 34
+        }
+      },
+      "lookup › class init": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 439,
+          "median": 447
+        }
+      },
+      "lookup › object method call": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 483,
+          "median": 490
+        }
+      },
+      "lookup › Swift.Interceptor attach and detach on a facade method": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 102,
+          "median": 104
+        }
+      },
+      "listing › instanceMethods on a stripped class": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 291,
+          "median": 298
+        }
+      },
+      "listing › instanceMethods on a struct": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 210,
+          "median": 214
+        }
+      },
+      "listing › instanceMethods on Swift.Int, shallow": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 24,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 2869,
+          "median": 2877
+        }
+      },
+      "listing › instanceMethods on Swift.Int, deep": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 2,
+          "moduleLists": 4,
+          "pointerScans": 0,
+          "conformsToProtocol": 67,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 15073,
+          "median": 15095
+        }
+      },
+      "listing › properties on a class": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 50,
+          "median": 54
+        }
+      },
+      "listing › Object.keys on a type facade": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 2,
+          "moduleLists": 2,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 154,
+          "median": 157
+        }
+      },
+      "listing › Object.keys on an object facade": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 32,
+          "median": 33
+        }
+      },
+      "scan › Swift.choose over a class with live instances": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 2,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 18576,
+          "median": 18801
+        }
+      },
+      "scan › specializations of a generic struct": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 23,
+          "median": 24
+        }
+      },
+      "scan › enumerateFunctions with a selector glob": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 1453,
+          "median": 1475
+        }
+      },
+      "scan › protocols of a type": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 133,
+          "median": 134
+        }
+      },
+      "lookup › Swift.demangle of an exported symbol": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 2,
+          "median": 3
+        }
+      },
+      "scan › enumerateTypes over one module": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0
+        },
+        "wallUs": {
+          "min": 3783,
+          "median": 3788
+        }
+      }
+    }
+  }
+}
