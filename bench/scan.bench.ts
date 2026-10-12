@@ -16,6 +16,28 @@ describe("scan", () => {
   );
 
   bench(
+    "Swift.choose over a base class with a static subclass",
+    ({ measure }) => {
+      const Base = Swift.class("fixture.Base")!;
+      const alive = [Base.init(1), Swift.class("fixture.Derived")!.init()];
+      measure(() => Swift.choose(Base));
+      alive.length = 0;
+    },
+    { warmup: 1, iterations: 5 },
+  );
+
+  bench(
+    "Swift.choose over a generic class named without arguments",
+    ({ measure }) => {
+      const Coop = Swift.class("fixture.Coop")!;
+      const alive = [Swift.class("fixture.HenCoop")!.init()];
+      measure(() => Swift.choose(Coop));
+      alive.length = 0;
+    },
+    { warmup: 1, iterations: 5 },
+  );
+
+  bench(
     "specializations of a generic struct",
     ({ measure }) => {
       const Keyed = Swift.struct("fixture.Keyed")!.$type;

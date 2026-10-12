@@ -25,20 +25,43 @@ export function choose(cls: SwiftClass, options: ChooseOptions = {}): SwiftClass
     throw new Error("Swift.choose takes a class facade, e.g. Swift.class('Module.Name')");
   }
   const subclasses = options.subclasses ?? true;
-  const unbound = isUnboundGeneric(cls.$type);
   const writable = Process.enumerateRanges("rw-");
   const heap = writable.filter((range) => !isImageRange(range));
   const imageData = writable.filter(isImageRange);
 
-  let classes = unbound
-    ? classMetadataReferencing(writable, [descriptorOf(cls.$type).handle], OFFSETOF_DESCRIPTION)
-    : [new ClassMetadata(metadataOf(cls.$type).handle)];
+  const seen = new Set<string>();
+  const unseen = (found: ClassMetadata[]): ClassMetadata[] =>
+    found.filter((c) => {
+      const key = c.handle.toString();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  // Statically emitted subclass metadata lies in image data, a few megabytes, so the hierarchy
+  // under the classes is gathered there first and the heap, the bulk of writable memory, is
+  // scanned once for all of their instances. A subclass whose metadata the runtime allocated
+  // turns up in that scan and costs one more.
+  const withStaticSubclasses = (classes: ClassMetadata[]): ClassMetadata[] => {
+    const all = unseen(classes);
+    for (let level = all; subclasses && level.length > 0; ) {
+      level = unseen(classMetadataReferencing(imageData, level.map((c) => c.handle), OFFSETOF_SUPERCLASS));
+      all.push(...level);
+    }
+    return all;
+  };
+
+  let classes = withStaticSubclasses(
+    isUnboundGeneric(cls.$type)
+      ? specializedMetadataOf(descriptorOf(cls.$type)).map((m) => new ClassMetadata(m.handle))
+      : [new ClassMetadata(metadataOf(cls.$type).handle)]
+  );
   const instances: NativePointer[] = [];
   while (classes.length > 0) {
     const instanceSizes = new Map(classes.map((c) => [c.handle.and(ISA_MASK).toString(), c.instanceSize]));
-    const isas = classes.map((c) => c.handle);
     const found: ClassMetadata[] = [];
-    for (const { address, value } of findWordsEqualTo(heap, isas)) {
+    for (const { address, value } of findWordsEqualTo(heap, classes.map((c) => c.handle))) {
       if (isInstanceBlock(address, instanceSizes.get(value.and(ISA_MASK).toString())!)) {
         instances.push(address);
       } else if (subclasses) {
@@ -48,10 +71,7 @@ export function choose(cls: SwiftClass, options: ChooseOptions = {}): SwiftClass
         }
       }
     }
-    if (subclasses) {
-      found.push(...classMetadataReferencing(imageData, isas, OFFSETOF_SUPERCLASS));
-    }
-    classes = found;
+    classes = withStaticSubclasses(found);
   }
   return instances.map((handle) => asSwiftObject(handle));
 }
