@@ -29,15 +29,13 @@ import {
   initializerLookup,
   findMember,
   imageName,
-  importedObjCClassName,
-  isImportedObjCClass,
+  memberOwnerNamed,
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
 import { metatypeInstanceType } from "../abi/metatype.js";
 import { readFunctionType, ParameterOwnership } from "../abi/function-type.js";
 import { typeName } from "./type-name.js";
 import { objcClassName } from "./objc.js";
-import { findType } from "../reflection/registry.js";
 import { Protocol, protocolsForType } from "./protocol.js";
 import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum, SwiftObjCClass, typeFacade } from "./type-facade.js";
 
@@ -289,7 +287,7 @@ export abstract class NominalType extends SwiftType {
   // thunk its witness table dispatches through. A conformance another module declares is an
   // extension there, so it is listed only deep; that also keeps the symbol maps to one module.
   private witnessSlots(deep: boolean): UnnamedSlot[] {
-    if (isUnboundGeneric(this) || isImportedObjCClass(this.name)) {
+    if (isUnboundGeneric(this) || this instanceof ObjCClassWrapperType) {
       return [];
     }
     const metadata = metadataOf(this);
@@ -702,12 +700,14 @@ export function nominalTypeNamed(name: string): NominalType | null {
     const type = metadata === null ? null : typeOf(metadata);
     return type instanceof NominalType ? type : null;
   }
-  const descriptor = isImportedObjCClass(name) ? null : findType(name);
-  if (descriptor !== null) {
-    return typeFromDescriptor(descriptor);
+  const owner = memberOwnerNamed(name);
+  if (owner === null) {
+    return null;
   }
-  const objcClass = importedObjCClassName(name);
-  const metadata = objcClass === null ? null : resolveType(objcClass);
+  if (owner.kind !== "objcClass") {
+    return typeFromDescriptor(owner.descriptor);
+  }
+  const metadata = resolveType(owner.fullName);
   const type = metadata === null ? null : typeOf(metadata);
   return type instanceof NominalType ? type : null;
 }

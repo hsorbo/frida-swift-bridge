@@ -120,8 +120,18 @@ export function resolveFunctionSignature(
   return { throws: signature.throws, argTypes, returnType };
 }
 
+// __C is the module of everything imported from C. Only a C identifier under it can name an ObjC
+// class or protocol, and only where the ObjC runtime is; a bare identifier is accepted too.
+export const OBJC_MODULE_PREFIX = "__C.";
+const OBJC_IDENTIFIER = /^[A-Za-z_]\w*$/;
+
+export function importedObjCIdentifier(name: string): string | null {
+  const ident = name.startsWith(OBJC_MODULE_PREFIX) ? name.slice(OBJC_MODULE_PREFIX.length) : name;
+  return Process.platform === "darwin" && OBJC_IDENTIFIER.test(ident) ? ident : null;
+}
+
 export function resolveType(name: string): Metadata | null {
-  const objcType = name.startsWith("__C.") ? resolveObjCType(name) : null;
+  const objcType = name.startsWith(OBJC_MODULE_PREFIX) ? resolveObjCType(name) : null;
   if (objcType !== null) {
     return objcType;
   }
@@ -139,8 +149,8 @@ export function resolveType(name: string): Metadata | null {
 // An ObjC class or protocol has no Swift descriptor; resolve it through its `So<len><name>C` (class)
 // or `So<len><name>_p` (protocol existential) mangling. A C struct or enum under __C has a descriptor.
 function resolveObjCType(name: string): Metadata | null {
-  const ident = name.slice("__C.".length);
-  if (Process.platform !== "darwin" || !/^[A-Za-z_]\w*$/.test(ident)) {
+  const ident = importedObjCIdentifier(name);
+  if (ident === null) {
     return null;
   }
   const prefix = `So${ident.length}${ident}`;

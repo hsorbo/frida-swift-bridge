@@ -30,6 +30,8 @@ import {
   ParsedSwiftSignature,
   ParamConvention,
   symbolicate,
+  OBJC_MODULE_PREFIX,
+  importedObjCIdentifier,
 } from "./symbolication.js";
 import {
   makeSwiftNativeFunction,
@@ -701,29 +703,41 @@ function describeOverloads(candidates: MethodCandidate[]): string {
 }
 
 // A type imported from C declares no Swift members: every one is an extension member.
-function memberOrigin(address: NativePointer, type: string): MemberOrigin {
+function memberOrigin(address: NativePointer, owner: MemberOwner): MemberOrigin {
   const module = imageName(address);
-  const owner = type.startsWith(OBJC_MODULE_PREFIX) ? null : imageName(findType(type)!.handle);
-  return { kind: module === owner ? "own" : "extension", type, module };
+  const declaring = owner.kind === "swift" ? imageName(owner.descriptor.handle) : null;
+  return { kind: module === declaring ? "own" : "extension", type: owner.fullName, module };
 }
 
-const OBJC_MODULE_PREFIX = "__C.";
-const OBJC_CLASS_IDENTIFIER = /^[A-Za-z_]\w*$/;
+// The type a member lookup is keyed on, settled once per resolution. An ObjC class is the one kind
+// with no Swift descriptor; a C struct, enum or CF class under __C has one in the importing binary.
+export type MemberOwner =
+  | { kind: "swift" | "importedC"; fullName: string; descriptor: ContextDescriptor }
+  | { kind: "objcClass"; fullName: string; cls: NativePointer };
 
-// __C is the module of everything imported from C. An imported ObjC class is the one kind with no
-// Swift descriptor; a C struct or enum under __C has one in the importing binary.
-export function isImportedObjCClass(fullName: string): boolean {
-  return fullName.startsWith(OBJC_MODULE_PREFIX) && importedObjCClassName(fullName) !== null;
+function describedOwner(fullName: string, descriptor: ContextDescriptor): MemberOwner {
+  return { kind: fullName.startsWith(OBJC_MODULE_PREFIX) ? "importedC" : "swift", fullName, descriptor };
 }
 
 // The demangler spells an imported ObjC class __C.<name>; a bare name is accepted when no Swift type
 // claims it. Its Swift members are all extension members, led by the class's So<len><name>C token.
-export function importedObjCClassName(name: string): string | null {
-  const ident = name.startsWith(OBJC_MODULE_PREFIX) ? name.slice(OBJC_MODULE_PREFIX.length) : name;
-  if (Process.platform !== "darwin" || !OBJC_CLASS_IDENTIFIER.test(ident) || lookUpObjCClass(ident) === null) {
-    return null;
+function importedObjCClass(name: string): MemberOwner | null {
+  const ident = importedObjCIdentifier(name);
+  const cls = ident === null ? null : lookUpObjCClass(ident);
+  return cls === null ? null : { kind: "objcClass", fullName: `${OBJC_MODULE_PREFIX}${ident}`, cls };
+}
+
+export function memberOwnerNamed(name: string): MemberOwner | null {
+  const objcClass = name.startsWith(OBJC_MODULE_PREFIX) ? importedObjCClass(name) : null;
+  if (objcClass !== null) {
+    return objcClass;
   }
-  return `${OBJC_MODULE_PREFIX}${ident}`;
+  const descriptor = findType(name);
+  if (descriptor === null) {
+    return importedObjCClass(name);
+  }
+  const fullName = descriptor.fullTypeName;
+  return fullName === null ? null : describedOwner(fullName, descriptor);
 }
 
 function importedObjCClassToken(fullName: string): string {
@@ -731,25 +745,20 @@ function importedObjCClassToken(fullName: string): string {
   return `So${ident.length}${ident}C`;
 }
 
-function importedObjCClassChain(fullName: string): string[] {
-  const names = objcClassChainNames(lookUpObjCClass(fullName.slice(OBJC_MODULE_PREFIX.length)));
-  return names.length === 0 ? [fullName] : names;
-}
-
 // A Swift class with no declared superclass is rooted in the runtime's SwiftObject, which no Swift
 // extension can name.
 const SWIFT_OBJC_ROOT_CLASS = "_TtCs12_SwiftObject";
 
-function objcClassChainNames(cls: NativePointer | null): string[] {
-  const names: string[] = [];
+function objcClassChain(cls: NativePointer | null): MemberOwner[] {
+  const chain: MemberOwner[] = [];
   for (; cls !== null; cls = objcSuperclass(cls)) {
     const name = objcClassName(cls);
     if (name === SWIFT_OBJC_ROOT_CLASS) {
       break;
     }
-    names.push(`${OBJC_MODULE_PREFIX}${name}`);
+    chain.push({ kind: "objcClass", fullName: `${OBJC_MODULE_PREFIX}${name}`, cls });
   }
-  return names;
+  return chain;
 }
 
 // The metatype value of an imported ObjC class is the class itself, not its Swift wrapper.
@@ -762,52 +771,44 @@ function metatypeSelf(type: Metadata): NativePointer {
 const RUNTIME_ANONYMOUS_CONTEXT = /\(unknown context at \$[0-9a-f]+\)\./g;
 const PRIVATE_DECL_NAME = /\(([^()\s]+) in _[0-9A-F]+\)/g;
 
-function canonicalTypeName(typeName: string): string {
-  const declared = withoutTypeArguments(typeName).replace(RUNTIME_ANONYMOUS_CONTEXT, "");
-  const descriptor = isImportedObjCClass(declared) ? null : findType(declared);
-  if (descriptor === null) {
-    const objcClass = importedObjCClassName(declared);
-    if (objcClass === null) {
-      throw new Error(`unknown type: ${typeName}`);
-    }
-    return objcClass;
+function resolveMemberOwner(typeName: string): MemberOwner {
+  const owner = memberOwnerNamed(withoutTypeArguments(typeName).replace(RUNTIME_ANONYMOUS_CONTEXT, ""));
+  if (owner === null) {
+    throw new Error(`unknown type: ${typeName}`);
   }
-  const full = descriptor.fullTypeName;
-  if (full === null) {
-    throw new Error(`type ${typeName} has no full name`);
-  }
-  return full;
+  return owner;
 }
 
 // A member is keyed to its declaring class, so inherited ones need the superclass chain.
 // Most-derived first; non-class/generic types collapse to one level. A Swift class rooted in an
 // ObjC class continues through its ObjC superclasses, whose Swift members are extension members.
-function classChainNames(fullName: string): string[] {
-  if (isImportedObjCClass(fullName)) {
-    return importedObjCClassChain(fullName);
+function classChain(owner: MemberOwner): MemberOwner[] {
+  if (owner.kind === "objcClass") {
+    const chain = objcClassChain(owner.cls);
+    return chain.length === 0 ? [owner] : chain;
   }
-  const descriptor = findType(fullName);
-  if (descriptor === null || descriptor.kind !== ContextDescriptorKind.Class || descriptor.isGeneric) {
-    return [fullName];
+  const { descriptor } = owner;
+  if (descriptor.kind !== ContextDescriptorKind.Class || descriptor.isGeneric) {
+    return [owner];
   }
   const metadata = getMetadata(descriptor);
   if (metadata.kind !== MetadataKind.Class) {
-    return [fullName];
+    return [owner];
   }
-  const names: string[] = [];
+  const chain: MemberOwner[] = [];
   let cls: ClassMetadata | null = new ClassMetadata(metadata.handle);
   while (cls !== null && cls.isTypeMetadata) {
     const name = cls.description.fullTypeName;
     if (name === null) {
       break;
     }
-    names.push(name);
+    chain.push(describedOwner(name, cls.description));
     cls = cls.superclass;
   }
   if (cls !== null && !cls.isTypeMetadata) {
-    names.push(...objcClassChainNames(cls.handle));
+    chain.push(...objcClassChain(cls.handle));
   }
-  return names.length === 0 ? [fullName] : names;
+  return chain.length === 0 ? [owner] : chain;
 }
 
 // Every entity symbol leads with its context's mangled node, so the raw name can be tested for it
@@ -848,20 +849,20 @@ type SymbolFilter = (symbol: string) => boolean;
 
 // Keyed on the module, not on the answer: a loaded module's symbols can't change, while
 // "type T has no member m" stops being true as soon as another module is loaded.
-function foreignMembers(fullName: string, mayName: SymbolFilter | null = null): TypeMembers {
-  if (isImportedObjCClass(fullName)) {
+function foreignMembers(owner: MemberOwner, mayName: SymbolFilter | null = null): TypeMembers {
+  const { fullName } = owner;
+  if (owner.kind === "objcClass") {
     return exportedMembersAcrossModules(fullName, importedObjCClassToken(fullName), mayName, null);
   }
-  const descriptor = findType(fullName)!;
-  const owner = Process.findModuleByAddress(descriptor.handle);
-  if (owner === null) {
+  const module = Process.findModuleByAddress(owner.descriptor.handle);
+  if (module === null) {
     return { methods: [], accessors: [] };
   }
-  const token = provenToken(fullName, descriptor, owner);
+  const token = provenToken(fullName, owner.descriptor, module);
   if (token === null) {
     return { methods: [], accessors: [] };
   }
-  return exportedMembersAcrossModules(fullName, token, mayName, owner);
+  return exportedMembersAcrossModules(fullName, token, mayName, module);
 }
 
 function exportedMembersAcrossModules(fullName: string, token: string, mayName: SymbolFilter | null, except: Module | null): TypeMembers {
@@ -941,7 +942,7 @@ export interface MemberKinds {
 }
 
 export function memberKindsInOtherModules(typeName: string, name: string, isStatic = false): MemberKinds {
-  const fullName = canonicalTypeName(typeName);
+  const owner = resolveMemberOwner(typeName);
   const mayName = symbolMayName(name);
   const found: MemberKinds = { method: false, property: false, writable: false };
   const consider = (members: TypeMembers, isMethod: (c: MethodCandidate) => boolean): void => {
@@ -950,10 +951,10 @@ export function memberKindsInOtherModules(typeName: string, name: string, isStat
     found.writable ||= members.accessors.some((a) => a.member === name && a.isStatic === isStatic && a.kind === "setter");
   };
   const isMethod = (c: MethodCandidate): boolean => c.isStatic === isStatic && c.signature.accessor === undefined && methodKind(c.name) === "method";
-  for (const className of classChainNames(fullName)) {
-    consider(foreignMembers(className, mayName), isMethod);
+  for (const level of classChain(owner)) {
+    consider(foreignMembers(level, mayName), isMethod);
   }
-  for (const conformance of conformanceMembers(fullName, mayName)) {
+  for (const conformance of conformanceMembers(owner, mayName)) {
     consider(conformance.members, (c) => isConformanceMethod(c) && isMethod(c));
   }
   return found;
@@ -1011,14 +1012,14 @@ function protocolExtensionMembers(protocol: ContextDescriptor): TypeMembers {
 
 export type ModuleScope = "definingModule" | "allLoadedModules";
 
-type MemberSource = (fullName: string) => TypeMembers;
+type MemberSource = (owner: MemberOwner) => TypeMembers;
 
-function allLoadedModuleMembers(fullName: string): TypeMembers {
-  const own = definingModuleMembers(fullName);
-  if (isImportedObjCClass(fullName)) {
+function allLoadedModuleMembers(owner: MemberOwner): TypeMembers {
+  const own = definingModuleMembers(owner);
+  if (owner.kind === "objcClass") {
     return own;
   }
-  const foreign = foreignMembers(fullName);
+  const foreign = foreignMembers(owner);
   return {
     methods: [...own.methods, ...foreign.methods],
     accessors: [...own.accessors, ...foreign.accessors],
@@ -1027,15 +1028,15 @@ function allLoadedModuleMembers(fullName: string): TypeMembers {
 
 // An imported ObjC class has no defining module: every loaded module's extensions stand in for it,
 // and the aggregate is never cached since a module loaded later may add to it.
-function definingModuleMembers(fullName: string): TypeMembers {
-  if (isImportedObjCClass(fullName)) {
-    return foreignMembers(fullName);
+function definingModuleMembers(owner: MemberOwner): TypeMembers {
+  if (owner.kind === "objcClass") {
+    return foreignMembers(owner);
   }
+  const { fullName, descriptor } = owner;
   const cached = tableCache.get(fullName);
   if (cached !== undefined) {
     return cached;
   }
-  const descriptor = findType(fullName)!;
   const module = Process.findModuleByAddress(descriptor.handle);
   if (module === null) {
     throw new Error(`no module owns ${fullName}`);
@@ -1218,7 +1219,7 @@ export function enumerateMethods(
   const members = memberSource(modules);
   const seen = new Set<string>();
   const methods: MethodInfo[] = [];
-  const fullName = canonicalTypeName(typeName);
+  const owner = resolveMemberOwner(typeName);
   const add = (c: MethodCandidate): void => {
     const key = `${c.isStatic ? "s" : "i"}:${c.signature.selector}:${c.signature.argTypeNames.join(",")}->${c.signature.returnTypeName}`;
     if (seen.has(key)) {
@@ -1239,11 +1240,11 @@ export function enumerateMethods(
       mangled: c.mangled,
     });
   };
-  for (const className of types === "withSuperclasses" ? classChainNames(fullName) : [fullName]) {
-    members(className).methods.forEach(add);
+  for (const level of types === "withSuperclasses" ? classChain(owner) : [owner]) {
+    members(level).methods.forEach(add);
   }
   if (modules === "allLoadedModules" && types === "withSuperclasses") {
-    for (const conformance of conformanceMembers(fullName)) {
+    for (const conformance of conformanceMembers(owner)) {
       conformance.members.methods.filter(isConformanceMethod).forEach(add);
     }
   }
@@ -1267,10 +1268,10 @@ export function enumerateProperties(
   const members = memberSource(modules);
   const seen = new Set<string>();
   const properties: PropertyInfo[] = [];
-  const fullName = canonicalTypeName(typeName);
-  const levels = classChainNames(fullName).map((className) => members(className).accessors);
+  const owner = resolveMemberOwner(typeName);
+  const levels = classChain(owner).map((level) => members(level).accessors);
   if (modules === "allLoadedModules") {
-    levels.push(conformanceMembers(fullName).flatMap((c) => c.members.accessors));
+    levels.push(conformanceMembers(owner).flatMap((c) => c.members.accessors));
   }
   for (const accessors of levels) {
     const atThisLevel = new Map<string, PropertyInfo>();
@@ -1303,7 +1304,7 @@ export function resolveMethod(
 ): ResolvedMethod {
   const resolved = findMethod(typeName, methodName, options);
   if (resolved === null) {
-    throw noMethodError(canonicalTypeName(typeName), methodName);
+    throw noMethodError(resolveMemberOwner(typeName).fullName, methodName);
   }
   return resolved;
 }
@@ -1340,10 +1341,10 @@ export function findMethod(
   methodName: string,
   options: RawMethodResolveOptions = {}
 ): ResolvedMethod | null {
-  const fullName = canonicalTypeName(typeName);
+  const owner = resolveMemberOwner(typeName);
   return (
-    resolveMethodIn(fullName, methodName, options, definingModuleMembers) ??
-    (options.deep === false ? null : resolveMethodIn(fullName, methodName, options, allLoadedModuleMembers))
+    resolveMethodIn(owner, methodName, options, definingModuleMembers) ??
+    (options.deep === false ? null : resolveMethodIn(owner, methodName, options, allLoadedModuleMembers))
   );
 }
 
@@ -1364,14 +1365,14 @@ export function findMember(
   methodName: string,
   options: RawMethodResolveOptions = {}
 ): FoundMember | null {
-  const fullName = canonicalTypeName(typeName);
-  const candidates = matchingMethods(fullName, options, (c) => c.name === methodName);
+  const owner = resolveMemberOwner(typeName);
+  const candidates = matchingMethods(owner, options, (c) => c.name === methodName);
   if (candidates.length === 0) {
     return null;
   }
   if (candidates.length > 1) {
     throw new Error(
-      `ambiguous method ${methodName} on ${fullName}: ${describeOverloads(candidates)} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
+      `ambiguous method ${methodName} on ${owner.fullName}: ${describeOverloads(candidates)} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
     );
   }
   const { signature, isStatic } = candidates[0];
@@ -1382,20 +1383,20 @@ export function findMember(
     generic: signature.genericParams.length > 0,
     isStatic,
     async: signature.async,
-    origin: memberOrigin(address, fullName),
+    origin: memberOrigin(address, owner),
     signature,
   };
 }
 
 function resolveMethodIn(
-  fullName: string,
+  owner: MemberOwner,
   methodName: string,
   options: RawMethodResolveOptions,
   members: MemberSource
 ): ResolvedMethod | null {
-  for (const className of classChainNames(fullName)) {
+  for (const level of classChain(owner)) {
     const candidates = applyOverloadFilters(
-      members(className).methods.filter(
+      members(level).methods.filter(
         (c) => c.name === methodName && c.signature.genericParams.length === 0
       ),
       options
@@ -1406,7 +1407,7 @@ function resolveMethodIn(
     if (candidates.length > 1) {
       const overloads = describeOverloads(candidates);
       throw new Error(
-        `ambiguous method ${methodName} on ${className}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
+        `ambiguous method ${methodName} on ${level.fullName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
       );
     }
 
@@ -1423,7 +1424,7 @@ function resolveMethodIn(
       }
       asyncFunctionPointer = afp;
     }
-    const origin = memberOrigin(address, className);
+    const origin = memberOrigin(address, level);
     return setterShape({ address, argTypes, returnType, returnClosure, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
   }
   return null;
@@ -2493,7 +2494,7 @@ interface RequirementBound {
 // protocol (imported, or declared @objc in Swift) make the subject a bare reference.
 function requirementBound(req: GenericRequirement): RequirementBound {
   const bound = req.protocol;
-  if (bound === "AnyObject" || bound === "Swift.AnyObject" || bound.startsWith("__C.")) {
+  if (bound === "AnyObject" || bound === "Swift.AnyObject" || bound.startsWith(OBJC_MODULE_PREFIX)) {
     return { witnessed: null, classBound: true };
   }
   const protocol = findProtocol(bound);
@@ -2650,14 +2651,14 @@ function inferClosureTypeArguments(signature: SwiftFunctionSignature): Metadata[
 }
 
 function matchingMethods(
-  fullName: string,
+  owner: MemberOwner,
   options: RawMethodResolveOptions,
   match: (candidate: MethodCandidate) => boolean
 ): MethodCandidate[] {
-  const own = applyOverloadFilters(definingModuleMembers(fullName).methods.filter(match), options);
+  const own = applyOverloadFilters(definingModuleMembers(owner).methods.filter(match), options);
   return own.length > 0 || options.deep === false
     ? own
-    : applyOverloadFilters(allLoadedModuleMembers(fullName).methods.filter(match), options);
+    : applyOverloadFilters(allLoadedModuleMembers(owner).methods.filter(match), options);
 }
 
 // planGenericMethod also binds a non-generic method whose closure parameter needs ArgPlan lowering.
@@ -2668,21 +2669,21 @@ function argPlanBound(signature: SwiftFunctionSignature): boolean {
 }
 
 function planGenericMethod(typeNameArg: string, methodName: string, options: RawMethodResolveOptions): CallPlan {
-  const fullName = canonicalTypeName(typeNameArg);
+  const owner = resolveMemberOwner(typeNameArg);
   const candidates = matchingMethods(
-    fullName,
+    owner,
     options,
     (c) => c.name === methodName && argPlanBound(c.signature)
   );
   if (candidates.length === 0) {
-    throw new Error(`no generic or closure-taking method ${methodName} on ${fullName}`);
+    throw new Error(`no generic or closure-taking method ${methodName} on ${owner.fullName}`);
   }
   if (candidates.length > 1) {
     const selectors = candidates.map((c) => c.signature.selector).join(", ");
-    throw new Error(`ambiguous generic method ${methodName} on ${fullName}: ${selectors} (disambiguate with { arity } or { labels })`);
+    throw new Error(`ambiguous generic method ${methodName} on ${owner.fullName}: ${selectors} (disambiguate with { arity } or { labels })`);
   }
   const { address, signature, mangled } = candidates[0];
-  return { ...planGenericSignature(address, mangled, signature, options), origin: memberOrigin(address, fullName) };
+  return { ...planGenericSignature(address, mangled, signature, options), origin: memberOrigin(address, owner) };
 }
 
 function planGenericSignature(
@@ -2849,8 +2850,9 @@ function genericTypeArguments(receiver: Metadata): { unboundName: string; typePa
 // A value type whose layout is fixed in the generic context is routed by bindGenericTypeValueMethod.
 function planGenericTypeMethod(receiver: Metadata, methodName: string, options: RawMethodResolveOptions, trailsSelfMetadata: boolean): CallPlan {
   const { unboundName, typeParams, typeArguments } = genericTypeArguments(receiver);
+  const owner = resolveMemberOwner(unboundName);
   const candidates = matchingMethods(
-    unboundName,
+    owner,
     options,
     (c) => c.name === methodName && c.signature.genericParams.length === 0 && c.signature.simpleGenerics
   );
@@ -2892,7 +2894,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     typeArguments: trailsSelfMetadata ? [receiver] : [],
     witnessTables: [],
     argConventions: params.conventions,
-    origin: memberOrigin(address, unboundName),
+    origin: memberOrigin(address, owner),
     signature,
   });
 }
@@ -2963,30 +2965,30 @@ interface ResolvedAccessor {
 // Instance accessors only, walking the superclass chain like enumerateProperties so a subclass
 // shadows an inherited property and a static accessor of the same name is never mistaken for it.
 function resolveAccessor(typeName: string, member: string, kind: AccessorKind): ResolvedAccessor {
-  const resolved = findAccessor(typeName, member, kind);
+  const owner = resolveMemberOwner(typeName);
+  const resolved = findAccessor(owner, member, kind);
   if (resolved === null) {
-    throw new Error(`no ${kind} for ${member} on ${canonicalTypeName(typeName)}`);
+    throw new Error(`no ${kind} for ${member} on ${owner.fullName}`);
   }
   return resolved;
 }
 
-function findAccessor(typeName: string, member: string, kind: AccessorKind, isStatic = false): ResolvedAccessor | null {
-  const fullName = canonicalTypeName(typeName);
+function findAccessor(owner: MemberOwner, member: string, kind: AccessorKind, isStatic = false): ResolvedAccessor | null {
   return (
-    resolveAccessorIn(fullName, member, kind, isStatic, definingModuleMembers) ??
-    resolveAccessorIn(fullName, member, kind, isStatic, allLoadedModuleMembers)
+    resolveAccessorIn(owner, member, kind, isStatic, definingModuleMembers) ??
+    resolveAccessorIn(owner, member, kind, isStatic, allLoadedModuleMembers)
   );
 }
 
 function resolveAccessorIn(
-  fullName: string,
+  owner: MemberOwner,
   member: string,
   kind: AccessorKind,
   isStatic: boolean,
   members: MemberSource
 ): ResolvedAccessor | null {
-  for (const className of classChainNames(fullName)) {
-    const candidate = members(className).accessors.find(
+  for (const level of classChain(owner)) {
+    const candidate = members(level).accessors.find(
       (a) => a.member === member && a.kind === kind && a.isStatic === isStatic
     );
     if (candidate === undefined) {
@@ -2994,7 +2996,7 @@ function resolveAccessorIn(
     }
     const type = resolveParsedType(candidate.type, () => null);
     if (type === null) {
-      throw new Error(`cannot resolve ${kind} type ${candidate.typeName} of ${className}.${member}`);
+      throw new Error(`cannot resolve ${kind} type ${candidate.typeName} of ${level.fullName}.${member}`);
     }
     return { address: candidate.address, type, kind };
   }
@@ -3033,9 +3035,10 @@ function accessorPlan(
 }
 
 export function getProperty(self: NativePointer, typeName: string, member: string): CallResult {
-  const accessor = findAccessor(typeName, member, "getter");
+  const owner = resolveMemberOwner(typeName);
+  const accessor = findAccessor(owner, member, "getter");
   if (accessor === null) {
-    return conformanceGetProperty(canonicalTypeName(typeName), self, member);
+    return conformanceGetProperty(owner, self, member);
   }
   const selfByValue = getterSelfByValue(typeName);
   const routing: SelfRouting = selfByValue === null ? { indirect: true } : { indirect: false, receiver: selfByValue };
@@ -3044,17 +3047,17 @@ export function getProperty(self: NativePointer, typeName: string, member: strin
 
 // Self is the metatype: thick (the metadata) for a class or a protocol extension, erased for a value type.
 export function getStaticProperty(receiver: Metadata, member: string): CallResult {
-  const name = typeName(receiver);
-  const accessor = findAccessor(name, member, "getter", true);
+  const owner = resolveMemberOwner(typeName(receiver));
+  const accessor = findAccessor(owner, member, "getter", true);
   if (accessor === null) {
-    return conformanceGetProperty(canonicalTypeName(name), metatypeSelf(receiver), member, true);
+    return conformanceGetProperty(owner, metatypeSelf(receiver), member, true);
   }
   return new BoundMethod(accessorPlan(accessor.address, accessor.type, "getter"), { self: metatypeSelf(receiver) }).call() as CallResult;
 }
 
 export function setStaticProperty(receiver: Metadata, member: string, value: CallArg): void {
   const name = typeName(receiver);
-  const accessor = findAccessor(name, member, "setter", true);
+  const accessor = findAccessor(resolveMemberOwner(name), member, "setter", true);
   if (accessor === null) {
     throw new Error(`no static setter for ${member} on ${name}`);
   }
@@ -3073,19 +3076,18 @@ interface ConformanceMembers {
   members: TypeMembers;
 }
 
-function conformanceMembers(fullName: string, mayName: SymbolFilter | null = null): ConformanceMembers[] {
-  const descriptor = findType(fullName);
-  const receiver = descriptor === null || descriptor.isGeneric ? null : resolveType(fullName);
+function conformanceMembers(owner: MemberOwner, mayName: SymbolFilter | null = null): ConformanceMembers[] {
+  const receiver = owner.kind === "objcClass" || owner.descriptor.isGeneric ? null : resolveType(owner.fullName);
   if (receiver === null) {
     return [];
   }
   const conformances: { table: WitnessTable; protocol: ContextDescriptor }[] = [];
   const seen = new Set<string>();
-  for (const className of classChainNames(fullName)) {
-    if (isImportedObjCClass(className)) {
+  for (const level of classChain(owner)) {
+    if (level.kind === "objcClass") {
       continue;
     }
-    for (const conformance of conformancesOf(findType(className)!.handle)) {
+    for (const conformance of conformancesOf(level.descriptor.handle)) {
       const { protocol } = conformance;
       const key = protocol.handle.toString();
       if (seen.has(key)) {
@@ -3189,7 +3191,7 @@ function isAnyClass(type: Metadata): boolean {
 
 // swift_getTypeName names a pure ObjC class without its __C module.
 function selfOrSuperclassNamed(type: ClassMetadata, name: string): Metadata | null {
-  const printed = name.startsWith("__C.") ? name.slice("__C.".length) : name;
+  const printed = name.startsWith(OBJC_MODULE_PREFIX) ? name.slice(OBJC_MODULE_PREFIX.length) : name;
   for (let cls: ClassMetadata | null = type; cls !== null; cls = cls.superclass) {
     const metadata = new Metadata(cls.handle);
     if (typeName(metadata) === printed) {
@@ -3237,16 +3239,16 @@ function conformanceMethodOverloads(
 }
 
 function conformanceDeclaring(
-  fullName: string,
+  owner: MemberOwner,
   member: string,
   declares: (members: TypeMembers) => boolean
 ): ConformanceMembers | null {
-  const owners = conformanceMembers(fullName).filter((c) => declares(c.members));
-  if (owners.length > 1) {
-    const protocols = owners.map((c) => c.protocol.fullTypeName).join(", ");
-    throw new Error(`ambiguous ${member} on ${fullName}: declared by extensions of ${protocols}`);
+  const declaring = conformanceMembers(owner).filter((c) => declares(c.members));
+  if (declaring.length > 1) {
+    const protocols = declaring.map((c) => c.protocol.fullTypeName).join(", ");
+    throw new Error(`ambiguous ${member} on ${owner.fullName}: declared by extensions of ${protocols}`);
   }
-  return owners[0] ?? null;
+  return declaring[0] ?? null;
 }
 
 // Self is @in_guaranteed unless the callee's signature makes it class-bound, so a class reference needs a cell.
@@ -3269,7 +3271,7 @@ export function bindConformanceMethod(
     throw noMethodError(fullName, name);
   }
   const conformance = conformanceDeclaring(
-    fullName,
+    resolveMemberOwner(fullName),
     name,
     (m) => conformanceMethodOverloads(m, name, options).length > 0
   );
@@ -3281,12 +3283,12 @@ export function bindConformanceMethod(
   return bindResolved(resolved, receiver);
 }
 
-function conformanceGetProperty(fullName: string, self: NativePointer, member: string, isStatic = false): CallResult {
-  const conformance = conformanceDeclaring(fullName, member, (m) =>
+function conformanceGetProperty(owner: MemberOwner, self: NativePointer, member: string, isStatic = false): CallResult {
+  const conformance = conformanceDeclaring(owner, member, (m) =>
     m.accessors.some((a) => a.member === member && a.kind === "getter" && a.isStatic === isStatic)
   );
   if (conformance === null) {
-    throw new Error(`no ${isStatic ? "static " : ""}getter for ${member} on ${fullName}`);
+    throw new Error(`no ${isStatic ? "static " : ""}getter for ${member} on ${owner.fullName}`);
   }
   const accessor = resolveExtensionAccessor(conformance.table, member, "getter", isStatic);
   const receiver = isStatic ? self : witnessReceiver(conformance.table, accessor.classBound, self);
