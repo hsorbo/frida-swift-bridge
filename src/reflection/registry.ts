@@ -69,8 +69,15 @@ export function* typesNamedUnder(moduleName: string): Generator<ContextDescripto
   yield* typeDescriptors(`types:*!(extension in ${moduleName}):*`);
 }
 
-function* nestedTypes(parentName: string, name: string): Generator<ContextDescriptor> {
-  for (const query of [`types:*!${parentName}.${name}`, `types:*!(extension in *):${parentName}*.${name}`]) {
+// A type nested in the parent's own declaration lives in the parent's image; one an extension adds
+// is spelled `(extension in M):Parent<A>.Name` by the resolver and can live in any image.
+function* nestedTypes(parent: ContextDescriptor, name: string): Generator<ContextDescriptor> {
+  const parentName = parent.fullTypeName;
+  const image = Process.findModuleByAddress(parent.handle);
+  if (parentName === null || image === null) {
+    return;
+  }
+  for (const query of [`types:${image.path}!${parentName}.${name}`, `types:*!(extension in *):${parentName}*.${name}`]) {
     for (const descriptor of typeDescriptors(query)) {
       const simple = descriptor.name;
       if (simple !== null && descriptor.fullTypeName === `${parentName}.${simple}`) {
@@ -80,18 +87,17 @@ function* nestedTypes(parentName: string, name: string): Generator<ContextDescri
   }
 }
 
-export function nestedTypeNamesOf(parentName: string): string[] {
-  return [...nestedTypes(withoutTypeArguments(parentName), "*")].map((descriptor) => descriptor.name!);
+export function nestedTypeNamesOf(parent: ContextDescriptor): string[] {
+  return [...nestedTypes(parent, "*")].map((descriptor) => descriptor.name!);
 }
 
-export function findNestedType(parentName: string, name: string): ContextDescriptor | null {
-  parentName = withoutTypeArguments(parentName);
-  const fullName = `${parentName}.${name}`;
+export function findNestedType(parent: ContextDescriptor, name: string): ContextDescriptor | null {
+  const fullName = `${parent.fullTypeName}.${name}`;
   const hit = resolved.get(fullName);
   if (hit !== undefined) {
     return hit;
   }
-  for (const descriptor of nestedTypes(parentName, name)) {
+  for (const descriptor of nestedTypes(parent, name)) {
     resolved.set(fullName, descriptor);
     return descriptor;
   }

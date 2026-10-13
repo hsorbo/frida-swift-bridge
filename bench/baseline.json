@@ -30,8 +30,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 70,
-          "median": 71
+          "min": 73,
+          "median": 78
         }
       },
       "lookup › class init": {
@@ -46,8 +46,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 252,
-          "median": 276
+          "min": 265,
+          "median": 278
         }
       },
       "lookup › object method call": {
@@ -62,8 +62,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 197,
-          "median": 210
+          "min": 219,
+          "median": 233
         }
       },
       "lookup › Swift.Interceptor attach and detach on a facade method": {
@@ -78,8 +78,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 159,
-          "median": 166
+          "min": 180,
+          "median": 185
         }
       },
       "lookup › Swift.demangle of an exported symbol": {
@@ -103,15 +103,15 @@
           "symbolTables": 0,
           "exportTables": 0,
           "resolverQueries": 1,
-          "moduleLists": 2,
+          "moduleLists": 1,
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 2874,
-          "median": 2923
+          "min": 899,
+          "median": 937
         }
       },
       "listing › instanceMethods on a struct": {
@@ -126,8 +126,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 735,
-          "median": 739
+          "min": 802,
+          "median": 876
         }
       },
       "listing › instanceMethods on Swift.Int, shallow": {
@@ -137,13 +137,13 @@
           "resolverQueries": 1,
           "moduleLists": 1,
           "pointerScans": 0,
-          "conformsToProtocol": 82,
+          "conformsToProtocol": 12,
           "demangle": 0,
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 3115,
-          "median": 3134
+          "min": 3156,
+          "median": 3379
         }
       },
       "listing › instanceMethods on Swift.Int, deep": {
@@ -153,13 +153,13 @@
           "resolverQueries": 2,
           "moduleLists": 4,
           "pointerScans": 0,
-          "conformsToProtocol": 206,
+          "conformsToProtocol": 66,
           "demangle": 0,
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 41977,
-          "median": 42013
+          "min": 40772,
+          "median": 41268
         }
       },
       "listing › properties on a class": {
@@ -167,15 +167,15 @@
           "symbolTables": 0,
           "exportTables": 0,
           "resolverQueries": 0,
-          "moduleLists": 1,
+          "moduleLists": 0,
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 2062,
-          "median": 2082
+          "min": 15,
+          "median": 18
         }
       },
       "listing › Object.keys on a type facade": {
@@ -190,8 +190,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 1031,
-          "median": 1059
+          "min": 726,
+          "median": 754
         }
       },
       "listing › Object.keys on an object facade": {
@@ -207,7 +207,7 @@
         },
         "wallUs": {
           "min": 14,
-          "median": 14
+          "median": 15
         }
       },
       "scan › Swift.choose over a class with live instances": {
@@ -222,8 +222,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 177727,
-          "median": 180330
+          "min": 228556,
+          "median": 230171
         }
       },
       "scan › specializations of a generic struct": {
@@ -238,7 +238,7 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 5,
+          "min": 4,
           "median": 5
         }
       },
@@ -254,8 +254,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 8774,
-          "median": 8989
+          "min": 7631,
+          "median": 8112
         }
       },
       "scan › enumerateTypes over one module": {
@@ -270,8 +270,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 934,
-          "median": 953
+          "min": 923,
+          "median": 990
         }
       },
       "scan › protocols of a type": {
@@ -286,8 +286,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 693,
-          "median": 703
+          "min": 691,
+          "median": 702
         }
       },
       "first Swift.type lookup in a fresh process": {
@@ -302,24 +302,24 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 7568,
-          "median": 7568
+          "min": 6857,
+          "median": 6857
         }
       },
       "first instanceMethods on a stripped class in a fresh process": {
         "counters": {
           "symbolTables": 1,
           "exportTables": 0,
-          "resolverQueries": 3,
-          "moduleLists": 4,
+          "resolverQueries": 2,
+          "moduleLists": 2,
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 6,
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 12996,
-          "median": 12996
+          "min": 9454,
+          "median": 9454
         }
       },
       "first instanceMethods on Swift.Int in a fresh process": {
@@ -329,13 +329,13 @@
           "resolverQueries": 2,
           "moduleLists": 2,
           "pointerScans": 0,
-          "conformsToProtocol": 57,
-          "demangle": 192,
+          "conformsToProtocol": 10,
+          "demangle": 139,
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 134534,
-          "median": 134534
+          "min": 132893,
+          "median": 132893
         }
       },
       "scan › Swift.choose over a base class with a static subclass": {
@@ -350,8 +350,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 179955,
-          "median": 181248
+          "min": 227447,
+          "median": 229843
         }
       },
       "scan › Swift.choose over a generic class named without arguments": {
@@ -366,8 +366,8 @@
           "typeByMangledName": 0
         },
         "wallUs": {
-          "min": 179182,
-          "median": 182415
+          "min": 230319,
+          "median": 232409
         }
       }
     }

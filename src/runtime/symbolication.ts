@@ -1,4 +1,4 @@
-import { demangle } from "./demangle.js";
+import { demangle, isSwiftSymbol } from "./demangle.js";
 import { findType } from "../reflection/registry.js";
 import { findProtocol } from "../abi/protocol-conformance.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
@@ -84,6 +84,17 @@ export function symbolicate(address: NativePointer): SwiftSymbol | null {
     return null;
   }
   return { address, name, demangled };
+}
+
+export function hasSwiftSymbolAt(address: NativePointer): boolean {
+  address = address.strip();
+  const module = Process.findModuleByAddress(address);
+  if (module === null) {
+    return false;
+  }
+  const key = address.toString();
+  const name = exportedFunctionNames(module).get(key) ?? symbolNames(module).get(key);
+  return name !== undefined && isSwiftSymbol(name);
 }
 
 export function resolveFunctionSignature(

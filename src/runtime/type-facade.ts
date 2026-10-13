@@ -486,7 +486,7 @@ function typeFacadeState(target: SwiftTypeFacade): TypeFacadeState {
         }
         return nestedType(t, key) ?? undefined;
       },
-      ownKeys: (t, own) => [...new Set([...own.methods, ...own.properties, ...enumCases(t).keys(), ...nestedTypeNamesOf(t.$type.name)])],
+      ownKeys: (t, own) => [...new Set([...own.methods, ...own.properties, ...enumCases(t).keys(), ...nestedTypeNamesOf(descriptorOf(t.$type))])],
       owner: () => target.$type.name,
       propertyNoun: "static property",
     };
@@ -509,7 +509,7 @@ function enumCases(target: SwiftTypeFacade): Map<string, boolean> {
 }
 
 function nestedType(target: SwiftTypeFacade, key: string): SwiftTypeFacade | null {
-  const descriptor = findNestedType(target.$type.name, key);
+  const descriptor = findNestedType(descriptorOf(target.$type), key);
   return descriptor === null ? null : typeFromDescriptor(descriptor).facade;
 }
 

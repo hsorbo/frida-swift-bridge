@@ -17,12 +17,15 @@ const PROTOCOL_RECORD_INT_MASK = 0x2;
 
 const OFFSETOF_CONF_PROTOCOL = 0x0;
 const OFFSETOF_CONF_TYPE_REF = 0x4;
+const OFFSETOF_CONF_WITNESS_TABLE_PATTERN = 0x8;
 const OFFSETOF_CONF_FLAGS = 0xc;
 const OFFSETOF_CONF_TRAILING_OBJECTS = 0x10;
 
 const CONFORMANCE_FLAG_IS_RETROACTIVE = 0x40;
+const CONFORMANCE_FLAG_IS_SYNTHESIZED_NON_UNIQUE = 0x80;
 const CONFORMANCE_NUM_CONDITIONAL_REQUIREMENTS_SHIFT = 8;
 const CONFORMANCE_NUM_CONDITIONAL_REQUIREMENTS_MASK = 0xff;
+const CONFORMANCE_FLAG_HAS_GENERIC_WITNESS_TABLE = 0x20000;
 
 const enum TypeReferenceKind {
   DirectTypeDescriptor = 0,
@@ -58,8 +61,20 @@ export class ProtocolConformance {
     }
   }
 
+  get witnessTablePattern(): NativePointer | null {
+    return RelativeDirectPointer.resolve(this.handle.add(OFFSETOF_CONF_WITNESS_TABLE_PATTERN));
+  }
+
   get isRetroactive(): boolean {
     return (this.flags & CONFORMANCE_FLAG_IS_RETROACTIVE) !== 0;
+  }
+
+  get isSynthesizedNonUnique(): boolean {
+    return (this.flags & CONFORMANCE_FLAG_IS_SYNTHESIZED_NON_UNIQUE) !== 0;
+  }
+
+  get hasGenericWitnessTable(): boolean {
+    return (this.flags & CONFORMANCE_FLAG_HAS_GENERIC_WITNESS_TABLE) !== 0;
   }
 
   get numConditionalRequirements(): number {
@@ -191,7 +206,13 @@ function distinct(descriptors: Iterable<ContextDescriptor>): ContextDescriptor[]
   return result;
 }
 
-export function conformingProtocols(typeDescriptor: NativePointer): ContextDescriptor[] {
+export interface Conformance {
+  protocol: ContextDescriptor;
+  record: ProtocolConformance;
+}
+
+// The type's conformances, one per protocol.
+export function conformancesOf(typeDescriptor: NativePointer): Conformance[] {
   const descriptor = new ContextDescriptor(typeDescriptor);
   const name = descriptor.fullTypeName;
   if (name === null) {
@@ -200,14 +221,34 @@ export function conformingProtocols(typeDescriptor: NativePointer): ContextDescr
   // The resolver spells a type declared in another module's extension as the demangler does,
   // `(extension in M):Outer<A>.Name`, so such a type is matched by its last component instead.
   const query = declaredInExtension(descriptor) ? `conformances:*.${descriptor.name}!*` : `conformances:${name}!*`;
-  const protocols: ContextDescriptor[] = [];
-  for (const conformance of conformancesMatching(query)) {
-    const protocol = conformance.protocol;
-    if (protocol !== null && conformance.typeDescriptor?.equals(typeDescriptor)) {
-      protocols.push(protocol);
+  const seen = new Set<string>();
+  const conformances: Conformance[] = [];
+  for (const record of conformancesMatching(query)) {
+    const protocol = record.protocol;
+    if (protocol === null || !record.typeDescriptor?.equals(typeDescriptor)) {
+      continue;
+    }
+    const key = protocol.handle.toString();
+    if (!seen.has(key)) {
+      seen.add(key);
+      conformances.push({ protocol, record });
     }
   }
-  return distinct(protocols);
+  return conformances;
+}
+
+export function conformingProtocols(typeDescriptor: NativePointer): ContextDescriptor[] {
+  return conformancesOf(typeDescriptor).map((c) => c.protocol);
+}
+
+// The runtime answers with the conformance's own pattern unless the table has to be instantiated
+// for the type or uniqued across the images that each synthesized a copy (swift_getWitnessTable).
+export function witnessTableOf(conformance: Conformance, type: Metadata): NativePointer | null {
+  const { protocol, record } = conformance;
+  if (record.hasGenericWitnessTable || record.isSynthesizedNonUnique) {
+    return conformsToProtocol(type, protocol);
+  }
+  return record.witnessTablePattern;
 }
 
 function declaredInExtension(descriptor: ContextDescriptor): boolean {

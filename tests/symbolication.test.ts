@@ -1,12 +1,13 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
-import { requireDarwin, requireSymbolTable } from "./swift.js";
+import { loadSwiftCore, requireDarwin, requireSymbolTable } from "./swift.js";
 
 import { Swift } from "../src/index.js";
 import {
   parseSwiftSignature,
   parseTypeExpr,
   symbolicate,
+  hasSwiftSymbolAt,
   resolveFunctionSignature,
   resolveType,
   resolveTypeExpr,
@@ -182,6 +183,14 @@ describe("symbolicate", () => {
 
   test("returns null for an address with no owning module", () => {
     expect(symbolicate(ptr(1))).toBeNull();
+  });
+
+  test("hasSwiftSymbolAt is true only where a Swift symbol starts", () => {
+    const { address } = fixtureSymbol("fixture.addInts");
+    expect(hasSwiftSymbolAt(address)).toBe(true);
+    expect(hasSwiftSymbolAt(address.add(4))).toBe(false);
+    expect(hasSwiftSymbolAt(loadSwiftCore().getExportByName("swift_demangle"))).toBe(false);
+    expect(hasSwiftSymbolAt(ptr(1))).toBe(false);
   });
 });
 

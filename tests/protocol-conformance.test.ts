@@ -10,6 +10,8 @@ import {
   enumerateProtocolConformances,
   findProtocol,
   conformsToProtocol,
+  conformancesOf,
+  witnessTableOf,
 } from "../src/abi/protocol-conformance.js";
 
 import { metadataFor } from "../src/abi.js";
@@ -50,6 +52,24 @@ describe("protocol conformances", () => {
     const sequence = findProtocol("Swift.Sequence");
     expect(sequence).not.toBeNull();
     expect(conformsToProtocol(metadataFor("Swift.Int")!, sequence!)).toBeNull();
+  });
+
+  test("an unconditional conformance's table is the pattern its record carries", () => {
+    loadFixture();
+    const politeGreeter = metadataFor("fixture.PoliteGreeter")!;
+    const conformance = conformancesOf(findType("fixture.PoliteGreeter")!.handle).find((c) => c.protocol.fullTypeName === "fixture.Greeter")!;
+    expect(conformance.record.hasGenericWitnessTable).toBe(false);
+    expect(witnessTableOf(conformance, politeGreeter)!.equals(conformance.record.witnessTablePattern!)).toBe(true);
+    expect(witnessTableOf(conformance, politeGreeter)!.equals(conformsToProtocol(politeGreeter, conformance.protocol)!)).toBe(true);
+  });
+
+  test("a conditional conformance's table is the runtime's instantiation for the type", () => {
+    loadFixture();
+    const conformance = conformancesOf(findType("fixture.Pair")!.handle).find((c) => c.protocol.fullTypeName === "fixture.Greeter")!;
+    expect(conformance.record.hasGenericWitnessTable).toBe(true);
+    const pairOfGreeters = metadataFor("fixture.Pair", [metadataFor("fixture.PoliteGreeter")!])!;
+    expect(witnessTableOf(conformance, pairOfGreeters)!.equals(conformsToProtocol(pairOfGreeters, conformance.protocol)!)).toBe(true);
+    expect(witnessTableOf(conformance, metadataFor("fixture.Pair", [metadataFor("Swift.Int")!])!)).toBeNull();
   });
 
   test("instantiates a constrained generic with a witness-table key argument", () => {

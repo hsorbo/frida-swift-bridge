@@ -2,13 +2,13 @@ import { Metadata, MetadataKind, getMetadata } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
 import { isActor, isDefaultActor, MethodDescriptorKind, readVTable } from "../abi/class-descriptor.js";
-import { conformingProtocols, conformsToProtocol } from "../abi/protocol-conformance.js";
+import { conformancesOf, witnessTableOf } from "../abi/protocol-conformance.js";
 import { ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
-import { parseSwiftSignature, symbolicate, resolveParsedType, resolveTypeExpr, resolveType, ParamConvention } from "./symbolication.js";
+import { parseSwiftSignature, symbolicate, hasSwiftSymbolAt, resolveParsedType, resolveTypeExpr, resolveType, ParamConvention } from "./symbolication.js";
 import { specializedMetadataOf } from "./choose.js";
 import {
   SwiftBoundMethod,
@@ -296,20 +296,20 @@ export abstract class NominalType extends SwiftType {
     const descriptor = descriptorOf(this);
     const ownImage = imageName(descriptor.handle);
     const slots: UnnamedSlot[] = [];
-    for (const protocol of conformingProtocols(descriptor.handle)) {
-      const name = protocol.fullTypeName;
-      const table = name === null ? null : conformsToProtocol(metadata, protocol);
+    for (const conformance of conformancesOf(descriptor.handle)) {
+      const name = conformance.protocol.fullTypeName;
+      const table = name === null ? null : witnessTableOf(conformance, metadata);
       if (table === null) {
         continue;
       }
-      for (const requirement of readProtocolRequirements(protocol)) {
+      for (const requirement of readProtocolRequirements(conformance.protocol)) {
         if (requirement.kind !== ProtocolRequirementKind.Method) {
           continue;
         }
         const witness = table.add(requirement.witnessIndex * Process.pointerSize).readPointer().strip();
         const address = requirement.isAsync ? new AsyncFunctionPointer(witness).code : witness;
         const module = imageName(address);
-        if ((!deep && module !== ownImage) || symbolicate(address) !== null) {
+        if ((!deep && module !== ownImage) || hasSwiftSymbolAt(address)) {
           continue;
         }
         slots.push({

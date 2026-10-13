@@ -73,8 +73,9 @@ import { PrefixedExport, moduleKey, swiftExportsOfTokens, hasSwiftSymbolWithPref
 import {
   findProtocol,
   conformsToProtocol,
-  conformingProtocols,
+  conformancesOf,
   conformingTypes,
+  witnessTableOf,
   ProtocolConformance,
 } from "../abi/protocol-conformance.js";
 import {
@@ -721,10 +722,18 @@ function importedObjCClassChain(fullName: string): string[] {
   return names.length === 0 ? [fullName] : names;
 }
 
+// A Swift class with no declared superclass is rooted in the runtime's SwiftObject, which no Swift
+// extension can name.
+const SWIFT_OBJC_ROOT_CLASS = "_TtCs12_SwiftObject";
+
 function objcClassChainNames(cls: NativePointer | null): string[] {
   const names: string[] = [];
   for (; cls !== null; cls = objcSuperclass(cls)) {
-    names.push(`${OBJC_MODULE_PREFIX}${objcClassName(cls)}`);
+    const name = objcClassName(cls);
+    if (name === SWIFT_OBJC_ROOT_CLASS) {
+      break;
+    }
+    names.push(`${OBJC_MODULE_PREFIX}${name}`);
   }
   return names;
 }
@@ -2976,13 +2985,14 @@ function conformanceMembers(fullName: string, mayName: SymbolFilter | null = nul
     if (isImportedObjCClass(className)) {
       continue;
     }
-    for (const protocol of conformingProtocols(findType(className)!.handle)) {
+    for (const conformance of conformancesOf(findType(className)!.handle)) {
+      const { protocol } = conformance;
       const key = protocol.handle.toString();
       if (seen.has(key)) {
         continue;
       }
       seen.add(key);
-      const table = conformsToProtocol(receiver, protocol);
+      const table = witnessTableOf(conformance, receiver);
       if (table !== null) {
         conformances.push({ table: new WitnessTable(table, receiver), protocol });
       }
