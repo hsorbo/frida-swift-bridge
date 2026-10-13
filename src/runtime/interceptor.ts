@@ -624,15 +624,9 @@ function returnIsIndirect(ret: TypePlan | null): boolean {
 
 const ARCH = Process.arch;
 
-const FP_HOOK_UNSUPPORTED =
-  "hooking floating-point register arguments/returns is unsupported on x86-64 (no XMM in the CPU context)";
-
 // gum surfaces each x86-64 xmm register as a 16-byte ArrayBuffer; the low lane holds the swiftcc scalar.
 function readXmm(context: CpuContext, n: number, cls: "double" | "float"): number {
-  const buf = (context as unknown as Record<string, ArrayBuffer | undefined>)[`xmm${n}`];
-  if (buf === undefined) {
-    throw new Error(FP_HOOK_UNSUPPORTED);
-  }
+  const buf = (context as unknown as Record<string, ArrayBuffer>)[`xmm${n}`];
   return cls === "double" ? new Float64Array(buf)[0] : new Float32Array(buf)[0];
 }
 

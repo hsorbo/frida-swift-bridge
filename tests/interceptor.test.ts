@@ -4,7 +4,7 @@ import { fixtureExport, existentialMetadata, loadFixture, loadFixtureSyms } from
 import { Swift, type SwiftValue, type SwiftObject, type CallResult } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { SwiftInterceptor, type SwiftInvocationContext } from "../src/runtime/interceptor.js";
-import { requireFpRegisterHooks, requireSymbolTable, requireTrailingSelfInRegisters } from "./swift.js";
+import { requireSymbolTable, requireTrailingSelfInRegisters } from "./swift.js";
 
 import { metadataFor, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
 
@@ -398,8 +398,7 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toEqual(int64(42));
   });
 
-  test("decodes a Double argument and return from the FP registers", (ctx) => {
-    requireFpRegisterHooks(ctx);
+  test("decodes a Double argument and return from the FP registers", () => {
     const Double_ = metadataFor("Swift.Double")!;
     const addr = fixtureExport("fixture.scaleDouble");
     let seenArgs: SwiftValue[] | null = null;
@@ -420,8 +419,7 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toBe(42);
   });
 
-  test("decodes a mixed Double/Int struct from the FP and GP registers", (ctx) => {
-    requireFpRegisterHooks(ctx);
+  test("decodes a mixed Double/Int struct from the FP and GP registers", () => {
     const Int = metadataFor("Swift.Int")!;
     const addr = fixtureExport("fixture.scaleMixedPair(");
     let seenArgs: SwiftValue[] | null = null;
@@ -467,8 +465,7 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toEqual(int64(25));
   });
 
-  test("reads FP arguments spilled past the registers from the caller's stack", (ctx) => {
-    requireFpRegisterHooks(ctx);
+  test("reads FP arguments spilled past the registers from the caller's stack", () => {
     const Double_ = metadataFor("Swift.Double")!;
     const addr = fixtureExport("fixture.spillDoubles");
     let seenArgs: SwiftValue[] | null = null;
@@ -524,8 +521,7 @@ describe("SwiftInterceptor.attach", () => {
     expect(seenRet).toEqual(int64(40));
   });
 
-  test("decodes a single-case enum argument as its payload", (ctx) => {
-    requireFpRegisterHooks(ctx);
+  test("decodes a single-case enum argument as its payload", () => {
     const Int = metadataFor("Swift.Int")!;
     const addr = fixtureExport("fixture.spillWrapped(");
     let seenArgs: SwiftValue[] | null = null;

@@ -21,26 +21,6 @@ export function requireLinux(ctx: { skip: (reason?: string) => never }): void {
   }
 }
 
-// arm64 always exposes v-registers; x86-64 surfaces xmm on the CpuContext only in Frida > 17.15.5.
-export function requireFpRegisterHooks(ctx: { skip: (reason?: string) => never }): void {
-  if (Process.arch !== "arm64" && Process.arch !== "x64") {
-    ctx.skip(`FP register hooks need arm64 or x86-64, got ${Process.arch}`);
-  }
-  if (Process.arch === "x64" && !fridaVersionIsNewerThan(17, 15, 5)) {
-    ctx.skip(`x86-64 xmm hooks need Frida > 17.15.5, got ${Frida.version}`);
-  }
-}
-
-function fridaVersionIsNewerThan(major: number, minor: number, patch: number): boolean {
-  const [a = 0, b = 0, c = 0] = Frida.version
-    .split("-")[0]
-    .split(".")
-    .map(Number);
-  if (a !== major) return a > major;
-  if (b !== minor) return b > minor;
-  return c > patch;
-}
-
 export function requireSwiftHost(): void {
   const ok =
     (Process.arch === "arm64" || Process.arch === "x64") &&

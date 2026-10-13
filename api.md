@@ -1476,9 +1476,7 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
   with an element of generic, opaque layout is refused.
 - **Methods of generic types in `Swift.function`.** `Swift.function` plans a
   symbol's own generic parameters, not those of its enclosing type.
-- **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan,
-  and on x86-64 any floating-point argument or result when Frida's CPU context
-  does not carry the XMM registers.
+- **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan.
 - **`FixedArray` and `Borrow` metadata.** The metadata kinds behind
   `InlineArray` and borrowed values have no reflection wrapper and throw
   `unsupported metadata kind`.
