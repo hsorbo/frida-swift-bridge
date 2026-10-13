@@ -10,6 +10,7 @@ const MAKE_LIMITER = "$s7fixture11makeLimiteryS2iKcSiF";
 const MAKE_SCALER = "$s7fixture10makeScaleryxxcxSjRzlF";
 const MAKE_CONSTANT_SEVEN = "$s7fixture17makeConstantSevenSiycyF";
 const MAKE_CURRIED_SUM = "$s7fixture14makeCurriedSumyS2icSicSiF";
+const INVOKE_MAPPING = "$s7fixture13invokeMappingyS2i_S2iXEtF";
 
 describe("closure results", () => {
   let module: Module;
@@ -39,6 +40,14 @@ describe("closure results", () => {
     expect(triple(5)).toEqual(int64(15));
     const halve = Swift.function(module, MAKE_SCALER, { typeArguments: [Double] }).call(0.5) as SwiftClosureValue;
     expect(halve(7)).toBe(3.5);
+  });
+
+  test("a returned closure is passed back where a function-typed parameter is expected", async () => {
+    const add2 = Swift.function(module, MAKE_ADDER).call(2) as SwiftClosureValue;
+    expect(Swift.function(module, INVOKE_MAPPING).call(40, add2)).toEqual(int64(42));
+    const calc = Swift.class("fixture.AsyncCalc")!.init(100)!;
+    expect(await calc.mapAsync(7, add2)).toEqual(int64(109));
+    expect(add2(1)).toEqual(int64(3));
   });
 
   test("a closure returning a closure is called in turn", () => {

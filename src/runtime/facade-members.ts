@@ -11,7 +11,7 @@ import {
   memberKindsInOtherModules,
   withHookTarget,
 } from "./method.js";
-import { ClosureSpec } from "./closure.js";
+import { ClosureSpec, isSwiftClosureValue } from "./closure.js";
 
 // A synthesized `then` would make a facade thenable and silently break `await`; never a member.
 export const POISON = new Set(["then", "catch", "finally"]);
@@ -46,7 +46,7 @@ export function splitSubscriptArgs(args: unknown[]): { indices: CallArg[]; selec
 
 export function invokeOptions(args: CallArg[]): ValueMethodResolveOptions {
   const options: ValueMethodResolveOptions = { arity: args.length };
-  if (args.some((a) => a instanceof ClosureSpec)) {
+  if (args.some((a) => a instanceof ClosureSpec || isSwiftClosureValue(a))) {
     options.typeArguments = []; // generic path; planGenericMethod infers the closure-result R
   }
   return options;

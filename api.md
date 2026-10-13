@@ -1091,8 +1091,9 @@ next.$dispose();                        // releases the closure's context
 
 `function` and `context` are its two words. A closure returned from a generic
 function takes and returns its type parameters by address, as Swift's own
-callers of it do. A `SwiftClosureValue` is not accepted where a Swift API expects
-a closure argument; that still takes `Swift.closure`.
+callers of it do. A `SwiftClosureValue` is also accepted where a Swift API takes a
+function-typed parameter: its two words are passed as they are, so a closure one
+call returned can be handed to the next.
 
 > Closure synthesis is platform-specific — it requires an arm64 or x86-64 Swift
 > host. On other architectures `Swift.closure` is unavailable.

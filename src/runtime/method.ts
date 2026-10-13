@@ -51,7 +51,7 @@ import {
 import { probeSelfOwnership, RegisterRange } from "./value-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClass, SerialExecutorRef } from "./async-call.js";
-import { SwiftClosure, ClosureSpec, ClosureBody, LoadableClosureBody, SwiftThrow } from "./closure.js";
+import { SwiftClosure, ClosureSpec, ClosureBody, ClosureWords, LoadableClosureBody, SwiftThrow, closureValueWords, isSwiftClosureValue } from "./closure.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName } from "./objc.js";
@@ -114,7 +114,7 @@ export function isSwiftObject(value: CallResult): value is SwiftObject {
 }
 
 // A SwiftField ($field view) is a borrowed ValueInstance at runtime, which marshalArg accepts.
-export type CallArg = SwiftValue | SwiftObject | SwiftField | ClosureSpec;
+export type CallArg = SwiftValue | SwiftObject | SwiftField | ClosureSpec | SwiftClosureValue;
 
 // Resolution order is own, then extension in another module, then protocol extension.
 export type MemberOrigin =
@@ -2560,7 +2560,7 @@ export interface CallPlan {
 
 interface PlannedArgs {
   ptrs: NativePointer[];
-  closures: (SwiftClosure | null)[]; // referenced through the call: Swift invokes them in-flight
+  closures: (ClosureWords | null)[]; // referenced through the call: Swift invokes them in-flight
   destroyBorrowedTemps(): void;
 }
 
@@ -2596,9 +2596,12 @@ function decodeArgs(raw: NativeCallbackArgumentValue[], params: LoadableScalar[]
   return raw.map((value, i) => (params[i].decode ? params[i].decode!(value) : value));
 }
 
-function marshalClosure(plan: { discriminator: number; shape: ClosureShape }, arg: CallArg): SwiftClosure {
+function marshalClosure(plan: { discriminator: number; shape: ClosureShape }, arg: CallArg): ClosureWords {
+  if (isSwiftClosureValue(arg)) {
+    return closureValueWords(arg, plan.discriminator);
+  }
   if (!(arg instanceof ClosureSpec)) {
-    throw new Error("expected a Swift.closure() argument for a function-typed parameter");
+    throw new Error("expected a Swift.closure() or a returned closure for a function-typed parameter");
   }
   const shape = plan.shape;
   if (shape.mode === "loadable") {

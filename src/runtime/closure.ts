@@ -1,4 +1,5 @@
 import { getSwiftCoreApi } from "./api.js";
+import type { SwiftClosureValue } from "./method.js";
 import { markScriptOwnedErrorBox } from "./thrown-error.js";
 import { ARM64E_ABI } from "../basic/pac.js";
 import { GP_ARG_REGISTERS, SWIFTCC } from "./swiftcc.js";
@@ -46,6 +47,36 @@ export function closure(body: AnyClosureBody): ClosureSpec {
   return new ClosureSpec(body);
 }
 
+// The two words a function-typed parameter receives: a synthesized trampoline's, or a returned
+// closure's handed back.
+export interface ClosureWords {
+  readonly fnPointer: NativePointer;
+  readonly context: NativePointer;
+  value(): NativePointer;
+}
+
+export function isSwiftClosureValue(value: unknown): value is SwiftClosureValue {
+  return typeof value === "function" && "context" in value;
+}
+
+// Passed at +0: the facade stays referenced through the call, so its context outlives the
+// callee's use of it.
+export function closureValueWords(closure: SwiftClosureValue, discriminator: number): ClosureWords {
+  const fnPointer = signClosureFunction(closure.function, discriminator);
+  return { fnPointer, context: closure.context, value: () => closureWordsBuffer(fnPointer, closure.context) };
+}
+
+function signClosureFunction(code: NativePointer, discriminator: number): NativePointer {
+  return ARM64E_ABI ? code.strip().sign(CLOSURE_KEY, discriminator) : code;
+}
+
+function closureWordsBuffer(fnPointer: NativePointer, context: NativePointer): NativePointer {
+  const buffer = Memory.alloc(Process.pointerSize * 2);
+  buffer.writePointer(fnPointer);
+  buffer.add(Process.pointerSize).writePointer(context);
+  return buffer;
+}
+
 interface ClosureResources {
   callback: AnyNativeCallback;
   code: NativePointer;
@@ -74,7 +105,7 @@ export class SwiftClosure {
   readonly context: NativePointer;
 
   private constructor(resources: ClosureResources, discriminator: number) {
-    this.fnPointer = ARM64E_ABI ? resources.code.strip().sign(CLOSURE_KEY, discriminator) : resources.code;
+    this.fnPointer = signClosureFunction(resources.code, discriminator);
     this.context = allocContext(resources);
     liveResources.add(resources);
     const release = getSwiftCoreApi().swift_release;
@@ -85,10 +116,7 @@ export class SwiftClosure {
   }
 
   value(): NativePointer {
-    const buffer = Memory.alloc(Process.pointerSize * 2);
-    buffer.writePointer(this.fnPointer);
-    buffer.add(Process.pointerSize).writePointer(this.context);
-    return buffer;
+    return closureWordsBuffer(this.fnPointer, this.context);
   }
 
   static overBytes(fn: ClosureBody, discriminator: number, options: { throws?: boolean; indirectResult?: boolean } = {}): SwiftClosure {
