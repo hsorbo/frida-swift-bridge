@@ -368,7 +368,7 @@ export type AccessorKind = "getter" | "setter";
 interface AccessorCandidate {
   address: NativePointer;
   member: string;
-  kind: AccessorKind | "modify";
+  kind: AccessorKind | "modify" | "read";
   type: TypeExpr;
   typeName: string;
   isStatic: boolean;
@@ -1165,7 +1165,7 @@ function parseMember(
     return null;
   }
   if (signature.kind === "function") {
-    if ((initsOnly && signature.name !== "init") || signature.accessor === "modify") {
+    if ((initsOnly && signature.name !== "init") || signature.accessor === "modify" || signature.accessor === "read") {
       return null;
     }
     const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);

@@ -7,11 +7,11 @@ export interface SwiftFunctionMatch {
   readonly address: NativePointer;
   readonly module: string;
   readonly name: string;
-  readonly kind: "function" | "getter" | "setter" | "modify";
+  readonly kind: "function" | "getter" | "setter" | "modify" | "read";
   readonly signature: SwiftMemberSignature;
 }
 
-// A getter or modify yields the property's type and a setter takes it, as the hook's callbacks see them.
+// A getter, modify or read yields the property's type and a setter takes it, as the hook's callbacks see them.
 function accessorSignature(accessor: SwiftAccessorSignature): SwiftMemberSignature {
   const isSetter = accessor.kind === "setter";
   return {

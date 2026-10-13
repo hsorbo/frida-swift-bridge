@@ -195,6 +195,28 @@ public func bumpTally() -> Int {
     return sharedTally.count
 }
 
+// Read accessors yield a borrowed value: a scalar, a two-word String, an address-only struct and a
+// four-word struct whose tail spills past the result registers.
+public struct Payload {
+    public var value: Any
+}
+
+public struct Reading {
+    var n: Int
+    var label: String
+    var box: Payload
+    var four: LoadableStruct
+    public var scalar: Int { _read { yield n } }
+    public var text: String { _read { yield label } }
+    public var payload: Payload { _read { yield box } }
+    public var block: LoadableStruct { _read { yield four } }
+}
+
+public func driveReading() -> Int {
+    let r = Reading(n: 5, label: "a string long enough to live on the heap", box: Payload(value: 7), four: LoadableStruct(a: 1, b: 2, c: 3, d: 4))
+    return r.scalar + r.text.utf8.count + (r.payload.value as! Int) + r.block.d
+}
+
 public struct Rect {
     public var width: Int
     public var scaled: Int {
@@ -2056,6 +2078,8 @@ public struct Grid {
         get { cells[i] }
         _modify { yield &cells[i] }
     }
+    public subscript(read i: Int) -> Int { _read { yield cells[i] } }
+    public subscript<T>(echo t: T) -> T { _read { yield t } }
 }
 public final class Board {
     public var cells: [String]
@@ -2069,5 +2093,5 @@ public func driveGrid() -> Int {
     var g = Grid(cells: [1, 2, 3, 4])
     g[1] = 9
     g[tracked: 2] += 1
-    return g[1] + g[row: 1, column: 0] + g[scaled: 3] + Grid[unit: 1]
+    return g[1] + g[row: 1, column: 0] + g[scaled: 3] + Grid[unit: 1] + g[read: 3] + g[echo: 5]
 }

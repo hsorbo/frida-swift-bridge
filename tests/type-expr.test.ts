@@ -178,5 +178,9 @@ describe("parseSwiftSignature", () => {
     expect(s.member).toBe("origin");
     expect(s.typeName).toBe("fixture.Point?");
     expect(s.type.kind).toBe("optional");
+    expect(parseSwiftSignature("fixture.Reading.text.read : Swift.String")!.kind).toBe("read");
+    const read = parseSwiftSignature("fixture.Grid.subscript.read : (read: Swift.Int) -> Swift.Int") as SwiftFunctionSignature;
+    expect(read.kind).toBe("function");
+    expect(read.accessor).toBe("read");
   });
 });

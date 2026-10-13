@@ -211,9 +211,9 @@ Frida's resolver, so only the hits are realized:
 `Swift.enumerateFunctions(filter?)` takes the same `Module` or glob, matched
 against the demangled name of every function and accessor that has a Swift
 symbol. Each match has an `address`, its `module`, the demangled `name`, a
-`kind` (`function`, `getter`, `setter` or `modify`) and the `signature` a
-member carries; a getter or modify yields the property's type and a setter
-takes it, as the hook's callbacks see them. A match goes straight into
+`kind` (`function`, `getter`, `setter`, `modify` or `read`) and the `signature`
+a member carries; a getter, modify or read yields the property's type and a
+setter takes it, as the hook's callbacks see them. A match goes straight into
 `Swift.Interceptor.attach`. Methods and free functions alike are listed;
 metadata accessors, deinitializers and thunks are not. With no module in the
 filter the query walks every loaded module's symbols, so scope it when you can:
@@ -843,9 +843,9 @@ Swift.type("MyApp.Grid").$subscript(1, { labels: ["unit"] });       // static su
 
 `$type.subscript(selector?, options?)` and `$type.typeSubscript(...)` find an
 accessor through reflection, the getter unless `{ accessor: "setter" }`, to
-describe or hook it; a `modify` accessor is hooked by its address like a
-property's. The hook sees the indices as arguments, a setter's stored element
-ahead of them, and the element as the getter's return or the modify's yield.
+describe or hook it; a `modify` or `read` accessor is hooked by its address like
+a property's. The hook sees the indices as arguments, a setter's stored element
+ahead of them, and the element as the getter's return or the coroutine's yield.
 
 For direct access to a stored field's storage, `$field(name)` returns a live
 borrowed view with `.read()`, `.write(value)`, and `.handle`. Reads and writes
@@ -1185,6 +1185,10 @@ Swift.Interceptor.attach(modify, {
     onLeave(retval) { console.log("after", retval); },      // 8, after `p.tracked += 3`
 });
 ```
+
+A `read` accessor is the borrowing coroutine: it lends the value itself, so
+`onLeave` fires at the yield, before the caller uses it, with the value as
+`retval`.
 
 A small value type's `self` goes by address when the method mutates it and in
 the argument registers otherwise, and the symbol doesn't say which. The bridge

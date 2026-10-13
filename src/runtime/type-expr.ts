@@ -87,10 +87,10 @@ export interface SwiftFunctionSignature {
   contextConstraints: string[];
 }
 
-export type SubscriptAccessor = "getter" | "setter" | "modify";
+export type SubscriptAccessor = "getter" | "setter" | "modify" | "read";
 
 export interface SwiftAccessorSignature {
-  kind: "getter" | "setter" | "modify";
+  kind: "getter" | "setter" | "modify" | "read";
   context: string;
   member: string;
   type: TypeExpr;
@@ -509,7 +509,7 @@ function parseEntityPath(parser: Parser): EntityPath {
 }
 
 function parseAccessor(s: string): ParsedSwiftSignature | null {
-  for (const kind of ["getter", "setter", "modify"] as const) {
+  for (const kind of ["getter", "setter", "modify", "read"] as const) {
     const marker = `.${kind} : `;
     const at = s.indexOf(marker);
     if (at === -1) {

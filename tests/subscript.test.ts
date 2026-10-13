@@ -52,7 +52,7 @@ describe("subscripts", () => {
     expect(Grid.$type.subscript({ labels: ["scaled"] }).isGeneric).toBe(true);
   });
 
-  test("hooks on a getter, a setter and a modify see the indices, the stored element and the yield", () => {
+  test("hooks on a getter, a setter, a modify and a read see the indices, the stored element and the yield", () => {
     const Grid = Swift.type("fixture.Grid") as SwiftStruct;
     const seen: { kind: string; args: SwiftValue[]; ret: CallResult }[] = [];
     const record = (kind: string) => ({
@@ -64,9 +64,11 @@ describe("subscripts", () => {
       SwiftInterceptor.attach(Grid.$type.subscript("subscript(_:)", { accessor: "setter" }), record("set")),
       SwiftInterceptor.attach(loadFixture().getExportByName("$s7fixture4GridV7trackedS2i_tciM"), record("modify")),
       SwiftInterceptor.attach(Grid.$type.typeSubscript({ labels: ["unit"] }), record("unit")),
+      SwiftInterceptor.attach(fixtureExport("fixture.Grid.subscript.read : (read: Swift.Int)"), record("read")),
+      SwiftInterceptor.attach(fixtureExport("fixture.Grid.subscript.read : <A>(echo: A)"), record("echo")),
     ];
     try {
-      expect(makeSwiftNativeFunction(fixtureExport("fixture.driveGrid"), metadataFor("Swift.Int")!, [])()!.readS64()).toEqual(int64(116));
+      expect(makeSwiftNativeFunction(fixtureExport("fixture.driveGrid"), metadataFor("Swift.Int")!, [])()!.readS64()).toEqual(int64(125));
     } finally {
       listeners.forEach((l) => l.detach());
     }
@@ -75,6 +77,8 @@ describe("subscripts", () => {
       { kind: "modify", args: [int64(2)], ret: int64(4) },
       { kind: "row:column", args: [int64(1), int64(0)], ret: int64(4) },
       { kind: "unit", args: [int64(1)], ret: int64(100) },
+      { kind: "read", args: [int64(3)], ret: int64(4) },
+      { kind: "echo", args: [int64(5)], ret: int64(5) },
     ]);
   });
 });

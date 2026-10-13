@@ -19,6 +19,7 @@ import {
   placeAsyncResultScalars,
   placeTypedErrorScalars,
   typedErrorReturnsDirectly,
+  registerCount,
   PlacedResultScalar,
 } from "./calling-convention.js";
 import { probeSelfOwnership, probeTypedErrorBuffer } from "./value-convention.js";
@@ -45,7 +46,7 @@ import type { SwiftMemberFunction } from "./qualified-function.js";
 import type { SwiftFunctionMatch } from "./function-listing.js";
 import type { FacadeCallable } from "./facade-members.js";
 import type { ParsedSwiftSignature } from "./symbolication.js";
-import { SWIFTCC, FP_ARG_REGISTERS, putSseScalarMove } from "./swiftcc.js";
+import { SWIFTCC, FP_ARG_REGISTERS, GP_RESULT_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
 export type SwiftInvocationContext = InvocationContext & { self?: CallResult; typeArguments?: string[] };
 
@@ -134,7 +135,7 @@ interface CallShape {
   generics: GenericEnvironment;
   throws: boolean;
   receiver: Receiver | null;
-  coroutine?: true;
+  coroutine?: "modify" | "read";
 }
 
 // Where a typed error lands: the result registers it shares with the result, or the buffer the
@@ -426,10 +427,11 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     if (parsed.genericParams.length > 0 && !parsed.simpleGenerics) {
       throw new Error(`unsupported generic signature: ${parsed.context}.${parsed.selector}`);
     }
-    // A subscript getter borrows self and a setter or modify mutates it; the setter takes the
-    // element it stores ahead of the indices and the modify yields it.
+    // A subscript getter or read borrows self and a setter or modify mutates it; the setter takes
+    // the element it stores ahead of the indices and a coroutine yields it.
     const accessor = parsed.accessor;
-    const accessorOwnership: SelfOwnership | undefined = accessor === undefined ? undefined : accessor === "getter" ? "borrowing" : "mutating";
+    const accessorOwnership: SelfOwnership | undefined =
+      accessor === undefined ? undefined : accessor === "getter" || accessor === "read" ? "borrowing" : "mutating";
     ownership ??= accessorOwnership;
     let generics = genericEnvironment(parsed, ownership);
     const gp = generics.params;
@@ -459,7 +461,7 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
       throws: parsed.throws,
       receiver,
     };
-    return accessor === "modify" ? { ...shape, coroutine: true } : shape;
+    return accessor === "modify" || accessor === "read" ? { ...shape, coroutine: accessor } : shape;
   }
 
   const memberType = resolveParsedType(parsed.type, () => null);
@@ -473,8 +475,10 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
       return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
     case "setter":
       return { args: [member], ret: null, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
+    case "read":
+      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing"), coroutine: "read" };
     default:
-      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: true };
+      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: "modify" };
   }
 }
 
@@ -980,8 +984,11 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
   const entry = hookEntry(hookable);
   const target = entry.address;
   const shape = callShape(entry, options.self);
-  if (shape.coroutine) {
+  if (shape.coroutine === "modify") {
     return attachModify(target, shape, callbacks);
+  }
+  if (shape.coroutine === "read") {
+    return attachRead(target, shape, callbacks);
   }
   const { args, ret, generics: environment, throws } = shape;
   const genericParams = environment.params;
@@ -1155,8 +1162,9 @@ function getResumeTrampoline(): NativePointer {
   return page;
 }
 
-interface ModifyInvocationState {
+interface CoroutineInvocationState {
   buffer?: NativePointer;
+  generics?: Metadata[];
   selfAddress?: NativePointer;
   selfMetadata?: Metadata;
 }
@@ -1174,7 +1182,7 @@ function attachModify(target: NativePointer, shape: CallShape, callbacks: SwiftI
 
   const onEnter = function (this: SwiftInvocationContext) {
     const context = this.context;
-    const state = this as unknown as ModifyInvocationState;
+    const state = this as unknown as CoroutineInvocationState;
     const { values, trailingSelf, selfMetadata } = materializeArgs(context, shape.args, shape.generics, 1, receiver);
     state.buffer = gpArg(context, 0);
     state.selfAddress = trailingSelf ?? selfRegister(context);
@@ -1193,7 +1201,7 @@ function attachModify(target: NativePointer, shape: CallShape, callbacks: SwiftI
     callbacks.onLeave !== undefined
       ? function (this: SwiftInvocationContext, continuation: InvocationReturnValue) {
           const context = this.context;
-          const state = this as unknown as ModifyInvocationState;
+          const state = this as unknown as CoroutineInvocationState;
           const buffer = state.buffer!;
           const key = buffer.toString();
           let slot = pendingResumes.get(key);
@@ -1231,6 +1239,102 @@ function attachModify(target: NativePointer, shape: CallShape, callbacks: SwiftI
       liveEntries.clear();
     },
   };
+}
+
+// A read accessor is modify's borrowing twin: the same ramp, but it lends the value rather than its
+// address, so the hook reads it as the ramp leaves and needs no trampoline. The ramp returns the
+// continuation in the first result register and the yield behind it: a formally indirect or
+// oversized value as a pointer, a loadable one's scalars as a direct result shifted by a register.
+function attachRead(target: NativePointer, shape: CallShape, callbacks: SwiftInvocationCallbacks): InvocationListener {
+  const receiver = knownReceiver(shape, true);
+  const ret = shape.ret!;
+  const genericParams = shape.generics.params;
+
+  const onEnter = function (this: SwiftInvocationContext) {
+    const context = this.context;
+    const state = this as unknown as CoroutineInvocationState;
+    const { values, generics, trailingSelf, selfMetadata } = materializeArgs(context, shape.args, shape.generics, 1, receiver);
+    state.generics = generics;
+    state.selfAddress = trailingSelf ?? selfRegister(context);
+    if (selfMetadata !== null) {
+      state.selfMetadata = selfMetadata;
+    }
+    exposeTypeArguments(this, generics);
+    if (receiver !== null) {
+      exposeSelf(this, receiver, state.selfAddress, selfMetadata);
+    }
+    if (callbacks.onEnter !== undefined) {
+      callbacks.onEnter.call(this, values());
+    }
+  };
+
+  const onLeave =
+    callbacks.onLeave !== undefined
+      ? function (this: SwiftInvocationContext) {
+          const context = this.context;
+          const state = this as unknown as CoroutineInvocationState;
+          const generics = state.generics!;
+          exposeTypeArguments(this, generics);
+          if (receiver !== null) {
+            exposeSelf(this, receiver, state.selfAddress!, state.selfMetadata ?? null);
+          }
+          callbacks.onLeave!.call(this, materializeYield(context, ret, generics, genericParams));
+        }
+      : undefined;
+
+  return Interceptor.attach(rampTarget(target), { onEnter, onLeave });
+}
+
+function materializeYield(context: CpuContext, ret: TypePlan, generics: Metadata[], genericParams: string[]): CallResult {
+  if (ret.kind === "metatype") {
+    return decodeMetatype(gpResult(context, 1));
+  }
+  if (ret.kind === "closure") {
+    return decodeClosure(gpResult(context, 1), gpResult(context, 2));
+  }
+  const metadata = planMetadata(ret, generics, genericParams);
+  if (metadata.kind === MetadataKind.Class) {
+    return asSwiftObject(new ClassInstance(gpResult(context, 1)));
+  }
+  if (isIndirectPlan(ret) || shouldPassIndirectly(metadata)) {
+    return decodeBorrowedValue(metadata, gpResult(context, 1));
+  }
+  const scratch = Memory.alloc(Math.max(words(metadata), 1) * 8);
+  const scalars = loweredScalars(metadata);
+  const direct = directYieldScalars(scalars);
+  placeResultScalars(metadata).slice(0, direct).forEach(({ scalar, location }) => {
+    writeRegisterScalar(
+      scratch,
+      scalar,
+      location,
+      (n) => gpResult(context, n + 1),
+      (n, cls) => fpResult(context, n, cls)
+    );
+  });
+  if (direct < scalars.length) {
+    const spilled = gpResult(context, 1 + registerCount(scalars.slice(0, direct).filter((s) => s.cls === "int")));
+    let at = 0;
+    for (const scalar of scalars.slice(direct)) {
+      at = Math.ceil(at / scalar.size) * scalar.size;
+      Memory.copy(scratch.add(scalar.offset), spilled.add(at), scalar.size);
+      at += scalar.size;
+    }
+  }
+  return decodeBorrowedValue(metadata, scratch);
+}
+
+// The continuation and the yield share the result registers. A yield that would overrun them keeps
+// the scalars that fit in two and spills the rest, in order, into a struct in the coroutine buffer
+// that the register after the direct ones points at.
+function directYieldScalars(scalars: LoweredScalar[]): number {
+  if (registerCount(scalars) < GP_RESULT_REGISTERS) {
+    return scalars.length;
+  }
+  let n = 0;
+  while (n < scalars.length && registerCount(scalars.slice(0, n + 1)) <= GP_RESULT_REGISTERS - 2) {
+    n++;
+  }
+  return n;
 }
 
 export interface SwiftAsyncCallbacks {

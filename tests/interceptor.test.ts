@@ -227,6 +227,35 @@ describe("SwiftInterceptor.attach", () => {
     expect((seenSelf as unknown as SwiftObject).count).toEqual(int64(42));
   });
 
+  test("hooks read accessors: self on enter, the yielded value on leave", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const selves: CallResult[] = [];
+    const yields: Record<string, CallResult> = {};
+    const listeners = ["scalar", "text", "payload", "block"].map((name) =>
+      SwiftInterceptor.attach(fixtureExport(`fixture.Reading.${name}.read`), {
+        onEnter(args) {
+          expect(args).toEqual([]);
+          selves.push(this.self!);
+        },
+        onLeave(ret) {
+          yields[name] = ret;
+        },
+      })
+    );
+    const result = makeSwiftNativeFunction(fixtureExport("fixture.driveReading"), Int, [])() as NativePointer;
+    listeners.forEach((l) => l.detach());
+    expect(result.readS64()).toEqual(int64(56));
+    const four = { a: int64(1), b: int64(2), c: int64(3), d: int64(4) };
+    expect(yields).toEqual({
+      scalar: int64(5),
+      text: "a string long enough to live on the heap",
+      payload: { value: int64(7) },
+      block: four,
+    });
+    expect(selves).toHaveLength(4);
+    expect(selves[0]).toEqual({ n: int64(5), label: "a string long enough to live on the heap", box: { value: int64(7) }, four });
+  });
+
   test("recovers a generic scalar argument and return from the implicit metadata", () => {
     const Int = metadataFor("Swift.Int")!;
     const identity = fixtureExport("fixture.genericIdentity");
