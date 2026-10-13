@@ -97,7 +97,17 @@ import { metadataOf, typeOf } from "./swift-type.js";
 
 export type MethodKind = "method" | "init" | "subscript";
 
-export type CallResult = SwiftValue | SwiftObject;
+export type CallResult = SwiftValue | SwiftObject | SwiftClosureValue | CallResult[];
+
+// A closure a call returned, owned: called like a method, its context released on dispose or
+// collection. `function` and `context` are its two words.
+export interface SwiftClosureValue {
+  (...args: CallArg[]): CallResult;
+  readonly function: NativePointer;
+  readonly context: NativePointer;
+  $dispose(): void;
+  [Symbol.dispose](): void;
+}
 
 export function isSwiftObject(value: CallResult): value is SwiftObject {
   return typeof value === "object" && value !== null && "$kind" in value;
@@ -267,6 +277,7 @@ export interface ResolvedMethod {
   witnessTables?: NativePointer[];
   abstractArgs?: boolean[];
   abstractReturn?: Abstraction;
+  returnClosure?: ArgPlan; // a function-typed result, planned in place of returnType
   argConventions?: ParamConvention[];
   origin?: MemberOrigin;
 }
@@ -610,7 +621,7 @@ function signatureMetadata(
   signature: SwiftFunctionSignature,
   resolveParam: ResolveParam = () => null,
   thrownIsAbstract: (type: TypeExpr) => boolean = () => false
-): { argTypes: Metadata[]; returnType: Metadata | null; thrown?: ThrownType } {
+): { argTypes: Metadata[]; returnType: Metadata | null; returnClosure?: ArgPlan; thrown?: ThrownType } {
   const argTypes = signature.params.map(({ type }) => {
     const metadata = resolveParsedType(type, resolveParam);
     if (metadata === null) {
@@ -619,13 +630,16 @@ function signatureMetadata(
     return metadata;
   });
   let returnType: Metadata | null = null;
-  if (signature.result !== null) {
+  let returnClosure: ArgPlan | undefined;
+  if (signature.result?.kind === "function") {
+    returnClosure = planReturnedClosure(signature.result, (type) => planGenericType(type, [], [], new Set()), signature.selector);
+  } else if (signature.result !== null) {
     returnType = resolveParsedType(signature.result, resolveParam);
     if (returnType === null) {
       throw new Error(`cannot resolve return type ${signature.result.text} of ${signature.selector}`);
     }
   }
-  return { argTypes, returnType, thrown: resolveThrownType(signature, resolveParam, thrownIsAbstract) };
+  return { argTypes, returnType, returnClosure, thrown: resolveThrownType(signature, resolveParam, thrownIsAbstract) };
 }
 
 function resolveThrownType(
@@ -1399,7 +1413,7 @@ function resolveMethodIn(
     const { isStatic, signature, mangled } = candidates[0];
     const params = splitParams(signature.params);
     const address = candidates[0].address.strip();
-    const { argTypes, returnType, thrown } = signatureMetadata(signature);
+    const { argTypes, returnType, returnClosure, thrown } = signatureMetadata(signature);
     let asyncFunctionPointer: AsyncFunctionPointer | undefined;
     if (signature.async) {
       const module = Process.findModuleByAddress(address.strip());
@@ -1410,7 +1424,7 @@ function resolveMethodIn(
       asyncFunctionPointer = afp;
     }
     const origin = memberOrigin(address, className);
-    return setterShape({ address, argTypes, returnType, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
+    return setterShape({ address, argTypes, returnType, returnClosure, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
   }
   return null;
 }
@@ -1463,7 +1477,7 @@ function planOf(resolved: ResolvedMethod): CallPlan {
     ),
     returnPlan:
       returnType === null
-        ? null
+        ? resolved.returnClosure ?? null
         : Array.isArray(resolved.abstractReturn)
           ? { kind: "destructuredTuple", metadata: returnType, byAddress: resolved.abstractReturn }
           : resolved.abstractReturn === true
@@ -1492,6 +1506,7 @@ function thrownRidesResultRegisters(thrown: ThrownType, returnType: Metadata | n
 function argPlanKey(plan: ArgPlan): string {
   switch (plan.kind) {
     case "closure":
+    case "closureResult":
       return "c";
     case "generic":
       return `g${plan.index}`;
@@ -1551,6 +1566,9 @@ function withInvoker<T>(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata
 function resultShapeOf(plan: CallPlan): AsyncResultShape | null {
   if (plan.returnPlan === null) {
     return null;
+  }
+  if (plan.returnPlan.kind === "closureResult") {
+    throw new Error(`${plan.selector}: an async closure result is unsupported`);
   }
   const metadata = planMetadata(plan.returnPlan);
   if (plan.returnPlan.kind === "generic" || plan.returnPlan.kind === "abstractIndirect") {
@@ -1623,7 +1641,8 @@ export class BoundMethod {
     if (plan.signature === undefined) {
       throw new Error(`${this.selector} was bound without a signature`);
     }
-    const metadataOrNull = (argPlan: ArgPlan | null): Metadata | null => (argPlan === null || argPlan.kind === "closure" ? null : argPlan.metadata);
+    const metadataOrNull = (argPlan: ArgPlan | null): Metadata | null =>
+      argPlan === null || argPlan.kind === "closure" || argPlan.kind === "closureResult" ? null : argPlan.metadata;
     const [element, ...indices] = plan.argPlans;
     return plan.signature.accessor === "setter"
       ? boundSignature(plan.signature, indices.map(metadataOrNull), metadataOrNull(element))
@@ -1678,7 +1697,11 @@ export class BoundMethod {
   }
 
   private decode(ret: NativePointer | null): CallResult {
-    const returnType = this.plan.returnPlan === null ? null : planMetadata(this.plan.returnPlan);
+    const { returnPlan } = this.plan;
+    if (returnPlan?.kind === "closureResult") {
+      return adoptReturnedClosure(ret!, returnPlan.plan);
+    }
+    const returnType = returnPlan === null ? null : planMetadata(returnPlan);
     if (!this.adoptResult) {
       return decodeReturn(returnType, ret);
     }
@@ -1780,6 +1803,45 @@ export class BoundMethod {
       }
     );
   }
+}
+
+// The callee's +1 closure, called with its context as self; the context is released once, on
+// dispose or collection. The facade is a function, so the weak callback must not reach it.
+function adoptReturnedClosure(words: NativePointer, template: CallPlan): SwiftClosureValue {
+  const fn = words.readPointer().strip();
+  const context = words.add(Process.pointerSize).readPointer();
+  const bound = new BoundMethod({ ...template, address: fn }, { self: context });
+  const state = { disposed: false };
+  const releaseContext = (): void => {
+    state.disposed = true;
+    if (!context.isNull()) {
+      getSwiftCoreApi().swift_release(context);
+    }
+  };
+  const closure = ((...args: CallArg[]): CallResult => {
+    if (state.disposed) {
+      throw new Error(`closure ${template.selector} has been disposed`);
+    }
+    return bound.call(...args) as CallResult;
+  }) as SwiftClosureValue;
+  const weakId = Script.bindWeak(closure, () => {
+    if (!state.disposed) {
+      releaseContext();
+    }
+  });
+  const dispose = (): void => {
+    if (!state.disposed) {
+      state.disposed = true;
+      Script.unbindWeak(weakId);
+      releaseContext();
+    }
+  };
+  return Object.defineProperties(closure, {
+    function: { value: fn },
+    context: { value: context },
+    $dispose: { value: dispose },
+    [Symbol.dispose]: { value: dispose },
+  });
 }
 
 // null ⇒ Void; check indirect before lowering, matching lowerArg (a resilient float aggregate is @out).
@@ -2057,11 +2119,10 @@ function rejectInitializer(signature: SwiftFunctionSignature): void {
 
 function resolveSignatureTypes(
   signature: SwiftFunctionSignature
-): { argTypes: Metadata[]; returnType: Metadata | null; thrown?: ThrownType; argConventions: ParamConvention[] } {
+): { argTypes: Metadata[]; returnType: Metadata | null; returnClosure?: ArgPlan; thrown?: ThrownType; argConventions: ParamConvention[] } {
   rejectInitializer(signature);
   const params = splitParams(signature.params);
-  const { argTypes, returnType, thrown } = signatureMetadata(signature);
-  return { argTypes, returnType, thrown, argConventions: params.conventions };
+  return { ...signatureMetadata(signature), argConventions: params.conventions };
 }
 
 // Thin metatype: no self passed.
@@ -2168,7 +2229,8 @@ export type ArgPlan =
   | { kind: "concrete"; metadata: Metadata }
   | { kind: "abstractIndirect"; metadata: Metadata }
   | { kind: "destructuredTuple"; metadata: Metadata; byAddress: boolean[] }
-  | { kind: "closure"; discriminator: number; shape: ClosureShape };
+  | { kind: "closure"; discriminator: number; shape: ClosureShape }
+  | { kind: "closureResult"; plan: CallPlan }; // how to call the returned closure; its address is read per call
 
 const RAW_BUFFER_PARAM = "Swift.UnsafeRawBufferPointer";
 const RAW_BUFFER_TOKEN = "$sSW"; // $s mangling of UnsafeRawBufferPointer
@@ -2288,6 +2350,37 @@ function planClosureType(
   );
 }
 
+// A closure result is called like a method whose self is its context, so its own parameters and
+// result are planned in the enclosing signature's generic context. A type parameter there is
+// passed by address, as in any generic function type, but no metadata trails the arguments: the
+// closure carries its own.
+function planReturnedClosure(spelling: Extract<TypeExpr, { kind: "function" }>, planType: (type: TypeExpr) => ArgPlan, selector: string): ArgPlan {
+  if (spelling.async) {
+    throw new Error(`${selector}: an async closure result is unsupported`);
+  }
+  const withoutMetadataArgs = (plan: ArgPlan): ArgPlan => (plan.kind === "generic" ? { kind: "abstractIndirect", metadata: plan.metadata } : plan);
+  const params = splitParams(spelling.params);
+  const argPlans = params.types.map((type, i) => planParam(withoutMetadataArgs(planType(type)), params.conventions[i], selector));
+  const result = spelling.result;
+  const returnPlan = result.text === "()" || result.text === "Swift.Void" ? null : withoutMetadataArgs(planResultType(result, planType, selector));
+  const plan: CallPlan = {
+    address: NULL,
+    selector: spelling.text,
+    argPlans,
+    returnPlan,
+    throws: spelling.throws,
+    async: false,
+    typeArguments: [],
+    witnessTables: [],
+    argConventions: params.conventions,
+  };
+  return { kind: "closureResult", plan };
+}
+
+function planResultType(type: TypeExpr, planType: (type: TypeExpr) => ArgPlan, selector: string): ArgPlan {
+  return type.kind === "function" ? planReturnedClosure(type, planType, selector) : planType(type);
+}
+
 // A class-bound generic parameter lowers as a bare reference, not address-only.
 function planGenericType(
   type: TypeExpr,
@@ -2384,6 +2477,7 @@ function swiftArgType(plan: ArgPlan): SwiftArgType {
     case "destructuredTuple":
       return { tuple: plan.metadata, byAddress: plan.byAddress };
     case "closure":
+    case "closureResult":
       return { closure: true };
   }
 }
@@ -2488,6 +2582,9 @@ function planMetadata(plan: ArgPlan): Metadata {
   if (plan.kind === "closure") {
     throw new Error("closure types are only supported as arguments");
   }
+  if (plan.kind === "closureResult") {
+    throw new Error(`a closure result ${plan.plan.selector} cannot be marshalled as an argument`);
+  }
   return plan.metadata;
 }
 
@@ -2564,7 +2661,7 @@ function matchingMethods(
 function argPlanBound(signature: SwiftFunctionSignature): boolean {
   return signature.genericParams.length > 0
     ? signature.simpleGenerics
-    : signature.params.some((p) => p.type.kind === "function");
+    : signature.params.some((p) => p.type.kind === "function") || signature.result?.kind === "function";
 }
 
 function planGenericMethod(typeNameArg: string, methodName: string, options: RawMethodResolveOptions): CallPlan {
@@ -2609,7 +2706,7 @@ function planGenericSignature(
   const returnPlan =
     signature.result === null
       ? null
-      : planGenericType(signature.result, signature.genericParams, resolvedTypeArguments, classBoundParams);
+      : planResultType(signature.result, (type) => planGenericType(type, signature.genericParams, resolvedTypeArguments, classBoundParams), signature.selector);
   const thrown = planThrownType(signature, signature.genericParams, resolvedTypeArguments);
   const witnessTables = options.witnessTables ?? autoWitnessTables(signature, resolvedTypeArguments);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
@@ -2770,7 +2867,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
   const returnPlan =
     signature.result === null
       ? null
-      : planTypeMemberArg(signature.result, typeParams, typeArguments, classBound);
+      : planResultType(signature.result, (type) => planTypeMemberArg(type, typeParams, typeArguments, classBound), signature.selector);
   const thrown = planThrownType(signature, typeParams, typeArguments);
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (signature.async) {
@@ -3495,6 +3592,9 @@ function resolveWitnessSignature(
   signature: SwiftFunctionSignature,
   classBound: Set<string>
 ): Pick<ResolvedMethod, "argTypes" | "returnType" | "throws" | "thrown" | "selector" | "abstractArgs" | "abstractReturn" | "argConventions"> {
+  if (signature.result?.kind === "function") {
+    throw new Error(`${signature.selector}: a closure result through a protocol witness is unsupported`);
+  }
   const params = splitParams(signature.params);
   const layout = protocolLevelParamLayout(table, classBound);
   const { argTypes, returnType, thrown } = signatureMetadata(

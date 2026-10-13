@@ -1584,6 +1584,29 @@ public func genericCapturingContext() -> UnsafeMutableRawPointer {
     }
 }
 
+// Closure results: a thick closure handed to the caller at +1, which calls it with the context as self.
+public func makeAdder(_ n: Int) -> (Int) -> Int { { $0 + n } }
+public func makeLabeler(_ prefix: String) -> (Int) -> String { { "\(prefix)\($0)" } }
+public func makeLimiter(_ limit: Int) -> (Int) throws -> Int {
+    { n in
+        if n > limit { throw FixtureError.boom }
+        return n * 2
+    }
+}
+public func makeScaler<T: Numeric>(_ k: T) -> (T) -> T { { $0 * k } }
+public func makeConstantSeven() -> () -> Int { { 7 } }
+public func makeCurriedSum(_ a: Int) -> (Int) -> (Int) -> Int { { b in { c in a + b + c } } }
+public final class Stepper {
+    var n = 0
+    public init() {}
+    public func incrementer() -> () -> Int {
+        return {
+            self.n += 1
+            return self.n
+        }
+    }
+}
+
 public actor Ticker {
     public var count = 0
     public init() {}

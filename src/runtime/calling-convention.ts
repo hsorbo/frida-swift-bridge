@@ -594,8 +594,12 @@ interface ResultLowering {
 }
 
 function placeDirect(metadata: Metadata): PlacedScalar[] {
+  return placeDirectScalars(loweredScalars(metadata));
+}
+
+function placeDirectScalars(scalars: LoweredScalar[]): PlacedScalar[] {
   const allocator = new ArgumentAllocator(0, true);
-  return loweredScalars(metadata).map((scalar) => ({ scalar, location: allocator.scalar(scalar) }));
+  return scalars.map((scalar) => ({ scalar, location: allocator.scalar(scalar) }));
 }
 
 function copyDirect(direct: PlacedScalar[], registerDump: NativePointer, out: NativePointer): void {
@@ -617,6 +621,13 @@ function lowerResult(metadata: Metadata, forcedIndirect: boolean): ResultLowerin
   }
   const direct = placeDirect(metadata);
   return { size, stride, sret: null, leading: [], direct, assemble: (out, dump) => copyDirect(direct, dump, out) };
+}
+
+// A thick closure result is its function and context words in the first two result registers.
+function lowerClosureResult(): ResultLowering {
+  const size = CLOSURE_WORDS * 8;
+  const direct = placeDirectScalars(wordPieces(CLOSURE_WORDS));
+  return { size, stride: size, sret: null, leading: [], direct, assemble: (out, dump) => copyDirect(direct, dump, out) };
 }
 
 // The elements by address each fill a buffer; the rest form one direct value. sret serves a lone
@@ -738,16 +749,15 @@ export function makeSwiftNativeFunction(
 
   let result: ResultLowering | null = null;
   if (returnType !== null) {
-    if (isClosureRef(returnType)) {
-      throw new Error("closure return types are not supported");
-    }
-    result = isDestructuredTuple(returnType)
-      ? lowerDestructuredResult(returnType)
-      : isGenericRef(returnType)
-        ? lowerResult(typeArgumentFor(returnType), true)
-        : isAbstractIndirect(returnType)
-          ? lowerResult(returnType.metadata, true)
-          : lowerResult(returnType, false);
+    result = isClosureRef(returnType)
+      ? lowerClosureResult()
+      : isDestructuredTuple(returnType)
+        ? lowerDestructuredResult(returnType)
+        : isGenericRef(returnType)
+          ? lowerResult(typeArgumentFor(returnType), true)
+          : isAbstractIndirect(returnType)
+            ? lowerResult(returnType.metadata, true)
+            : lowerResult(returnType, false);
   }
 
   const typedError = options.errorType === undefined ? null : lowerTypedError(options.errorType, result, returnType);

@@ -542,7 +542,7 @@ describe("SwiftInterceptor.attach", () => {
   test("surfaces a thrown error on leave instead of decoding a bogus return", () => {
     const Int = metadataFor("Swift.Int")!;
     const addr = fixtureExport("fixture.mightThrow");
-    const seen: { retval: CallResult; error?: SwiftValue }[] = [];
+    const seen: { retval: CallResult; error?: CallResult }[] = [];
     const listener = SwiftInterceptor.attach(addr, {
       onLeave(retval, error) {
         seen.push({ retval, error });

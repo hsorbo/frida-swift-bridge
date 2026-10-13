@@ -38,7 +38,7 @@ import {
 import { findType } from "../reflection/registry.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { typeName } from "./type-name.js";
-import { asSwiftObject } from "./object-facade.js";
+import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod, SwiftFunction } from "./method.js";
 import type { SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
@@ -871,12 +871,14 @@ function materializeThrown(
   return decodeBorrowedValue(metadata, scratch);
 }
 
+type BorrowedValue = SwiftValue | SwiftObject;
+
 // Mirrors method.ts decodeReturn, but borrows: an interceptor only observes the caller's +1, so it
 // neither adopts nor destroys. A non-POD value embedding a managed reference can't be deep-copied
 // out, so it surfaces as a live facade over the borrowed storage, valid for the callback's duration;
 // everything else stays a snapshot. An indirect address is the caller's storage, so writing through
 // it edits the argument or return.
-function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent: ValueInstance | null = null): CallResult {
+function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent: ValueInstance | null = null): BorrowedValue {
   if (metadata.kind === MetadataKind.Tuple) {
     const tuple = ValueInstance.borrow(metadata, address, parent);
     return [...enumerateTupleElements(metadata)].map((e) => decodeBorrowedValue(e.type, address.add(e.offset), tuple));
@@ -895,7 +897,7 @@ function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent:
 
 // The caller's storage itself, as a facade whose writes the callee and then the caller see; a
 // class reference is the object it holds.
-function decodeInoutArgument(metadata: Metadata, address: NativePointer): CallResult {
+function decodeInoutArgument(metadata: Metadata, address: NativePointer): BorrowedValue {
   if (metadata.kind === MetadataKind.Class) {
     return asSwiftObject(new ClassInstance(address.readPointer()));
   }

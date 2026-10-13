@@ -593,8 +593,8 @@ robot.$method("pick", { returnType: "Swift.Int" }).call();   // pick() -> Int
 
 A bound method has `address`, `call(...)`, `signature` and `origin`. The
 signature is the member's with its types resolved: `argTypes` and `returnType`
-are reflection objects (`null` for a closure parameter or a type that stays
-generic), beside the names, labels and effects:
+are reflection objects (`null` for a closure parameter or result, or a type
+that stays generic), beside the names, labels and effects:
 
 ```js
 const move = robot.$method("move", { labels: ["to"] });
@@ -1076,6 +1076,24 @@ Pass the type explicitly for a closure that returns a value: `{ typeArguments:
 [Swift.type("Swift.Int")] }`. A parameter that is not a closure result cannot be
 inferred and must be given.
 
+A function or method whose result is a closure returns it as a callable: call
+it with marshalled arguments like any method, and its result and errors come
+back the same way. The closure is owned, and keeps its captures alive until it
+is garbage-collected or disposed through `$dispose()` or a `using` binding:
+
+```js
+const stepper = Swift.type("MyApp.Stepper").init();
+const next = stepper.incrementer();     // () -> Int
+next();                                 // int64(1)
+next();                                 // int64(2)
+next.$dispose();                        // releases the closure's context
+```
+
+`function` and `context` are its two words. A closure returned from a generic
+function takes and returns its type parameters by address, as Swift's own
+callers of it do. A `SwiftClosureValue` is not accepted where a Swift API expects
+a closure argument; that still takes `Swift.closure`.
+
 > Closure synthesis is platform-specific — it requires an arm64 or x86-64 Swift
 > host. On other architectures `Swift.closure` is unavailable.
 
@@ -1446,10 +1464,10 @@ corrupts memory instead of failing cleanly.
 
 Each of these throws on purpose: the bridge has no lowering for the shape yet.
 
-- **Closures as results.** A function returning a closure is refused
-  (`closure return types are not supported`). Closure parameters take only the
-  shapes listed under [Closures](#closures); a consuming or `inout` closure
-  parameter is refused too.
+- **Closure shapes.** Closure parameters take only the shapes listed under
+  [Closures](#closures); a consuming or `inout` closure parameter is refused
+  too. An `async` closure result, and a closure result through a protocol
+  witness, are refused.
 - **Tuples with an opaque element.** A tuple parameter, result or async result
   with an element of generic, opaque layout is refused.
 - **Methods of generic types in `Swift.function`.** `Swift.function` plans a

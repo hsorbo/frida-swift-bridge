@@ -129,6 +129,7 @@ export type {
   MemberOrigin,
   SwiftBoundInitializer,
   SwiftFunction,
+  SwiftClosureValue,
   AsyncReceiver,
   CallResult,
   CallArg,
