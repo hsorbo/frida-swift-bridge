@@ -38,6 +38,8 @@ import {
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
 import { metatypeInstanceType } from "../abi/metatype.js";
+import { fixedArrayCount, fixedArrayElementType } from "../abi/fixed-array.js";
+import { borrowReferentType } from "../abi/borrow.js";
 import { readFunctionType, ParameterOwnership } from "../abi/function-type.js";
 import { typeName } from "./type-name.js";
 import { objcClassName } from "./objc.js";
@@ -121,6 +123,8 @@ export type TypeKind =
   | "objc-class"
   | "foreign-class"
   | "foreign-reference"
+  | "fixed-array"
+  | "borrow"
   | "type";
 
 function typeKindName(metadata: Metadata): TypeKind {
@@ -148,6 +152,10 @@ function typeKindName(metadata: Metadata): TypeKind {
       return "foreign-class";
     case MetadataKind.ForeignReferenceType:
       return "foreign-reference";
+    case MetadataKind.FixedArray:
+      return "fixed-array";
+    case MetadataKind.Borrow:
+      return "borrow";
     default:
       return "type";
   }
@@ -556,6 +564,22 @@ export class MetatypeType extends SwiftType {
   }
 }
 
+export class FixedArrayType extends SwiftType {
+  get count(): number {
+    return fixedArrayCount(metadataOf(this));
+  }
+
+  get elementType(): SwiftType {
+    return typeOf(fixedArrayElementType(metadataOf(this)));
+  }
+}
+
+export class BorrowType extends SwiftType {
+  get referentType(): SwiftType {
+    return typeOf(borrowReferentType(metadataOf(this)));
+  }
+}
+
 export type ParameterConvention = "borrowing" | "consuming" | "inout";
 
 export interface FunctionTypeParameter {
@@ -751,8 +775,9 @@ function wrapperFromMetadata(metadata: Metadata): SwiftType {
     case MetadataKind.ForeignReferenceType:
       return new ForeignReferenceType(metadata);
     case MetadataKind.FixedArray:
+      return new FixedArrayType(metadata);
     case MetadataKind.Borrow:
-      throw new Error(`unsupported metadata kind ${MetadataKind[metadata.kind]}`);
+      return new BorrowType(metadata);
     default:
       return new SwiftType(metadata);
   }

@@ -2,6 +2,8 @@ import { Metadata, MetadataKind } from "./metadata.js";
 import { enumerateFields, fieldTypeIn, resolveFieldType, ReferenceStorage } from "./field-descriptor.js";
 import { readEnumCase, projectEnumData, projectBox, setEnumTag } from "./enum.js";
 import { enumerateTupleElements } from "./tuple.js";
+import { enumerateFixedArrayElements } from "./fixed-array.js";
+import { borrowReferentType, borrowedValueAddress } from "./borrow.js";
 import { readString, writeString } from "./string.js";
 import {
   existentialRepresentation,
@@ -241,6 +243,14 @@ function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
         setEnumTag(metadata, address, tag);
       };
     }
+    case MetadataKind.FixedArray: {
+      const elements = [...enumerateFixedArrayElements(metadata)];
+      if (!Array.isArray(value) || value.length !== elements.length) {
+        throw new Error(`writeValue: expected an array of ${elements.length} elements for ${typeName(metadata)}`);
+      }
+      const elementPlans = elements.map((e, i) => planWrite(e.type, value[i]));
+      return (address) => elementPlans.forEach((plan, i) => plan(address.add(elements[i].offset)));
+    }
     default:
       throw new Error(`writeValue: unsupported metadata kind ${metadata.kind}`);
   }
@@ -296,6 +306,10 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
       }
       return elements;
     }
+    case MetadataKind.FixedArray:
+      return [...enumerateFixedArrayElements(metadata)].map((e) => readValue(e.type, address.add(e.offset)));
+    case MetadataKind.Borrow:
+      return readValue(borrowReferentType(metadata), borrowedValueAddress(metadata, address));
     default:
       return null;
   }

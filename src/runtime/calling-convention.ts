@@ -2,6 +2,7 @@ import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { existentialRepresentation } from "../abi/existential.js";
 import { enumerateTupleElements, getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
+import { enumerateFixedArrayElements } from "../abi/fixed-array.js";
 import { SwiftError } from "./thrown-error.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { ContextDescriptorKind } from "../abi/context-descriptor.js";
@@ -262,6 +263,8 @@ function aggregateMembers(metadata: Metadata): AggregateMember[] | null {
     members = structMembers(metadata);
   } else if (metadata.kind === MetadataKind.Tuple) {
     members = [...enumerateTupleElements(metadata)];
+  } else if (metadata.kind === MetadataKind.FixedArray) {
+    members = [...enumerateFixedArrayElements(metadata)];
   } else if (metadata.kind === MetadataKind.Enum) {
     members = singleCasePayload(metadata);
   }

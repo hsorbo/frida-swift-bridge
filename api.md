@@ -298,8 +298,8 @@ Every reflection object extends `SwiftType`:
 - `info.name`: the fully-qualified name, including every enclosing context
   (`MyApp.Outer.Inner`).
 - `info.kind`: `"class"`, `"struct"`, `"enum"`, `"tuple"`, `"metatype"`,
-  `"function"`, `"existential"`, `"objc-class"`, `"foreign-class"` or
-  `"foreign-reference"`.
+  `"function"`, `"existential"`, `"objc-class"`, `"foreign-class"`,
+  `"foreign-reference"`, `"fixed-array"` or `"borrow"`.
 - `info.moduleName`: the logical Swift module name.
 - `info.superClass`: the parent's reflection, or `null`.
 - `info.toJSON()`: cheap identity `{ kind, name, module }`.
@@ -409,9 +409,12 @@ Swift.type("MyApp.Session").$type.isActor;                // true for `actor Ses
 
 Other reflection you may encounter: `TupleType` (`elements`, each
 `{ label, type }`), `MetatypeType` (`instanceType`), `FunctionType`
-(`signature`), and the foreign/ObjC bridging wrappers `ObjCClassWrapperType`
-(`objcClass`), `ForeignClassType`, `ForeignReferenceType`. These describe types
-with no Swift members of their own, so they have no facade.
+(`signature`), `FixedArrayType` (`count`, `elementType`: the
+`Builtin.FixedArray` storage inside an `InlineArray`), `BorrowType`
+(`referentType`: a `Builtin.Borrow` view of its referent), and the foreign/ObjC
+bridging wrappers `ObjCClassWrapperType` (`objcClass`), `ForeignClassType`,
+`ForeignReferenceType`. These describe types with no Swift members of their
+own, so they have no facade.
 
 One type is one reflection object and one facade: `Swift.type`, `Swift.modules`,
 an instance's `$type` and `typeOf` under `/abi` all meet at the same objects,
@@ -1316,7 +1319,9 @@ addInts(20, 22);    // int64(42), not 42
 ```
 
 A struct decodes to an object keyed by field name; a bridged `Array`, `Set`, or
-`Dictionary` decodes to the corresponding JS value. A container returned from a
+`Dictionary` decodes to the corresponding JS value. An `InlineArray` is a struct
+whose `_storage` field reads and writes as an array of its elements; a
+`Builtin.Borrow` reads as the value it refers to. A container returned from a
 call arrives as a value facade; `$container()` projects it:
 
 ```js
@@ -1529,9 +1534,6 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
 - **Methods of generic types in `Swift.function`.** `Swift.function` plans a
   symbol's own generic parameters, not those of its enclosing type.
 - **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan.
-- **`FixedArray` and `Borrow` metadata.** The metadata kinds behind
-  `InlineArray` and borrowed values have no reflection wrapper and throw
-  `unsupported metadata kind`.
 - **Hosts.** arm64 and x86-64 on Darwin and Linux. Anything else throws
   `unsupported Swift host`.
 

@@ -1,8 +1,17 @@
-import { Metadata } from "../abi/metadata.js";
+import { Metadata, MetadataKind } from "../abi/metadata.js";
+import { fixedArrayCount, fixedArrayElementType } from "../abi/fixed-array.js";
+import { borrowReferentType } from "../abi/borrow.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { getSwiftCoreApi } from "./api.js";
 
+// The runtime has no demangling for these two kinds; spell them as its demangler would.
 export function typeName(metadata: Metadata, qualified = true): string {
+  if (metadata.kind === MetadataKind.FixedArray) {
+    return `Builtin.FixedArray<${fixedArrayCount(metadata)}, ${typeName(fixedArrayElementType(metadata), qualified)}>`;
+  }
+  if (metadata.kind === MetadataKind.Borrow) {
+    return `Builtin.Borrow<${typeName(borrowReferentType(metadata), qualified)}>`;
+  }
   const [data, length] = getSwiftCoreApi().swift_getTypeName(
     metadata.handle,
     qualified ? 1 : 0

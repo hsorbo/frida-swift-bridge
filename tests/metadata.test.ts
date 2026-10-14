@@ -56,12 +56,12 @@ describe("metadata", () => {
     expect(() => getGenericMetadata(ctx, [])).toThrow();
   });
 
-  test("typeOf rejects the FixedArray and Borrow kinds that slip under the class normalization", () => {
-    for (const kind of [MetadataKind.FixedArray, MetadataKind.Borrow]) {
+  test("typeOf wraps the FixedArray and Borrow kinds that sit under the class normalization", () => {
+    for (const [kind, name] of [[MetadataKind.FixedArray, "fixed-array"], [MetadataKind.Borrow, "borrow"]] as const) {
       const handle = Memory.alloc(Process.pointerSize);
       handle.writeU32(kind);
       expect(new Metadata(handle).kind).toBe(kind);
-      expect(() => typeOf(new Metadata(handle))).toThrow(new RegExp(MetadataKind[kind]));
+      expect(typeOf(new Metadata(handle)).kind).toBe(name);
     }
   });
 });

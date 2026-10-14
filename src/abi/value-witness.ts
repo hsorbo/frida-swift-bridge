@@ -20,6 +20,8 @@ const IS_NON_INLINE = 0x20000;
 const IS_NON_BITWISE_TAKABLE = 0x100000;
 const IS_INCOMPLETE = 0x400000;
 const IS_NON_COPYABLE = 0x800000;
+const IS_NON_BITWISE_BORROWABLE = 0x1000000;
+const IS_ADDRESSABLE_FOR_DEPENDENCIES = 0x2000000;
 
 export const NUM_WORDS_VALUE_BUFFER = 3;
 
@@ -68,6 +70,14 @@ export class ValueWitnessTable {
 
   get isCopyable(): boolean {
     return (this.flags & IS_NON_COPYABLE) === 0;
+  }
+
+  get isBitwiseBorrowable(): boolean {
+    return this.isBitwiseTakable && (this.flags & IS_NON_BITWISE_BORROWABLE) === 0;
+  }
+
+  get isAddressableForDependencies(): boolean {
+    return (this.flags & IS_ADDRESSABLE_FOR_DEPENDENCIES) !== 0;
   }
 
   get isIncomplete(): boolean {

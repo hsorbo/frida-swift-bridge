@@ -2137,3 +2137,15 @@ public func driveGrid() -> Int {
     g[tracked: 2] += 1
     return g[1] + g[row: 1, column: 0] + g[scaled: 3] + Grid[unit: 1] + g[read: 3] + g[echo: 5]
 }
+
+// InlineArray's storage is a Builtin.FixedArray; three Ints explode like a tuple at a call boundary.
+#if compiler(>=6.2)
+@available(macOS 26, iOS 26, *)
+public struct Voxel { public var cells: InlineArray<3, Int> }
+@available(macOS 26, iOS 26, *)
+public func makeVoxel() -> Voxel { Voxel(cells: [1, 2, 3]) }
+@available(macOS 26, iOS 26, *)
+public func scaleVoxel(_ v: Voxel, _ k: Int) -> Voxel {
+    Voxel(cells: [v.cells[0] * k, v.cells[1] * k, v.cells[2] * k])
+}
+#endif

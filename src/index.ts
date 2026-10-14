@@ -80,6 +80,8 @@ export {
   ObjCClassWrapperType,
   ForeignClassType,
   ForeignReferenceType,
+  FixedArrayType,
+  BorrowType,
   TypeMember,
   MemberQuery,
   MethodQuery,

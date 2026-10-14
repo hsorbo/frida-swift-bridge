@@ -151,6 +151,13 @@ export {
 } from "./abi/tuple.js";
 export { metatypeInstanceType } from "./abi/metatype.js";
 export {
+  FixedArrayElement,
+  fixedArrayCount,
+  fixedArrayElementType,
+  enumerateFixedArrayElements,
+} from "./abi/fixed-array.js";
+export { borrowReferentType, borrowedValueAddress } from "./abi/borrow.js";
+export {
   KeyPathBuffer,
   KeyPathComponent,
   StoredKeyPathComponent,
@@ -234,6 +241,8 @@ export {
   ObjCClassWrapperType,
   ForeignClassType,
   ForeignReferenceType,
+  FixedArrayType,
+  BorrowType,
   TypeMember,
   MethodQuery,
   MemberLookupOptions,
