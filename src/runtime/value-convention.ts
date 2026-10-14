@@ -584,10 +584,13 @@ function memoryFills(): Set<string> {
 }
 
 // A Windows image calls the memset of whichever C runtime it imports, reached through an import
-// thunk. The export table Frida reads for that runtime does not always carry it, so the target is
-// named through the debug symbols instead.
+// thunk; the runtime's export table names the target.
 function importsMemoryFill(target: NativePointer): boolean {
-  return Process.platform === "windows" && MEMORY_FILL_NAMES.includes(DebugSymbol.fromAddress(target).name ?? "");
+  if (Process.platform !== "windows") {
+    return false;
+  }
+  const runtime = Process.findModuleByAddress(target);
+  return runtime !== null && MEMORY_FILL_NAMES.some((name) => runtime.findExportByName(name)?.equals(target) === true);
 }
 
 function dlsymMemoryFills(): NativePointer[] {
