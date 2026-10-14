@@ -3,6 +3,7 @@ import { readValue, writeValue, enumerateInstanceFields, swiftValueEquals, Swift
 import { decodeBridgedContainer } from "./container.js";
 import {
   BoundMethod,
+  bindResolved,
   bindValueMethod,
   rootAsyncReceiver,
   bindGenericValueMethod,
@@ -14,7 +15,7 @@ import {
   CallArg,
   RawInstance,
 } from "../runtime/method.js";
-import { SwiftType, typeOf } from "../runtime/swift-type.js";
+import { NominalType, SlotSignature, SwiftType, typeOf } from "../runtime/swift-type.js";
 import { typeName } from "../runtime/type-name.js";
 
 // qjs and v8 (Frida 17) ship no Symbol.dispose; polyfill so `using` resolves the key below.
@@ -143,6 +144,12 @@ export class ValueInstance implements RawInstance {
       return rootAsyncReceiver(bindGenericTypeValueMethod(this.metadata, this.handle, name, options), this);
     }
     return rootAsyncReceiver(bindValueMethod(this.metadata, this.handle, name, options), this);
+  }
+
+  // A value's slot is a witness slot: its thunk takes self by address.
+  slot(selector: string, signature: SlotSignature): BoundMethod {
+    this.checkLive();
+    return rootAsyncReceiver(bindResolved((this.type as NominalType).slotCall(selector, signature, false), this.handle), this);
   }
 
   call(name: string, ...args: CallArg[]): CallResult | Promise<CallResult> {

@@ -17,6 +17,7 @@ export interface VTableEntry {
   kind: MethodDescriptorKind;
   isInstance: boolean;
   isDynamic: boolean;
+  isAsync: boolean; // the slot holds the method's async function pointer record, not code
   declaredImpl: NativePointer;
   metadataOffset: number; // VTableOffset + slot
 }
@@ -73,6 +74,7 @@ const METADATA_INITIALIZATION_MASK = 0x3;
 const KIND_MASK = 0x0f;
 const IS_INSTANCE = 0x10;
 const IS_DYNAMIC = 0x20;
+const IS_ASYNC = 0x40;
 
 function kindFlags(descriptor: ContextDescriptor): number {
   return descriptor.flags >>> KIND_FLAGS_SHIFT;
@@ -173,6 +175,7 @@ export function readVTable(descriptor: ContextDescriptor): VTableEntry[] {
       kind: flags & KIND_MASK,
       isInstance: (flags & IS_INSTANCE) !== 0,
       isDynamic: (flags & IS_DYNAMIC) !== 0,
+      isAsync: (flags & IS_ASYNC) !== 0,
       declaredImpl,
       metadataOffset: vtableOffset + i,
     });

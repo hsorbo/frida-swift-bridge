@@ -11,7 +11,7 @@ import {
   lowerResolveOptions,
   splitSelector,
 } from "./method.js";
-import { SwiftType, NominalType, ClassType, StructType, EnumType } from "./swift-type.js";
+import { SwiftType, NominalType, ClassType, StructType, EnumType, SlotSignature } from "./swift-type.js";
 import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js";
 import { WitnessTable } from "../abi/witness-table.js";
 import { typeName } from "./type-name.js";
@@ -85,7 +85,7 @@ export interface SwiftObjectBase {
 export interface SwiftClassObject extends SwiftObjectBase {
   readonly $kind: "object";
   readonly $type: ClassType;
-  $method(name: string, options?: MethodResolveOptions): SwiftClassBoundMethod;
+  $method(name: string, options?: MethodResolveOptions | SlotSignature): SwiftClassBoundMethod;
   $subscript(...indicesThenOptions: unknown[]): CallResult;
   $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void;
   $container?: never;
@@ -94,7 +94,7 @@ export interface SwiftClassObject extends SwiftObjectBase {
 export interface SwiftValueObject extends SwiftObjectBase {
   readonly $kind: "value";
   readonly $type: StructType | EnumType;
-  $method(name: string, options?: ValueMethodResolveOptions): SwiftValueBoundMethod;
+  $method(name: string, options?: ValueMethodResolveOptions | SlotSignature): SwiftValueBoundMethod;
   $subscript(...indicesThenOptions: unknown[]): CallResult;
   $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void;
   $container(): SwiftValue;
@@ -142,7 +142,10 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   const readProperty = (name: string): CallResult => (isValue ? value.get(name) : object.get(name));
   const writeProperty = (name: string, v: CallArg): void =>
     isValue ? value.set(name, v) : object.set(name, v);
-  const method = (selector: string, selectorOptions: ValueMethodResolveOptions = {}) => {
+  const method = (selector: string, selectorOptions: ValueMethodResolveOptions | SlotSignature = {}) => {
+    if (typeof selectorOptions === "string") {
+      return isValue ? value.slot(selector, selectorOptions) : object.slot(selector, selectorOptions);
+    }
     const { name, options } = splitSelector(selector, selectorOptions);
     const raw = lowerResolveOptions(options);
     return isValue ? value.method(name, raw) : object.method(name, raw);
@@ -211,7 +214,7 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
         case "$call":
           return (name: string, ...args: CallArg[]) => invoke(name, args);
         case "$method":
-          return (name: string, options: ValueMethodResolveOptions = {}) =>
+          return (name: string, options: ValueMethodResolveOptions | SlotSignature = {}) =>
             narrowBoundMethod(method(name, options), target);
         case "$subscript":
           return (...args: unknown[]) => subscript("getter", args, []);

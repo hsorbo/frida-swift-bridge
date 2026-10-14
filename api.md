@@ -318,7 +318,8 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
   `signature`: `{ labels, argTypeNames, returnTypeName, throws, thrownTypeName,
   isAsync, genericParams }`, the types spelled as the symbol spells them, so a
   generic member's read `"A"` and the names paste into `{ argTypes }`; a
-  `vtable#` slot's `signature` is `null`.
+  `vtable#` slot's `signature` is `null` unless the lookup supplies one as a
+  string in place of `options` (see below).
 - `info.subscript(selector?, options?)` / `info.typeSubscript(...)`: a subscript
   accessor, the getter unless `{ accessor: "setter" }`. See [Properties](#properties).
 - `info.properties(query?)`: the properties as `{ name, typeName, isStatic, writable }`;
@@ -358,11 +359,32 @@ which runs only for calls made through the protocol; on a binary that keeps
 its exports, a named `speak()` and the `MyKit.Vocal#1` that calls it are
 listed side by side. A conformance another module declares is an extension
 there, so its slots join the listing with `{ deep: true }`, like the members
-it adds. Either member's `signature` is `null`, there being no
-symbol to read one from. Hook it with Frida's own
-`Interceptor.attach(member.address, …)`: `Swift.Interceptor` and `bind()` need
-a signature. Accessor and initializer slots are not listed, and a generic type
-named without its arguments lists no slots.
+it adds. Either member's `signature` is `null`, there being no symbol to read
+one from, and `bind()` throws; hook it with Frida's own
+`Interceptor.attach(member.address, …)`. Accessor and initializer slots are not
+listed, and a generic type named without its arguments lists no slots.
+
+The caller can supply the signature instead: a string in place of the lookup
+options, spelled as the listings spell a member's types, `-> ()` for Void.
+Labels, `inout`, `throws`, `throws(E)`, `async` and generic parameters read as
+they do in a symbol, and the slot then calls, hooks and reports its `signature`
+as a named member does:
+
+```js
+obj.$method("vtable#11", "(x: Swift.Int) throws -> Swift.String").call(5);
+Type.$typeMethod("vtable#13", "(x: Swift.Int) -> Swift.Int").call(1);
+const speak = Type.$type.instanceMethod("MyKit.Vocal#1", "speak() -> Swift.String");
+speak.bind(obj).call();
+Swift.Interceptor.attach(Type.$type.instanceMethod("vtable#11", "(x: Swift.Int) -> Swift.Int"), { onEnter(args) {} });
+```
+
+A vtable slot takes the object, or the metatype for a class method, as self;
+a subclass finds the inherited slot with its own override. A witness slot runs
+through its thunk with the protocol's self convention and, like a named
+requirement, is hooked by its address only. The descriptor decides what the
+text may not: a signature that says `async` for a sync slot, or omits it for an
+async one, is refused. A leading name (`"speak() -> Swift.String"`) makes the
+member display under that selector; without one it keeps the slot's own.
 
 Kind-specific members:
 
@@ -590,7 +612,9 @@ Options: `arity`, `labels`, `argTypes`, `returnType`, `static`, `typeArguments`,
 the demangled type names exactly; `returnType: null` selects the overload
 returning `Void`. A lookup searches the type's own module and, on a miss, every
 loaded module and the type's protocol extensions once; `deep: false` stops at
-the own module, for a hot callback that must not pay for the sweep.
+the own module, for a hot callback that must not pay for the sweep. On a
+stripped binary a `vtable#<offset>` or `<Protocol>#<index>` selector takes a
+signature string in place of the options; see [Reflection](#reflection).
 
 ```js
 robot.$method("move", { labels: ["to"] }).call(5);   // move(to:)

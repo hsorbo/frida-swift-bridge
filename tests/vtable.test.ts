@@ -104,6 +104,10 @@ describe("unnamed vtable slots on the reflection", () => {
     }
   });
 
+  test("an async method a symbol names is not listed again as a slot: its vtable word is the async function pointer", () => {
+    expect(Swift.class("fixture.Ticker")!.$type.instanceMethods().some((s) => s.startsWith("vtable#"))).toBe(false);
+  });
+
   test("a generic class named without its arguments lists no slots", () => {
     expect(Swift.class("fixture.GenericHolder")!.$type.instanceMethods().some((s) => s.startsWith("vtable#"))).toBe(false);
   });

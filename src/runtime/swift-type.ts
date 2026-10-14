@@ -3,8 +3,10 @@ import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descrip
 import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
 import { isActor, isDefaultActor, MethodDescriptorKind, readVTable } from "../abi/class-descriptor.js";
 import { conformancesOf, witnessTableOf } from "../abi/protocol-conformance.js";
-import { ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
+import { ProtocolRequirement, ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
+import { WitnessTable } from "../abi/witness-table.js";
+import type { SwiftFunctionSignature } from "./type-expr.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
@@ -30,6 +32,9 @@ import {
   findMember,
   imageName,
   memberOwnerNamed,
+  ResolvedMethod,
+  resolveSignatureTypes,
+  resolveWitnessRequirement,
 } from "./method.js";
 import { enumerateTupleElements, tupleLabels } from "../abi/tuple.js";
 import { metatypeInstanceType } from "../abi/metatype.js";
@@ -60,7 +65,8 @@ export type MemberLookupOptions = Omit<ValueMethodResolveOptions, "static">;
 
 // A member found by name alone, never by resolving its types, so it is found and hookable whether
 // or not it or its type is generic. The facades bind one to call it. A vtable or witness slot no
-// symbol names is listed as `vtable#<offset>` or `<Protocol>#<index>` and has no signature.
+// symbol names is listed as `vtable#<offset>` or `<Protocol>#<index>` and has no signature until
+// the caller supplies one as the lookup's second argument.
 export interface SwiftMember {
   readonly address: NativePointer;
   readonly selector: string;
@@ -69,14 +75,36 @@ export interface SwiftMember {
   readonly signature: SwiftMemberSignature | null;
 }
 
+// The signature text of a slot lookup: `(x: Swift.Int) throws -> Swift.String` as a listing prints
+// a member's types, with a leading name if the slot should display under one.
+export type SlotSignature = string;
+
 interface UnnamedSlot {
   selector: string;
   isStatic: boolean;
+  isAsync: boolean;
+  entry: NativePointer; // the slot's word: the implementation, or an async method's function pointer record
   address: NativePointer;
   origin: MemberOrigin;
+  witness: { table: WitnessTable; requirement: ProtocolRequirement } | null;
 }
 
 const UNNAMED_SLOT_SELECTOR = /#\d+$/;
+
+// The text is a member's demangled spelling without its context, so a synthetic one makes it parse;
+// a nameless text keeps the slot's own selector. The descriptor, not the text, decides async.
+function parseSlotSignature(typeName: string, slot: UnnamedSlot, text: SlotSignature): SwiftFunctionSignature {
+  const named = !/^[(<]/.test(text);
+  const context = slot.isStatic ? `static ${typeName}` : typeName;
+  const signature = parseSwiftSignature(`${context}.${named ? "" : "slot"}${text}`);
+  if (signature === null || signature.kind !== "function") {
+    throw new Error(`cannot parse a signature from ${text}`);
+  }
+  if (signature.async !== slot.isAsync) {
+    throw new Error(`${slot.selector} on ${typeName} is ${slot.isAsync ? "async" : "not async"}, unlike the signature ${text}`);
+  }
+  return named ? signature : { ...signature, selector: slot.selector };
+}
 
 export interface SwiftInstanceMethod extends SwiftMember {
   bind(receiver: SwiftObject): SwiftBoundMethod;
@@ -217,43 +245,87 @@ export abstract class NominalType extends SwiftType {
     return this.selectors(false, options);
   }
 
-  instanceMethod(name: string, options: MemberLookupOptions = {}): SwiftInstanceMethod {
-    const member = this.member(name, { ...options, static: false }, `instance method ${name}`);
+  // A slot selector takes the signature text in place of the options, there being no symbol to read one from.
+  instanceMethod(name: string, options: MemberLookupOptions | SlotSignature = {}): SwiftInstanceMethod {
+    const member = this.member(name, false, options, `instance method ${name}`);
     const bind = member.signature === null
       ? (): never => { throw new Error(`${name} on ${this.name} has no symbol to read a signature from`); }
       : (receiver: SwiftObject): SwiftBoundMethod => receiver.$method(name, options);
     return withHookTarget({ ...member, bind }, hookTargetOf(member) ?? null);
   }
 
-  typeMethod(name: string, options: MemberLookupOptions = {}): SwiftMember {
-    return this.member(name, { ...options, static: true }, `type method ${name}`);
+  typeMethod(name: string, options: MemberLookupOptions | SlotSignature = {}): SwiftMember {
+    return this.member(name, true, options, `type method ${name}`);
   }
 
   initializer(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftMember {
-    return this.member(this.initializerSymbolName(), initializerLookup(selector, options), "initializer");
+    return this.namedMember(this.initializerSymbolName(), initializerLookup(selector, options), "initializer");
   }
 
   // A subscript's getter unless { accessor: "setter" }; the selector names its labels.
   subscript(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftMember {
-    return this.member(...subscriptLookup(selector, options, false), "subscript");
+    return this.namedMember(...subscriptLookup(selector, options, false), "subscript");
   }
 
   typeSubscript(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftMember {
-    return this.member(...subscriptLookup(selector, options, true), "type subscript");
+    return this.namedMember(...subscriptLookup(selector, options, true), "type subscript");
+  }
+
+  /**
+   * @internal The call a facade binds for a slot named with a signature: the facade supplies the
+   * receiver, the slot's kind the dispatch and async-ness, the text everything else.
+   */
+  slotCall(selector: string, signature: SlotSignature, isStatic: boolean): ResolvedMethod {
+    const slot = this.slot(selector, isStatic, `${isStatic ? "type" : "instance"} method ${selector}`);
+    const parsed = parseSlotSignature(this.name, slot, signature);
+    if (slot.witness !== null) {
+      return { ...resolveWitnessRequirement(slot.witness.table, slot.witness.requirement, parsed), origin: slot.origin };
+    }
+    return {
+      address: slot.address,
+      ...resolveSignatureTypes(parsed),
+      throws: parsed.throws,
+      isStatic,
+      selector: parsed.selector,
+      signature: parsed,
+      async: slot.isAsync,
+      asyncFunctionPointer: slot.isAsync ? new AsyncFunctionPointer(slot.entry) : undefined,
+      origin: slot.origin,
+    };
   }
 
   protected initializerSymbolName(): string {
     return "init";
   }
 
-  private member(selector: string, selectorOptions: ValueMethodResolveOptions, description: string): SwiftMember {
+  private member(selector: string, isStatic: boolean, options: MemberLookupOptions | SlotSignature, description: string): SwiftMember {
+    if (typeof options === "string") {
+      const slot = this.slot(selector, isStatic, description);
+      const signature = parseSlotSignature(this.name, slot, options);
+      return withHookTarget(
+        { address: slot.address, selector: signature.selector, isGeneric: signature.genericParams.length > 0, origin: slot.origin, signature: memberSignature(signature) },
+        { address: slot.address, signature, witnessDispatched: slot.witness !== null }
+      );
+    }
     if (UNNAMED_SLOT_SELECTOR.test(selector)) {
-      const slot = this.unnamedSlots(true, true).find((s) => s.selector === selector && s.isStatic === selectorOptions.static);
-      if (slot === undefined) {
-        throw new Error(`no ${description} on ${this.name}`);
-      }
+      const slot = this.slot(selector, isStatic, description);
       return { address: slot.address, selector, isGeneric: false, origin: slot.origin, signature: null };
     }
+    return this.namedMember(selector, { ...options, static: isStatic }, description);
+  }
+
+  private slot(selector: string, isStatic: boolean, description: string): UnnamedSlot {
+    if (!UNNAMED_SLOT_SELECTOR.test(selector)) {
+      throw new Error(`${selector} is not a vtable#<offset> or <Protocol>#<index> slot; a signature text is for a slot`);
+    }
+    const slot = this.unnamedSlots(true, true).find((s) => s.selector === selector && s.isStatic === isStatic);
+    if (slot === undefined) {
+      throw new Error(`no ${description} on ${this.name}`);
+    }
+    return slot;
+  }
+
+  private namedMember(selector: string, selectorOptions: ValueMethodResolveOptions, description: string): SwiftMember {
     const { name, options } = splitSelector(selector, selectorOptions);
     const found = findMember(this.name, name, lowerResolveOptions(options));
     if (found === null) {
@@ -296,16 +368,17 @@ export abstract class NominalType extends SwiftType {
     const slots: UnnamedSlot[] = [];
     for (const conformance of conformancesOf(descriptor.handle)) {
       const name = conformance.protocol.fullTypeName;
-      const table = name === null ? null : witnessTableOf(conformance, metadata);
-      if (table === null) {
+      const tableHandle = name === null ? null : witnessTableOf(conformance, metadata);
+      if (tableHandle === null) {
         continue;
       }
+      const table = new WitnessTable(tableHandle, metadata);
       for (const requirement of readProtocolRequirements(conformance.protocol)) {
         if (requirement.kind !== ProtocolRequirementKind.Method) {
           continue;
         }
-        const witness = table.add(requirement.witnessIndex * Process.pointerSize).readPointer().strip();
-        const address = requirement.isAsync ? new AsyncFunctionPointer(witness).code : witness;
+        const entry = table.requirement(requirement.witnessIndex);
+        const address = requirement.isAsync ? new AsyncFunctionPointer(entry).code : entry;
         const module = imageName(address);
         if ((!deep && module !== ownImage) || hasSwiftSymbolAt(address)) {
           continue;
@@ -313,8 +386,11 @@ export abstract class NominalType extends SwiftType {
         slots.push({
           selector: `${name}#${requirement.witnessIndex}`,
           isStatic: !requirement.isInstance,
+          isAsync: requirement.isAsync,
+          entry,
           address,
           origin: { kind: module === ownImage ? "own" : "extension", type: this.name, module },
+          witness: { table, requirement },
         });
       }
     }
@@ -408,11 +484,15 @@ export class ClassType extends NominalType {
         if (entry.kind !== MethodDescriptorKind.Method) {
           continue;
         }
+        const word = metadata.handle.add(entry.metadataOffset * Process.pointerSize).readPointer().strip();
         slots.push({
           selector: `vtable#${entry.metadataOffset}`,
           isStatic: !entry.isInstance,
-          address: metadata.handle.add(entry.metadataOffset * Process.pointerSize).readPointer().strip(),
+          isAsync: entry.isAsync,
+          entry: word,
+          address: entry.isAsync ? new AsyncFunctionPointer(word).code : word,
           origin,
+          witness: null,
         });
       }
     }

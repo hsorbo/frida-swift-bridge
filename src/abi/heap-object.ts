@@ -5,7 +5,7 @@ import { enumerateClassInstanceFields, readObject, SwiftValue } from "./instance
 import { ValueInstance } from "./value.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import { objcRetainCount, objcClassName } from "../runtime/objc.js";
-import { SwiftType, typeOf } from "../runtime/swift-type.js";
+import { NominalType, SlotSignature, SwiftType, typeOf } from "../runtime/swift-type.js";
 import { typeName } from "../runtime/type-name.js";
 import {
   BoundMethod,
@@ -17,6 +17,7 @@ import {
   bindGenericMethod,
   rootAsyncReceiver,
   bindGenericTypeClassMethod,
+  witnessRequirementReceiver,
   RawMethodResolveOptions,
   getProperty,
   setProperty,
@@ -162,12 +163,25 @@ export class ClassInstance implements RawInstance {
     if (resolved === null) {
       return rootAsyncReceiver(bindConformanceMethod(this.typeName, this.handle, name, options), this);
     }
+    return this.bind(resolved, this.handle);
+  }
+
+  // A vtable or witness slot called with the caller's signature: the former takes the object as a
+  // method does, the latter as the requirement's thunk does.
+  slot(selector: string, signature: SlotSignature): BoundMethod {
+    const resolved = (this.type as NominalType).slotCall(selector, signature, false);
+    const table = resolved.witnessSelf;
+    return this.bind(resolved, table === undefined ? this.handle : witnessRequirementReceiver(table, this.handle));
+  }
+
+  private bind(resolved: ResolvedMethod, self: NativePointer): BoundMethod {
+    const description = this.metadata.isTypeMetadata ? this.metadata.description : null;
     let executor = null;
     if (resolved.async === true && description !== null && isActor(description)) {
       executor = actorSerialExecutor(this.dynamicType, this.handle)
         ?? (isDefaultActor(description) ? { identity: this.handle, implementation: NULL } : null);
     }
-    return rootAsyncReceiver(bindResolved(resolved, this.handle, { executor }), this);
+    return rootAsyncReceiver(bindResolved(resolved, self, { executor }), this);
   }
 
   get vtable(): VTableEntry[] {

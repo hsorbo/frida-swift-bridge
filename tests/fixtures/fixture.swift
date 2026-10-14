@@ -1225,6 +1225,27 @@ public class Dispatcher {
     func hidden(_ x: Int) -> Int { x * 3 }
 }
 
+// Non-public methods keep their vtable slots and lose their symbols to strip: the slots are
+// called with a caller-supplied signature. Declaration order fixes the slot order.
+public class SlotHost {
+    public let base: Int
+    public init(base: Int) { self.base = base }
+    func plain(_ x: Int) -> Int { base + x }
+    func checked(_ x: Int) throws -> Int {
+        if x < 0 { throw CodedError(code: x) }
+        return base + x
+    }
+    func later(_ x: Int) async -> Int {
+        await Task.yield()
+        return base * x
+    }
+    class func tagged(_ x: Int) -> Int { x + 1000 }
+}
+public final class SlotSubHost: SlotHost {
+    public override init(base: Int) { super.init(base: base) }
+    override func plain(_ x: Int) -> Int { base - x }
+}
+
 // Generic class: Self metadata (hence T's metadata + Scalable witness) is recovered from the instance
 // isa, so its methods take no trailing type args. Still trips readVTable's not-fixed-offset guard.
 public class GenericHolder<T: Scalable> {

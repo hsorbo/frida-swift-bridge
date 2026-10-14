@@ -47,6 +47,7 @@ import {
   EnumType,
   ObjCClassWrapperType,
   MemberLookupOptions,
+  SlotSignature,
   SwiftMember,
   metadataOf,
   descriptorOf,
@@ -87,7 +88,12 @@ export abstract class SwiftTypeFacade {
     return this.$typeMethod(name, invokeOptions(args)).call(...args);
   }
 
-  abstract $typeMethod(name: string, options?: MemberLookupOptions): SwiftBoundMethod;
+  abstract $typeMethod(name: string, options?: MemberLookupOptions | SlotSignature): SwiftBoundMethod;
+
+  // A type's slot takes the metatype as self, as a named type method does.
+  protected slotTypeMethod(selector: string, signature: SlotSignature): SwiftBoundMethod {
+    return narrowBoundMethod(bindResolved(this.$type.slotCall(selector, signature, true), metadataOf(this.$type).handle));
+  }
 
   $subscript(...indicesThenOptions: unknown[]): CallResult {
     const { indices, selector, options } = splitSubscriptArgs(indicesThenOptions);
@@ -118,7 +124,10 @@ export abstract class SwiftTypeFacade {
 export abstract class SwiftValueType extends SwiftTypeFacade {
   declare readonly $type: StructType | EnumType;
 
-  $typeMethod(selector: string, selectorOptions: MemberLookupOptions = {}): SwiftBoundMethod {
+  $typeMethod(selector: string, selectorOptions: MemberLookupOptions | SlotSignature = {}): SwiftBoundMethod {
+    if (typeof selectorOptions === "string") {
+      return this.slotTypeMethod(selector, selectorOptions);
+    }
     const { name, options } = splitSelector(selector, selectorOptions);
     const type = this.$type;
     const raw = lowerResolveOptions(options);
@@ -326,7 +335,10 @@ export class SwiftClass extends SwiftTypeFacade {
     };
   }
 
-  $typeMethod(selector: string, selectorOptions: MemberLookupOptions = {}): SwiftBoundMethod {
+  $typeMethod(selector: string, selectorOptions: MemberLookupOptions | SlotSignature = {}): SwiftBoundMethod {
+    if (typeof selectorOptions === "string") {
+      return this.slotTypeMethod(selector, selectorOptions);
+    }
     const { name, options } = splitSelector(selector, selectorOptions);
     const type = this.$type;
     const raw = lowerResolveOptions({ ...options, static: true });
@@ -373,7 +385,10 @@ export class SwiftClass extends SwiftTypeFacade {
 export class SwiftObjCClass extends SwiftTypeFacade {
   declare readonly $type: ObjCClassWrapperType;
 
-  $typeMethod(selector: string, selectorOptions: MemberLookupOptions = {}): SwiftBoundMethod {
+  $typeMethod(selector: string, selectorOptions: MemberLookupOptions | SlotSignature = {}): SwiftBoundMethod {
+    if (typeof selectorOptions === "string") {
+      return this.slotTypeMethod(selector, selectorOptions);
+    }
     const { name, options } = splitSelector(selector, selectorOptions);
     const type = this.$type;
     const raw = lowerResolveOptions({ ...options, static: true });

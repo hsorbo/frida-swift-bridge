@@ -84,6 +84,7 @@ export {
   MemberQuery,
   MethodQuery,
   MemberLookupOptions,
+  SlotSignature,
   SwiftMember,
   SwiftInstanceMethod,
   NativeFunctionType,

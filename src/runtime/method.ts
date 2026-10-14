@@ -2129,7 +2129,7 @@ function rejectInitializer(signature: SwiftFunctionSignature): void {
   }
 }
 
-function resolveSignatureTypes(
+export function resolveSignatureTypes(
   signature: SwiftFunctionSignature
 ): { argTypes: Metadata[]; returnType: Metadata | null; returnClosure?: ArgPlan; thrown?: ThrownType; argConventions: ParamConvention[] } {
   rejectInitializer(signature);
@@ -3274,6 +3274,11 @@ function witnessReceiver(table: WitnessTable, classBound: Set<string>, self: Nat
   const cell = Memory.alloc(Process.pointerSize);
   cell.writePointer(self);
   return cell;
+}
+
+// A requirement's thunk takes self as the protocol declares it: a class-bound protocol's by reference.
+export function witnessRequirementReceiver(table: WitnessTable, self: NativePointer): NativePointer {
+  return witnessReceiver(table, selfSignature(table, [])!.classBound, self);
 }
 
 export function bindConformanceMethod(
