@@ -2182,7 +2182,7 @@ function valueSelfRouting(receiver: Metadata, selector: string, ownership: SelfO
 }
 
 // A consuming method takes ownership of self, so it gets a +1 copy and the caller's value survives.
-function copyOfValue(type: Metadata, value: NativePointer): NativePointer {
+export function copyOfValue(type: Metadata, value: NativePointer): NativePointer {
   const copy = Memory.alloc(type.typeLayout.stride);
   type.valueWitnesses.initializeWithCopy(copy, value);
   return copy;

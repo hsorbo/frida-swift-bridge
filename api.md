@@ -516,6 +516,9 @@ The control surface (never shadowed by Swift members of the same spelling):
 - `$field(name)`: a live borrowed [field view](#properties).
 - `$container()`: on a value facade wrapping a bridged `Array`/`Set`/`Dictionary`,
   the decoded JS value.
+- `[Symbol.iterator]()`: on a facade whose type conforms to `Sequence`, the Swift
+  iterator, so `for (const x of seq)`, `[...seq]` and `Array.from(seq)` work. See
+  [Iterating a Sequence](#iterating-a-sequence).
 - `$dispose()` and `[Symbol.dispose]()`: release (idempotent); works with `using`.
 - `equals(other)`: on an object, identity (Swift `===`); on a value, the type's
   `==` through its `Equatable` conformance, so a custom `==` decides. A value
@@ -1292,6 +1295,26 @@ call arrives as a value facade; `$container()` projects it:
 const ints = Swift.type("MyApp.Bag").$call("ints");   // a value facade
 ints.$container();    // [int64(10), int64(20), int64(30)]
 ```
+
+### Iterating a Sequence
+
+A facade whose type conforms to `Sequence` is a JavaScript iterable. Each
+element arrives as a call result would: numbers and strings as themselves,
+aggregates as facades, a `Dictionary` entry as a `[key, value]` pair, a `nil`
+element of a `[T?]` as `null`.
+
+```js
+for (const n of ints) { console.log(n); }       // 10, 20, 30
+[...Swift.type("MyApp.Bag").$call("intMap")];   // [[int64(1), int64(100)], [int64(2), int64(200)]]
+```
+
+The elements come from the type's own `makeIterator()` and `next()` through its
+`Sequence` and `IteratorProtocol` witness tables, so a custom `Sequence`, a
+`Collection`-only type and a class conformer iterate the same way, and nothing
+about the stdlib's storage layout is assumed, unlike `$container()`. One Swift
+call per element; the iterator is destroyed when the loop ends or `break`s. A
+facade of a type that is not a `Sequence` has no `Symbol.iterator`, so spreading
+it fails with JavaScript's own "is not iterable".
 
 ## Errors
 

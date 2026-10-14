@@ -16,6 +16,7 @@ import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js
 import { WitnessTable } from "../abi/witness-table.js";
 import { typeName } from "./type-name.js";
 import { POISON, invokeOptions, splitSubscriptArgs, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
+import { sequenceIterator } from "./sequence.js";
 
 const RESERVED = new Set([
   "toString",
@@ -66,6 +67,8 @@ export interface SwiftObjectBase {
   $set(name: string, value: CallArg): void;
   $field(name: string): SwiftField;
   $dispose(): void;
+  // Present at runtime only when the type conforms to Sequence.
+  [Symbol.iterator](): Iterator<CallResult>;
   equals(other: SwiftObject | NativePointer): boolean;
   toString(): string;
   [Symbol.dispose](): void;
@@ -187,6 +190,9 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
       if (typeof key === "symbol") {
         if (key === RAW) {
           return t;
+        }
+        if (key === Symbol.iterator) {
+          return sequenceIterator(target);
         }
         const member = Reflect.get(t, key);
         return typeof member === "function" ? member.bind(t) : member;

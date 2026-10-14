@@ -412,6 +412,24 @@ public struct Bag {
     public static func empty() -> [Int] { [] }
     public static func intSet() -> Set<Int> { [3, 1, 2] }
     public static func intMap() -> [Int: Int] { [1: 100, 2: 200] }
+    public static func optionals() -> [Int?] { [1, nil, 3] }
+}
+
+// A Sequence that is its own iterator: makeIterator() is the protocol's default, returning a copy.
+public struct Countdown: Sequence, IteratorProtocol {
+    public var n: Int
+    public mutating func next() -> Int? {
+        guard n > 0 else { return nil }
+        defer { n -= 1 }
+        return n
+    }
+}
+
+// A class conformer: Self is passed to the witness thunk through a cell.
+public class Playlist: Sequence {
+    let names: [String]
+    public init(names: [String]) { self.names = names }
+    public func makeIterator() -> IndexingIterator<[String]> { names.makeIterator() }
 }
 
 // Generic methods on a value receiver: small explodes self as a trailing arg, the 5-Int receiver
