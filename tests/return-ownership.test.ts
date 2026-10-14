@@ -3,6 +3,10 @@ import { loadFixture } from "./fixtures/load.js";
 
 import { SwiftObject, ClassInstance, ClassType, StructType, Metadata, metadataFor as metadataForRaw, typeOf } from "../src/abi.js";
 import { embedsManagedReference } from "../src/abi/instance.js";
+import { enumerateTupleElements, getUnlabelledTupleTypeMetadata } from "../src/abi/tuple.js";
+import { decodeReturn } from "../src/runtime/method.js";
+
+declare function gc(): void;
 
 function metadataFor(name: string, args?: Metadata[]): Metadata {
   return metadataForRaw(name, args)!;
@@ -41,6 +45,32 @@ describe("value return embedding a class ref", () => {
 
     owned.$dispose();
     expect(view.retainCount).toBe(before); // disposing the aggregate releases the embedded ref
+  });
+
+  test("a tuple element owns its storage once the tuple's buffer is gone", () => {
+    const token = (typeOf(metadataFor("fixture.Token")) as ClassType).facade.init(7);
+    const view = new ClassInstance(token.$handle);
+    const before = view.retainCount;
+    const Wrapper = metadataFor("fixture.Wrapper");
+    const wrapper = (typeOf(Wrapper) as StructType).facade.$call("make", token) as SwiftObject;
+
+    const tuple = getUnlabelledTupleTypeMetadata([Wrapper, metadataFor("Swift.Int")]);
+    const [, int] = [...enumerateTupleElements(tuple)];
+    // A page-sized allocation is unmapped when dropped, so an element still pointing into it faults.
+    let buffer: NativePointer | null = Memory.alloc(Process.pageSize);
+    Wrapper.valueWitnesses.initializeWithCopy(buffer, wrapper.$handle);
+    buffer.add(int.offset).writeS64(7);
+    const [element, seven] = decodeReturn(tuple, buffer) as [SwiftObject, Int64];
+    buffer = null;
+    gc();
+    gc();
+
+    expect(seven).toEqual(int64(7));
+    expect(view.retainCount).toBe(before + 2);
+    element.$dispose();
+    expect(view.retainCount).toBe(before + 1);
+    wrapper.$dispose();
+    expect(view.retainCount).toBe(before);
   });
 });
 

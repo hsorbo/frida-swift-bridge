@@ -485,6 +485,15 @@ function projectOptionalPayload(
   return { payloadType, address: projectBox(ret.readPointer()) };
 }
 
+function takeElement(type: Metadata, address: NativePointer): NativePointer {
+  if (type.valueWitnesses.isPOD) {
+    return address;
+  }
+  const own = Memory.alloc(Math.max(type.typeLayout.stride, 1));
+  type.valueWitnesses.initializeWithTake(own, address);
+  return own;
+}
+
 // Returns are +1: adopt a class; destroy a read non-POD temp; POD owns nothing. A value embedding a
 // managed reference would dangle on that destroy, so hand it back as an owned ValueInstance instead.
 export function decodeReturn(returnType: Metadata | null, ret: NativePointer | null): CallResult {
@@ -502,9 +511,11 @@ export function decodeReturn(returnType: Metadata | null, ret: NativePointer | n
     const some = projectOptionalPayload(returnType, ret);
     return some === null ? null : decodeReturn(some.payloadType, some.address);
   }
-  // A tuple decodes to an array, each element consumed in place by the recursion (not one facade).
+  // A tuple decodes to an array, each element consumed by the recursion (not one facade). A pointer
+  // into the tuple does not keep its allocation alive, and an adopted element outlives this call,
+  // so a non-POD element is taken into storage of its own first.
   if (returnType.kind === MetadataKind.Tuple) {
-    return [...enumerateTupleElements(returnType)].map((e) => decodeReturn(e.type, ret.add(e.offset)));
+    return [...enumerateTupleElements(returnType)].map((e) => decodeReturn(e.type, takeElement(e.type, ret.add(e.offset))));
   }
   // A class existential owns its +1 class ref in the first word; adopt it and skip the container
   // destroy, which would release that same ref and dangle the returned object.
