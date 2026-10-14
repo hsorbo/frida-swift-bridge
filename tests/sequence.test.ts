@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
+import { requireSymbolTable } from "./swift.js";
 
 import { Swift, SwiftValueObject } from "../src/index.js";
 
@@ -16,7 +17,8 @@ describe("iterating a Sequence facade", () => {
     loadFixture();
   });
 
-  test("an Array yields what $container() decodes", () => {
+  test("an Array yields what $container() decodes", (ctx) => {
+    requireSymbolTable(ctx);
     using ints = bagValue("ints");
     expect([...ints]).toEqual(ints.$container());
     using strings = bagValue("strings");
@@ -25,12 +27,14 @@ describe("iterating a Sequence facade", () => {
     expect([...empty]).toEqual([]);
   });
 
-  test("a Set yields its elements", () => {
+  test("a Set yields its elements", (ctx) => {
+    requireSymbolTable(ctx);
     using set = bagValue("intSet");
     expect([...set].sort((a, b) => Number(a) - Number(b))).toEqual([int64(1), int64(2), int64(3)]);
   });
 
-  test("a Dictionary yields [key, value] pairs", () => {
+  test("a Dictionary yields [key, value] pairs", (ctx) => {
+    requireSymbolTable(ctx);
     using map = bagValue("intMap");
     const entries = ([...map] as unknown[][]).sort(byFirst);
     expect(entries).toEqual([
@@ -39,28 +43,33 @@ describe("iterating a Sequence facade", () => {
     ]);
   });
 
-  test("an Array of optionals yields null for nil without ending early", () => {
+  test("an Array of optionals yields null for nil without ending early", (ctx) => {
+    requireSymbolTable(ctx);
     using values = bagValue("optionals");
     expect([...values]).toEqual([int64(1), null, int64(3)]);
   });
 
-  test("a Collection-only struct iterates through its implied Sequence conformance", () => {
+  test("a Collection-only struct iterates through its implied Sequence conformance", (ctx) => {
+    requireSymbolTable(ctx);
     using trio = Swift.struct("fixture.Trio")!.$new({ a: 1, b: 2, c: 3 });
     expect([...trio]).toEqual([int64(1), int64(2), int64(3)]);
   });
 
-  test("a struct that is its own iterator advances a copy", () => {
+  test("a struct that is its own iterator advances a copy", (ctx) => {
+    requireSymbolTable(ctx);
     using countdown = Swift.struct("fixture.Countdown")!.$new({ n: 3 });
     expect([...countdown]).toEqual([int64(3), int64(2), int64(1)]);
     expect(Number(countdown.n)).toBe(3);
   });
 
-  test("a class conformer passes self through a cell", () => {
+  test("a class conformer passes self through a cell", (ctx) => {
+    requireSymbolTable(ctx);
     using playlist = Swift.class("fixture.Playlist")!.init({ names: ["x", "y"] });
     expect([...playlist]).toEqual(["x", "y"]);
   });
 
-  test("for...of stops at a break and the facade iterates again", () => {
+  test("for...of stops at a break and the facade iterates again", (ctx) => {
+    requireSymbolTable(ctx);
     using ints = bagValue("ints");
     const seen: unknown[] = [];
     for (const x of ints) {
