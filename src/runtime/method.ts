@@ -3346,6 +3346,12 @@ export interface NamedRequirement {
   signature: SwiftFunctionSignature | SwiftAccessorSignature;
 }
 
+export interface UnnamedRequirement {
+  requirement: ProtocolRequirement;
+  name: null;
+  signature: null;
+}
+
 interface RequirementNaming {
   pending: ProtocolRequirement[];
   found: Map<number, NamedRequirement>;
@@ -3359,7 +3365,7 @@ const namingByProtocol = new Map<string, RequirementNaming>();
 // to any other conformance's table at the same index. Scanning every conforming type (rather than
 // requiring one caller-supplied table) both gives reflection a name with no invocation in hand and
 // lets a stripped conformance's own unrecoverable thunk still resolve by name via a sibling.
-export function namedProtocolRequirements(protocol: ContextDescriptor): NamedRequirement[] {
+export function namedProtocolRequirements(protocol: ContextDescriptor): (NamedRequirement | UnnamedRequirement)[] {
   const key = protocol.handle.toString();
   let naming = namingByProtocol.get(key);
   if (naming === undefined) {
@@ -3408,7 +3414,7 @@ export function namedProtocolRequirements(protocol: ContextDescriptor): NamedReq
     }
   }
 
-  return [...found.values()];
+  return pending.map((requirement) => found.get(requirement.witnessIndex) ?? { requirement, name: null, signature: null });
 }
 
 function conformanceTable(typeDescriptor: ContextDescriptor, protocol: ContextDescriptor): WitnessTable | null {
@@ -3426,7 +3432,7 @@ function conformanceTable(typeDescriptor: ContextDescriptor, protocol: ContextDe
 }
 
 function witnessCandidates(table: WitnessTable): NamedRequirement[] {
-  return namedProtocolRequirements(protocolOf(table));
+  return namedProtocolRequirements(protocolOf(table)).filter((c): c is NamedRequirement => c.name !== null);
 }
 
 // witness signatures mangle Self as "A" and its associated types as "A.<name>"
@@ -3502,6 +3508,7 @@ function resolveExtensionMethod(
   const { signature, mangled, constraints, isStatic } = matches[0];
   const requirement = requirementImplementedBy(
     table,
+    signature.selector,
     (r) => r.kind === ProtocolRequirementKind.Method && r.isAsync === signature.async && r.isInstance !== isStatic,
     (s) =>
       s.kind === "function" &&
@@ -3509,9 +3516,6 @@ function resolveExtensionMethod(
       sequenceEqual(s.argTypeNames, signature.argTypeNames) &&
       s.returnTypeName === signature.returnTypeName
   );
-  if (requirement === "undecodable") {
-    throw new Error(`cannot tell whether ${signature.selector} is a requirement of ${protocolName}`);
-  }
   let address: NativePointer;
   let asyncFunctionPointer: AsyncFunctionPointer | undefined;
   if (requirement !== null) {
@@ -3546,10 +3550,11 @@ function resolveExtensionMethod(
 // Stripped binaries only reveal a requirement's default through where the witness thunk branches.
 function requirementImplementedBy(
   table: WitnessTable,
+  member: string,
   isCandidate: (requirement: ProtocolRequirement) => boolean,
   isImplementation: (signature: ParsedSwiftSignature) => boolean
-): ProtocolRequirement | null | "undecodable" {
-  let undecodable = false;
+): ProtocolRequirement | null {
+  const unnamed: ProtocolRequirement[] = [];
   const protocol = protocolOf(table);
   for (const requirement of readProtocolRequirements(protocol).filter(isCandidate)) {
     const signature =
@@ -3557,12 +3562,29 @@ function requirementImplementedBy(
       witnessThunkSignature(table, requirement) ??
       siblingWitnessSignature(protocol, requirement);
     if (signature === null) {
-      undecodable = true;
+      unnamed.push(requirement);
     } else if (isImplementation(signature)) {
       return requirement;
     }
   }
-  return undecodable ? "undecodable" : null;
+  if (unnamed.length > 0) {
+    throw new Error(undecidedRequirementMessage(protocol.fullTypeName ?? "protocol", member, unnamed));
+  }
+  return null;
+}
+
+const SLOT_KIND_NOUN: Partial<Record<ProtocolRequirementKind, string>> = {
+  [ProtocolRequirementKind.Method]: "method",
+  [ProtocolRequirementKind.Getter]: "getter",
+  [ProtocolRequirementKind.Setter]: "setter",
+};
+
+// Every candidate shares the member's kind and instance-ness, so the first describes them all.
+function undecidedRequirementMessage(protocolName: string, member: string, unnamed: ProtocolRequirement[]): string {
+  const [{ kind, isInstance }] = unnamed;
+  const slots = unnamed.map((r) => `${protocolName}#${r.witnessIndex}`).join(", ");
+  const hint = kind === ProtocolRequirementKind.Method ? `; a slot is called with ${isInstance ? "$method" : "$typeMethod"}(slot, signature)` : "";
+  return `cannot tell whether ${member} is a requirement of ${protocolName}: no symbol names its ${isInstance ? "instance" : "type"} ${SLOT_KIND_NOUN[kind]} slot${unnamed.length > 1 ? "s" : ""} ${slots}${hint}`;
 }
 
 function siblingWitnessSignature(
@@ -3722,12 +3744,10 @@ function resolveExtensionAccessor(
   const requirementKind = kind === "getter" ? ProtocolRequirementKind.Getter : ProtocolRequirementKind.Setter;
   const requirement = requirementImplementedBy(
     table,
+    member,
     (r) => r.kind === requirementKind && r.isInstance !== isStatic,
     (s) => s.kind === kind && s.member === member
   );
-  if (requirement === "undecodable") {
-    throw new Error(`cannot tell whether ${member} is a requirement of ${protocolName}`);
-  }
   const address = requirement === null ? match.address.strip() : table.requirement(requirement.witnessIndex);
   const signature = selfSignature(table, requirement === null ? match.constraints : [])!;
   return witnessAccessor(table, address, member, kind, match.type, signature);

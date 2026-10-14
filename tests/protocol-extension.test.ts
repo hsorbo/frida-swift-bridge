@@ -82,7 +82,22 @@ describe("protocol-extension members on a conforming type", () => {
   test("another conformance's optimized thunk calling some other function first does not name the requirement", () => {
     loadOptimized();
     const t = (Swift.type("optimized.HiddenTagged") as SwiftStruct).$new({ n: 7 });
-    expect(() => t.tag()).toThrow(/cannot tell whether tag\(\) is a requirement of optimized\.Tagged/);
+    expect(() => t.tag()).toThrow(
+      /cannot tell whether tag\(\) is a requirement of optimized\.Tagged: no symbol names its instance method slot optimized\.Tagged#\d+; a slot is called with \$method\(slot, signature\)/
+    );
+  });
+
+  test("the slot an undecided requirement names calls the conformance's own witness with a signature", () => {
+    loadOptimized();
+    const t = (Swift.type("optimized.HiddenTagged") as SwiftStruct).$new({ n: 7 });
+    let message = "";
+    try {
+      t.tag();
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    const slot = /optimized\.Tagged#\d+/.exec(message)![0];
+    expect(t.$method(slot, "() -> Swift.Int").call()).toEqual(int64(7));
   });
 
   test("an extension method returns Self and passes an associated type indirectly for a loadable conformer", () => {

@@ -114,9 +114,13 @@ describe("Protocol.namedRequirements", () => {
     expect(greeter.requirements.map((r) => r.witnessIndex)).toContain(named.requirement.witnessIndex);
   });
 
-  test("a stripped conformance's witness thunk is unrecoverable, so no requirement is named", () => {
+  test("a stripped conformance's witness thunk is unrecoverable, so its requirement lists unnamed", () => {
     const greeter = Protocol.find("fixture.Greeter")!;
-    expect(greeter.namedRequirements()).toEqual([]);
+    const [greet, ...rest] = greeter.namedRequirements();
+    expect(rest).toEqual([]);
+    expect(greet.name).toBeNull();
+    expect(greet.signature).toBeNull();
+    expect(greet.requirement.kind).toBe(ProtocolRequirementKind.Method);
   });
 });
 

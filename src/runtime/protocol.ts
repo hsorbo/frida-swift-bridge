@@ -18,7 +18,7 @@ import {
   readProtocolRequirements,
   readRequirementSignature,
 } from "../abi/protocol-descriptor.js";
-import { NamedRequirement, namedProtocolRequirements } from "./method.js";
+import { NamedRequirement, UnnamedRequirement, namedProtocolRequirements } from "./method.js";
 import { GenericRequirementDescriptor } from "../abi/generic-requirement-descriptor.js";
 import { WitnessTable } from "../abi/witness-table.js";
 import { NominalType, typeFromDescriptor } from "./swift-type.js";
@@ -76,7 +76,7 @@ export class Protocol implements StableProtocol {
     return readProtocolRequirements(this.descriptor);
   }
 
-  namedRequirements(): NamedRequirement[] {
+  namedRequirements(): (NamedRequirement | UnnamedRequirement)[] {
     return namedProtocolRequirements(this.descriptor);
   }
 

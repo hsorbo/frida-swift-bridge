@@ -222,6 +222,7 @@ export {
   WitnessOrigin,
   classifyWitnessOrigin,
   NamedRequirement,
+  UnnamedRequirement,
   SwiftFunction,
   AsyncReceiver,
   resolveFunction,

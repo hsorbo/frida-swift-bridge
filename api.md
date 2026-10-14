@@ -1504,7 +1504,9 @@ corrupts memory instead of failing cleanly.
   protocol-extension member is a requirement (dispatched through the witness
   table) or an extension method (called directly), the bridge symbolicates the
   witnesses. If it can't, it throws
-  `cannot tell whether … is a requirement of …`.
+  `cannot tell whether … is a requirement of …`, naming the
+  `<Protocol>#<index>` slots the member may be, which a signature text calls
+  (see [Reflection](#reflection)).
 - **Closure captures.** Capture layout comes from the closure's capture
   descriptor. Escaping closures wrapped in a reabstraction thunk are unwrapped
   by their structure. When a capture's type can't be resolved, the bridge
