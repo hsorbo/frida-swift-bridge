@@ -43,10 +43,19 @@ interface RegisterAccess {
 }
 
 // How far the stack pointer, and the frame pointer once it copies it, lie below the entry stack
-// pointer; null past an adjustment the tracer does not follow.
+// pointer; null past an adjustment the tracer does not follow. resultSlots are the frame's slots,
+// by offset from the entry stack pointer, holding the indirect result pointer.
 interface StackFrame {
   spDepth: number | null;
   fpDepth: number | null;
+  resultSlots: Set<number>;
+}
+
+// Where the indirect result pointer lives when it arrives in an argument register: the registers
+// holding it, which a callee inherits, until a store goes through one of them.
+interface IndirectResultAliases {
+  registers: Set<string>;
+  stored: boolean;
 }
 
 interface ArchProbe {
@@ -63,6 +72,7 @@ interface ArchProbe {
   trackConstants(insn: Instruction, constants: Constants): void;
   trackFrame(insn: Instruction, frame: StackFrame): void;
   stackArgumentAccess(insn: Instruction, frame: StackFrame): RegisterAccess | null;
+  trackIndirectResult(insn: Instruction, frame: StackFrame, aliases: IndirectResultAliases): void;
 }
 
 // Empty results leave no trace in the result registers; Span-returning getters borrow self by address.
@@ -139,6 +149,7 @@ const arm64: ArchProbe = {
   stackArgumentAccess() {
     return null;
   },
+  trackIndirectResult() {},
 };
 
 const x64: ArchProbe = {
@@ -246,31 +257,65 @@ const x64: ArchProbe = {
       frame.spDepth = null;
     }
   },
-  // The caller's stack-passed words start above the return address and the home area. Capstone
-  // flags the store form of some SSE moves as a read, so the operand position tells a store.
+  // The caller's stack-passed words start above the return address and the home area.
   stackArgumentAccess(insn, frame) {
     if (insn.mnemonic === "lea") {
       return null;
     }
     const access: RegisterAccess = { read: [], written: [] };
     (insn as X86Instruction).operands.forEach((operand, index) => {
-      if (operand.type !== "mem" || operand.value.index !== undefined) {
+      const entryOffset = x64EntryOffset(operand, frame);
+      if (entryOffset === null || entryOffset < 8 + SWIFTCC.homeAreaSize) {
         return;
       }
-      const below = operand.value.base === "rsp" ? frame.spDepth : operand.value.base === "rbp" ? frame.fpDepth : null;
-      if (below === null) {
-        return;
-      }
-      const offset = operand.value.disp - below - 8 - SWIFTCC.homeAreaSize;
-      if (offset < 0) {
-        return;
-      }
-      const stores = index === 0 && !/^(cmp|test|push|v?u?comis[sd])$/.test(insn.mnemonic);
-      (stores ? access.written : access.read).push(stackArgument(Math.floor(offset / 8)));
+      const word = stackArgument(Math.floor((entryOffset - 8 - SWIFTCC.homeAreaSize) / 8));
+      (index === 0 && x64StoresFirstOperand(insn) ? access.written : access.read).push(word);
     });
     return access;
   },
+  // The pointer survives in the registers a mov copies it to and the 8-byte frame slots it is
+  // spilled to; any other write to one of them loses it.
+  trackIndirectResult(insn, frame, aliases) {
+    const [dst, src] = (insn as X86Instruction).operands;
+    if (dst?.type === "mem" && dst.value.base !== undefined && aliases.registers.has(dst.value.base) && x64StoresFirstOperand(insn)) {
+      aliases.stored = true;
+      return;
+    }
+    const slot = x64EntryOffset(dst, frame);
+    if (insn.mnemonic === "mov" && dst !== undefined && dst.size === 8) {
+      const srcSlot = x64EntryOffset(src, frame);
+      const copied = src?.type === "reg" ? aliases.registers.has(src.value) : srcSlot !== null && frame.resultSlots.has(srcSlot);
+      if (dst.type === "reg") {
+        copied ? aliases.registers.add(dst.value) : aliases.registers.delete(dst.value);
+        return;
+      }
+      if (slot !== null) {
+        copied ? frame.resultSlots.add(slot) : frame.resultSlots.delete(slot);
+        return;
+      }
+    }
+    for (const r of (insn as X86Instruction).regsAccessed.written) {
+      aliases.registers.delete(x64.canonicalRegister(r));
+    }
+    if (slot !== null) {
+      frame.resultSlots.delete(slot);
+    }
+  },
 };
+
+// The offset from the entry stack pointer of a memory operand based on the stack or frame pointer.
+function x64EntryOffset(operand: X86Operand | undefined, frame: StackFrame): number | null {
+  if (operand?.type !== "mem" || operand.value.index !== undefined) {
+    return null;
+  }
+  const below = operand.value.base === "rsp" ? frame.spDepth : operand.value.base === "rbp" ? frame.fpDepth : null;
+  return below === null ? null : operand.value.disp - below;
+}
+
+// Capstone flags the store form of some SSE moves as a read, so the operand position tells a store.
+function x64StoresFirstOperand(insn: Instruction): boolean {
+  return !/^(cmp|test|push|v?u?comis[sd])$/.test(insn.mnemonic);
+}
 
 const ARCH_PROBES: Partial<Record<Architecture, ArchProbe>> = { arm64, x64 };
 
@@ -377,15 +422,10 @@ function instanceGetters(members: OwnMember[], fullName: string): Getter[] {
   });
 }
 
-// Throwing and async functions can return without writing a result, or take it elsewhere. Where the
-// indirect result pointer shares its register with the first argument, only a static producer
-// without parameters tells the two apart.
-const STATIC_PRODUCER = SWIFTCC.indirectResultIsArgument ? "static " : "(static )?";
-const PRODUCER_PARAMS = SWIFTCC.indirectResultIsArgument ? "\\(\\)" : "\\(.*\\)";
-
+// Throwing and async functions can return without writing a result, or take it elsewhere.
 function resultProducers(members: OwnMember[], fullName: string): OwnMember[] {
   const name = escapeRegExp(fullName);
-  const producer = new RegExp(`^${STATIC_PRODUCER}${name}\\.[^.(]+${PRODUCER_PARAMS} -> ${name}$|^static ${name}\\.[^.(]+\\.getter : ${name}$`);
+  const producer = new RegExp(`^(static )?${name}\\.[^.(]+\\(.*\\) -> ${name}$|^static ${name}\\.[^.(]+\\.getter : ${name}$`);
   return members.filter((m) => producer.test(m.demangled) && !/ (throws|async)\b/.test(m.demangled));
 }
 
@@ -395,7 +435,7 @@ function foreignResultProducers(image: Module, token: string, fullName: string):
   if (identifier === undefined) {
     return [];
   }
-  const producer = new RegExp(`^${STATIC_PRODUCER}.*(${PRODUCER_PARAMS} -> |\\.getter : )${escapeRegExp(fullName)}$`);
+  const producer = new RegExp(`^(static )?.*(\\(.*\\) -> |\\.getter : )${escapeRegExp(fullName)}$`);
   return image
     .enumerateExports()
     .filter((e) => e.name.includes(identifier) && !e.name.startsWith(ownPrefix))
@@ -430,14 +470,17 @@ function classifySelfConvention(getter: NativePointer): ConventionEvidence | nul
   return null;
 }
 
+// Where the indirect result pointer has a register of its own, any read of it is a result being
+// written; where it rides the first argument register, only a store through it is.
 function classifyResultConvention(producer: NativePointer): ValueConvention | null {
   const arch = ARCH_PROBES[Process.arch]!;
   const uses = new Map<string, RegisterUse>();
-  const returned = traceEntryRegisterUses(arch, producer, uses, 0, { left: MAX_INSTRUCTIONS }) === "returned";
+  const aliases = SWIFTCC.indirectResultIsArgument ? { registers: new Set([arch.indirectResultRegister]), stored: false } : null;
+  const returned = traceEntryRegisterUses(arch, producer, uses, 0, { left: MAX_INSTRUCTIONS }, aliases) === "returned";
   if (uses.get(arch.asyncContextRegister) === "read") {
     return null;
   }
-  if (uses.get(arch.indirectResultRegister) === "read") {
+  if (aliases === null ? uses.get(arch.indirectResultRegister) === "read" : aliases.stored) {
     return "indirect";
   }
   return returned ? "direct" : null;
@@ -457,18 +500,22 @@ function traceEntryRegisterUses(
   uses: Map<string, RegisterUse>,
   depth: number,
   budget: { left: number },
+  aliases: IndirectResultAliases | null = null,
 ): TraceOutcome {
   let cursor = start;
   const constants: Constants = new Map();
   const saved = new Set<string>();
-  // Only the entry function's stack-passed words are the caller's arguments; a callee's are its caller's.
-  const frame: StackFrame = { spDepth: depth === 0 ? 0 : null, fpDepth: null };
+  const frame: StackFrame = { spDepth: 0, fpDepth: null, resultSlots: new Set() };
   while (budget.left-- > 0) {
     const insn = Instruction.parse(cursor);
     if (arch.trapMnemonics.has(insn.mnemonic)) {
       return "trapped";
     }
-    recordRegisterUses(arch, insn, uses, saved, frame);
+    // Only the entry function's stack-passed words are the caller's arguments; a callee's are its caller's.
+    recordRegisterUses(arch, insn, uses, saved, depth === 0 ? frame : null);
+    if (aliases !== null) {
+      arch.trackIndirectResult(insn, frame, aliases);
+    }
     const flow = arch.controlFlow(insn, constants);
     arch.trackConstants(insn, constants);
     arch.trackFrame(insn, frame);
@@ -486,13 +533,18 @@ function traceEntryRegisterUses(
         }
         // Past a callee that never returns lies the next function; past an untraced one, the
         // callee may have consumed self or the result pointer unseen.
-        const callee = traceEntryRegisterUses(arch, flow.target, uses, depth + 1, budget);
+        const callee = traceEntryRegisterUses(arch, flow.target, uses, depth + 1, budget, aliases);
         if (callee !== "returned") {
           return callee;
         }
         for (const r of arch.argumentRegisters) {
           if (!uses.has(r)) {
             uses.set(r, "written");
+          }
+        }
+        for (const r of aliases?.registers ?? []) {
+          if (!arch.calleeSavedRegisters.has(r)) {
+            aliases!.registers.delete(r);
           }
         }
         break;
@@ -551,10 +603,10 @@ function recordRegisterUses(
   insn: Instruction,
   uses: Map<string, RegisterUse>,
   saved: Set<string>,
-  frame: StackFrame,
+  entryFrame: StackFrame | null,
 ): void {
   const registers = arch.quirkyAccess(insn) ?? (insn as Arm64Instruction | X86Instruction).regsAccessed;
-  const stack = arch.stackArgumentAccess(insn, frame);
+  const stack = entryFrame && arch.stackArgumentAccess(insn, entryFrame);
   const read = [...registers.read.map(arch.canonicalRegister), ...(stack?.read ?? [])];
   const written = [...registers.written.map(arch.canonicalRegister), ...(stack?.written ?? [])];
   const frameSave = arch.isFrameSave(insn);

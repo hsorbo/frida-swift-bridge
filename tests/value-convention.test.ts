@@ -1,6 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
 
-import { probeSelfOwnership } from "../src/runtime/value-convention.js";
+import { loadResilient } from "./fixtures/load.js";
+import { probeSelfOwnership, probeValueConvention } from "../src/runtime/value-convention.js";
 import { SWIFTCC } from "../src/runtime/swiftcc.js";
 
 // Capstone attaches no register detail to these arm64 encodings, so the probe derives it from
@@ -27,6 +28,16 @@ describe("register-use probe on arm64 moves without Capstone register detail", (
     if (Process.arch !== "arm64") ctx.skip("arm64-only");
     const method = code([FMOV_H0_W8, STR_H0_X20, RET]);
     expect(probeSelfOwnership(method, { gp: [0, 0], fp: [0, 1], stack: [0, 0] })).toBe("mutating");
+  });
+});
+
+describe("value-convention probe on a type without getters", () => {
+  test("a resilient struct is indirect: its producer writes through the result pointer", () => {
+    expect(probeValueConvention(loadResilient(), "9resilient15ResilientOpaqueV")).toBe("indirect");
+  });
+
+  test("a frozen struct is direct: its producer returns in registers", () => {
+    expect(probeValueConvention(loadResilient(), "9resilient12FrozenOpaqueV")).toBe("direct");
   });
 });
 

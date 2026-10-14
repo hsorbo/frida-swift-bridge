@@ -55,6 +55,25 @@ public struct ResilientHolder {
 public func makeHolder(_ id: Int) -> ResilientHolder? { ResilientHolder(id: id) }
 public func holderTokenId(_ h: ResilientHolder) -> Int { h.token.id }
 
+// Told apart by their producers alone: no public getter shows the self convention, and the call
+// ahead of the result makes the -Onone producer spill its result pointer and reload it.
+func product(_ a: Int, _ b: Int) -> Int { a &* b }
+
+public struct ResilientOpaque {
+    var bits: Int
+    public static func scaled(_ base: ResilientOpaque, by factor: Int) -> ResilientOpaque {
+        let bits = product(base.bits, factor)
+        return ResilientOpaque(bits: bits)
+    }
+}
+@frozen public struct FrozenOpaque {
+    var bits: Int
+    public static func scaled(_ base: FrozenOpaque, by factor: Int) -> FrozenOpaque {
+        let bits = product(base.bits, factor)
+        return FrozenOpaque(bits: bits)
+    }
+}
+
 public enum ResilientMode { case first, second }
 @frozen public enum FrozenMode { case first, second }
 public func modeIndex(_ m: ResilientMode) -> Int { m == .first ? 1 : 2 }
