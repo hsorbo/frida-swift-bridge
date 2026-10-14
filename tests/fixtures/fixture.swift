@@ -1533,6 +1533,9 @@ public struct ByteSource {
     public func label(_ n: Int, _ body: (Int) -> String) -> String {
         return body(n)
     }
+    public func joinStr(_ a: String, _ b: String, _ c: String, _ n: Int, _ body: (String, String, String, Int) -> String) -> String {
+        return body(a, b, c, n)
+    }
 }
 
 var escapingBody: (() -> Void)?

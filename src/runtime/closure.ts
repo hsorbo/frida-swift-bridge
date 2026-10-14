@@ -148,7 +148,7 @@ export class SwiftClosure {
       resultSlot: stashedResultSlot(resultSlot),
       errorSlot,
       routesError: options.throws === true,
-      twoWordResultBuffer: null,
+      twoWordResult: null,
     });
     return new SwiftClosure({ callback, code, slots }, discriminator);
   }
@@ -176,10 +176,6 @@ export class SwiftClosure {
       ) as AnyNativeCallback;
       return new SwiftClosure({ callback, code: callback as unknown as NativePointer, slots: ptr(0) }, discriminator);
     }
-    if (twoWordResult && params.types.length > GP_ARG_REGISTERS) {
-      throw new Error("a closure returning two words takes at most four words of parameters here");
-    }
-
     const slots = Memory.alloc(Process.pointerSize * 3);
     const errorSlot = slots;
     const callback = new NativeCallback(
@@ -197,7 +193,7 @@ export class SwiftClosure {
       resultSlot: null,
       errorSlot,
       routesError: options.throws === true,
-      twoWordResultBuffer: twoWordResult ? slots.add(Process.pointerSize) : null,
+      twoWordResult: twoWordResult ? { buffer: slots.add(Process.pointerSize), stackWords: Math.max(0, params.types.length - GP_ARG_REGISTERS) } : null,
     });
     return new SwiftClosure({ callback, code, slots }, discriminator);
   }
@@ -228,7 +224,7 @@ export class SwiftClosure {
       resultSlot: stashedResultSlot(resultSlot),
       errorSlot,
       routesError: options.throws === true,
-      twoWordResultBuffer: null,
+      twoWordResult: null,
     });
     return new SwiftClosure({ callback, code, slots }, discriminator);
   }
@@ -312,7 +308,9 @@ interface ClosureTrampolineConfig {
   resultSlot: NativePointer | null; // null ⇒ no x8 stash (result rides in registers)
   errorSlot: NativePointer;
   routesError: boolean;
-  twoWordResultBuffer: NativePointer | null; // the callback's hidden result pointer, where the C ABI takes one
+  // The callback's hidden result pointer, where the C ABI takes one, and how many parameter words
+  // the caller passed on the stack.
+  twoWordResult: { buffer: NativePointer; stackWords: number } | null;
 }
 
 // Stash the @out result register (x8 / rax) for the callback, then route its error to swifterror
@@ -352,32 +350,38 @@ function writeArm64ClosureTrampoline(code: NativePointer, cfg: ClosureTrampoline
 }
 
 function writeX64ClosureTrampoline(code: NativePointer, cfg: ClosureTrampolineConfig): void {
-  Memory.patchCode(code, 0x80, (slot) => {
+  const stackWords = cfg.twoWordResult?.stackWords ?? 0;
+  // 16-align rsp across the call; the callee's home area, where there is one, goes below the pad,
+  // as do the stack words the hidden result pointer displaces.
+  const pad = 8 + SWIFTCC.homeAreaSize + 16 * Math.ceil(stackWords / 2);
+  Memory.patchCode(code, 0x80 + 0x10 * stackWords, (slot) => {
     const writer = new X86Writer(slot, { pc: code });
 
-    // 16-align rsp across the call; the callee's home area, where there is one, goes below the pad
-    const pad = 8 + SWIFTCC.homeAreaSize;
     writer.putSubRegImm("rsp", pad);
 
     if (cfg.resultSlot !== null) {
       writer.putMovRegAddress("r11", cfg.resultSlot);
       writer.putMovRegPtrReg("r11", "rax");
     }
-    if (cfg.twoWordResultBuffer !== null) {
-      // The hidden result pointer goes first, moving the register arguments up one; the last
-      // lands in the stack slot the pad leaves above the callee's home area.
+    if (cfg.twoWordResult !== null) {
+      // The hidden result pointer goes first, moving every argument up one slot: the last register
+      // argument and the stack words land in the slots the pad leaves above the callee's home area.
+      for (let i = 0; i < stackWords; i++) {
+        writer.putMovRegRegOffsetPtr("r11", "rsp", pad + 8 + SWIFTCC.homeAreaSize + i * 8);
+        writer.putMovRegOffsetPtrReg("rsp", SWIFTCC.homeAreaSize + 8 + i * 8, "r11");
+      }
       writer.putMovRegOffsetPtrReg("rsp", SWIFTCC.homeAreaSize, "r9");
       writer.putMovRegReg("r9", "r8");
       writer.putMovRegReg("r8", "rdx");
       writer.putMovRegReg("rdx", "rcx");
-      writer.putMovRegAddress("rcx", cfg.twoWordResultBuffer);
+      writer.putMovRegAddress("rcx", cfg.twoWordResult.buffer);
     }
 
     writer.putMovRegAddress("r11", cfg.target);
     writer.putCallReg("r11");
 
-    if (cfg.twoWordResultBuffer !== null) {
-      writer.putMovRegAddress("r11", cfg.twoWordResultBuffer);
+    if (cfg.twoWordResult !== null) {
+      writer.putMovRegAddress("r11", cfg.twoWordResult.buffer);
       writer.putMovRegRegPtr("rax", "r11");
       writer.putMovRegRegOffsetPtr("rdx", "r11", 8);
     }

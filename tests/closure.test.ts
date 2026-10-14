@@ -603,6 +603,11 @@ describe("String loadable closures through the facade", () => {
   test("(Int) -> String returns a synthesized string", () => {
     expect(byteSource().$method("label", { self: "borrowing", typeArguments: [] }).call(7, Swift.closure((n: number) => `n=${n}`))).toBe("n=7");
   });
+
+  test("(String, String, String, Int) -> String takes the parameter words past the argument registers", () => {
+    const join = Swift.closure((a: string, b: string, c: string, n: number) => [a, b, c].join("-").repeat(Number(n)));
+    expect(byteSource().$method("joinStr", { self: "borrowing", typeArguments: [] }).call("ab", "cd", "ef", 2, join)).toBe("ab-cd-efab-cd-ef");
+  });
 });
 
 describe("closure discriminator", () => {
