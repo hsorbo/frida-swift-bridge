@@ -3453,6 +3453,14 @@ export function resolveWitnessMethod(table: WitnessTable, methodName: string): R
     throw new Error(`ambiguous requirement ${methodName} on ${protocolName}: ${overloads}`);
   }
   const { requirement, signature } = matches[0];
+  return resolveWitnessRequirement(table, requirement, signature);
+}
+
+export function resolveWitnessRequirement(
+  table: WitnessTable,
+  requirement: ProtocolRequirement,
+  signature: SwiftFunctionSignature
+): ResolvedMethod {
   const address = table.requirement(requirement.witnessIndex);
   return {
     address,
