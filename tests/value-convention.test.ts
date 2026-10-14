@@ -28,3 +28,16 @@ describe("register-use probe on arm64 moves without Capstone register detail", (
     expect(probeSelfOwnership(method, { gp: [0, 0], fp: [0, 1] })).toBe("mutating");
   });
 });
+
+describe("register-use probe on x86-64 frame stores", () => {
+  test("a swiftself spill into the frame is a read, not a callee save", (ctx) => {
+    if (Process.arch !== "x64") ctx.skip("x86-64-only");
+    const page = Memory.alloc(Process.pageSize);
+    const writer = new X86Writer(page);
+    writer.putMovRegOffsetPtrReg("rsp", 0x20, "r13");
+    writer.putMovRegRegOffsetPtr("rax", "rsp", 0x20);
+    writer.putRet();
+    writer.flush();
+    expect(probeSelfOwnership(page, { gp: [0, 0], fp: [0, 0] })).toBe("mutating");
+  });
+});

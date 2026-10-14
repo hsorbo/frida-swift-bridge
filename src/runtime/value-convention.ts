@@ -152,8 +152,9 @@ const x64: ArchProbe = {
     match = /^[re]?(si|di|bp|sp)l?$/.exec(name);
     return match === null ? name : `r${match[1]}`;
   },
+  // x86-64 saves a callee-saved register only by push; a mov into the frame spills its entry value as data.
   isFrameSave(insn) {
-    return insn.mnemonic === "push" || (insn.mnemonic === "mov" && /^qword ptr \[r[sb]p\b/.test(insn.opStr));
+    return insn.mnemonic === "push";
   },
   quirkyAccess(insn) {
     if (insn.mnemonic === "push" && insn.opStr === "rax") {
