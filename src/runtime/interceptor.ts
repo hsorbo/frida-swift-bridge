@@ -580,7 +580,11 @@ function probedOwnership(
   );
   const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf, startReg);
   const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister, startReg);
-  return probeSelfOwnership(target, { gp: [inRegister.gp, trailing.gp], fp: [inRegister.fp, trailing.fp] });
+  return probeSelfOwnership(target, {
+    gp: [inRegister.gp, trailing.gp],
+    fp: [inRegister.fp, trailing.fp],
+    stack: [inRegister.stack, trailing.stack],
+  });
 }
 
 function decodeSelf({ metadata }: Receiver, address: NativePointer, selfMetadata: Metadata | null): CallResult {

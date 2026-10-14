@@ -60,14 +60,6 @@ export function requireSymbolTable(ctx: { skip: (reason?: string) => void }): vo
   }
 }
 
-// Win64 has four argument slots; a trailing self placed past them is on the stack, where the
-// self-ownership probe cannot see it being read.
-export function requireTrailingSelfInRegisters(ctx: { skip: (reason?: string) => void }): void {
-  if (Process.platform === "windows" && Process.arch === "x64") {
-    ctx.skip("a trailing self past the four Win64 argument registers is out of the probe's sight");
-  }
-}
-
 // The Windows runtime libraries are built without library evolution.
 export function requireResilientStdlib(ctx: { skip: (reason?: string) => void }): void {
   if (Process.platform === "windows") {

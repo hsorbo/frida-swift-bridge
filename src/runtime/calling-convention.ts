@@ -371,8 +371,8 @@ export class ArgumentAllocator {
     return size === 16 ? this.gp128() : this.gp(size);
   }
 
-  get registersUsed(): { gp: number; fp: number } {
-    return { gp: this.ngrn, fp: this.nsrn };
+  get registersUsed(): { gp: number; fp: number; stack: number } {
+    return { gp: this.ngrn, fp: this.nsrn, stack: Math.ceil(this.stackSize / 8) };
   }
 
   private stackSlot(width: number): ArgLocation {
@@ -522,8 +522,9 @@ function lowerArg(arg: SwiftArgType): LoweredArg {
   return { indirect: false, pieces: loweredScalars(arg) };
 }
 
-// The GP and FP argument registers taken by argTypes followed by implicitWords metadata/witness pointers.
-export function argumentRegisterUse(argTypes: SwiftArgType[], implicitWords: number, startReg = 0): { gp: number; fp: number } {
+// The GP and FP argument registers, then the stack words, taken by argTypes followed by implicitWords
+// metadata/witness pointers.
+export function argumentRegisterUse(argTypes: SwiftArgType[], implicitWords: number, startReg = 0): { gp: number; fp: number; stack: number } {
   const allocator = new ArgumentAllocator(startReg);
   for (const arg of argTypes.map(lowerArg)) {
     if (arg.indirect) {

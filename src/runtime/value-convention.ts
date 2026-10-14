@@ -42,6 +42,13 @@ interface RegisterAccess {
   written: string[];
 }
 
+// How far the stack pointer, and the frame pointer once it copies it, lie below the entry stack
+// pointer; null past an adjustment the tracer does not follow.
+interface StackFrame {
+  spDepth: number | null;
+  fpDepth: number | null;
+}
+
 interface ArchProbe {
   selfRegister: string;
   asyncContextRegister: string;
@@ -54,6 +61,8 @@ interface ArchProbe {
   quirkyAccess(insn: Instruction): RegisterAccess | null;
   controlFlow(insn: Instruction, constants: Constants): Flow;
   trackConstants(insn: Instruction, constants: Constants): void;
+  trackFrame(insn: Instruction, frame: StackFrame): void;
+  stackArgumentAccess(insn: Instruction, frame: StackFrame): RegisterAccess | null;
 }
 
 // Empty results leave no trace in the result registers; Span-returning getters borrow self by address.
@@ -126,6 +135,10 @@ const arm64: ArchProbe = {
       constants.delete(dest.value);
     }
   },
+  trackFrame() {},
+  stackArgumentAccess() {
+    return null;
+  },
 };
 
 const x64: ArchProbe = {
@@ -188,6 +201,75 @@ const x64: ArchProbe = {
     return { kind: "stop" };
   },
   trackConstants() {},
+  trackFrame(insn, frame) {
+    const [dst, src] = (insn as X86Instruction).operands;
+    const dstReg = dst?.type === "reg" ? dst.value : null;
+    const srcReg = src?.type === "reg" ? src.value : null;
+    const lowerStackPointer = (by: number) => {
+      frame.spDepth = frame.spDepth === null ? null : frame.spDepth + by;
+    };
+    switch (insn.mnemonic) {
+      case "push":
+        return lowerStackPointer(8);
+      case "pop":
+        lowerStackPointer(-8);
+        if (dstReg === "rbp") {
+          frame.fpDepth = null;
+        }
+        return;
+      case "sub":
+      case "add":
+        if (dstReg === "rsp" && src?.type === "imm") {
+          return lowerStackPointer(Number(src.value) * (insn.mnemonic === "sub" ? 1 : -1));
+        }
+        break;
+      case "mov":
+        if (dstReg === "rbp" && srcReg === "rsp") {
+          frame.fpDepth = frame.spDepth;
+          return;
+        }
+        if (dstReg === "rsp" && srcReg === "rbp") {
+          frame.spDepth = frame.fpDepth;
+          return;
+        }
+        break;
+      case "leave":
+        frame.spDepth = frame.fpDepth === null ? null : frame.fpDepth - 8;
+        frame.fpDepth = null;
+        return;
+    }
+    const { written } = (insn as X86Instruction).regsAccessed;
+    if (written.includes("rbp")) {
+      frame.fpDepth = null;
+    }
+    if (written.includes("rsp") && !insn.groups.includes("call")) {
+      frame.spDepth = null;
+    }
+  },
+  // The caller's stack-passed words start above the return address and the home area. Capstone
+  // flags the store form of some SSE moves as a read, so the operand position tells a store.
+  stackArgumentAccess(insn, frame) {
+    if (insn.mnemonic === "lea") {
+      return null;
+    }
+    const access: RegisterAccess = { read: [], written: [] };
+    (insn as X86Instruction).operands.forEach((operand, index) => {
+      if (operand.type !== "mem" || operand.value.index !== undefined) {
+        return;
+      }
+      const below = operand.value.base === "rsp" ? frame.spDepth : operand.value.base === "rbp" ? frame.fpDepth : null;
+      if (below === null) {
+        return;
+      }
+      const offset = operand.value.disp - below - 8 - SWIFTCC.homeAreaSize;
+      if (offset < 0) {
+        return;
+      }
+      const stores = index === 0 && !/^(cmp|test|push|v?u?comis[sd])$/.test(insn.mnemonic);
+      (stores ? access.written : access.read).push(stackArgument(Math.floor(offset / 8)));
+    });
+    return access;
+  },
 };
 
 const ARCH_PROBES: Partial<Record<Architecture, ArchProbe>> = { arm64, x64 };
@@ -228,6 +310,7 @@ export function probeValueConvention(image: Module, token: string): ValueConvent
 export interface RegisterRange {
   gp: [number, number];
   fp: [number, number];
+  stack: [number, number];
 }
 
 // A small loadable self goes by address in swiftself when the method mutates, else as the last formal
@@ -244,12 +327,13 @@ export function probeSelfOwnership(method: NativePointer, directOnly: RegisterRa
   }
   const fpRegisters = arch.argumentRegisters.filter((r) => /^(v|xmm)\d/.test(r));
   const gpRegisters = arch.argumentRegisters.filter((r) => !fpRegisters.includes(r));
-  const directOnlyRegisters = [
+  const directOnlyArguments = [
     ...gpRegisters.slice(directOnly.gp[0], directOnly.gp[1]),
     ...fpRegisters.slice(directOnly.fp[0], directOnly.fp[1]),
+    ...Array.from({ length: directOnly.stack[1] - directOnly.stack[0] }, (_, i) => stackArgument(directOnly.stack[0] + i)),
   ];
   const readsSelfRegister = uses.get(arch.selfRegister) === "read";
-  const readsDirectOnly = directOnlyRegisters.some((r) => uses.get(r) === "read");
+  const readsDirectOnly = directOnlyArguments.some((r) => uses.get(r) === "read");
   if (readsSelfRegister === readsDirectOnly) {
     return null;
   }
@@ -363,6 +447,10 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function stackArgument(word: number): string {
+  return `stack${word}`;
+}
+
 function traceEntryRegisterUses(
   arch: ArchProbe,
   start: NativePointer,
@@ -373,14 +461,17 @@ function traceEntryRegisterUses(
   let cursor = start;
   const constants: Constants = new Map();
   const saved = new Set<string>();
+  // Only the entry function's stack-passed words are the caller's arguments; a callee's are its caller's.
+  const frame: StackFrame = { spDepth: depth === 0 ? 0 : null, fpDepth: null };
   while (budget.left-- > 0) {
     const insn = Instruction.parse(cursor);
     if (arch.trapMnemonics.has(insn.mnemonic)) {
       return "trapped";
     }
-    recordRegisterUses(arch, insn, uses, saved);
+    recordRegisterUses(arch, insn, uses, saved, frame);
     const flow = arch.controlFlow(insn, constants);
     arch.trackConstants(insn, constants);
+    arch.trackFrame(insn, frame);
     switch (flow.kind) {
       case "return":
         return "returned";
@@ -455,10 +546,19 @@ function dlsymMemoryFills(): NativePointer[] {
 
 // A frame saves each callee-saved register once; storing its entry value again spills it as data
 // (-Onone keeps swiftself in a debug slot).
-function recordRegisterUses(arch: ArchProbe, insn: Instruction, uses: Map<string, RegisterUse>, saved: Set<string>): void {
-  const { read, written } = arch.quirkyAccess(insn) ?? (insn as Arm64Instruction | X86Instruction).regsAccessed;
+function recordRegisterUses(
+  arch: ArchProbe,
+  insn: Instruction,
+  uses: Map<string, RegisterUse>,
+  saved: Set<string>,
+  frame: StackFrame,
+): void {
+  const registers = arch.quirkyAccess(insn) ?? (insn as Arm64Instruction | X86Instruction).regsAccessed;
+  const stack = arch.stackArgumentAccess(insn, frame);
+  const read = [...registers.read.map(arch.canonicalRegister), ...(stack?.read ?? [])];
+  const written = [...registers.written.map(arch.canonicalRegister), ...(stack?.written ?? [])];
   const frameSave = arch.isFrameSave(insn);
-  for (const r of read.map(arch.canonicalRegister)) {
+  for (const r of read) {
     if (uses.has(r)) {
       continue;
     }
@@ -468,7 +568,7 @@ function recordRegisterUses(arch: ArchProbe, insn: Instruction, uses: Map<string
       uses.set(r, "read");
     }
   }
-  for (const r of written.map(arch.canonicalRegister)) {
+  for (const r of written) {
     if (!uses.has(r)) {
       uses.set(r, "written");
     }

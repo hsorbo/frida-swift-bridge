@@ -2777,9 +2777,13 @@ function probedSelfOwnership(
   const startReg = plan.async || plan.returnPlan === null ? 0 : argumentSlotBase(swiftArgType(plan.returnPlan));
   const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf, startReg);
   const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister, startReg);
-  const key = `${plan.address}:${trailing.gp}:${trailing.fp}:${inRegister.gp}:${inRegister.fp}`;
+  const key = `${plan.address}:${trailing.gp}:${trailing.fp}:${trailing.stack}:${inRegister.gp}:${inRegister.fp}:${inRegister.stack}`;
   if (!probedSelfOwnerships.has(key)) {
-    const directOnly: RegisterRange = { gp: [inRegister.gp, trailing.gp], fp: [inRegister.fp, trailing.fp] };
+    const directOnly: RegisterRange = {
+      gp: [inRegister.gp, trailing.gp],
+      fp: [inRegister.fp, trailing.fp],
+      stack: [inRegister.stack, trailing.stack],
+    };
     probedSelfOwnerships.set(key, probeSelfOwnership(plan.address, directOnly) ?? undefined);
   }
   return probedSelfOwnerships.get(key);
