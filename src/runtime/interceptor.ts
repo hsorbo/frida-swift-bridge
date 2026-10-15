@@ -53,7 +53,7 @@ export type SwiftInvocationContext = InvocationContext & { self?: CallResult; ty
 
 // Positional, and a labeled parameter also by its label: move(to:) names args.to. An unlabeled
 // parameter and a label an Array already owns (length, map) stay positional.
-export interface SwiftHookArgs extends Array<SwiftValue> {
+export interface SwiftHookArgs extends Array<CallResult> {
   readonly [label: string]: any;
 }
 
@@ -394,7 +394,7 @@ function carriedMetadata(
   return new Metadata(handle);
 }
 
-export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod | FacadeCallable | SwiftFunction | SwiftMemberFunction | SwiftFunctionMatch;
+export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod | FacadeCallable | SwiftFunction<any, any> | SwiftMemberFunction | SwiftFunctionMatch;
 
 interface HookEntry {
   address: NativePointer;
@@ -857,7 +857,7 @@ function materializeArgs(
   return { values, generics, trailingSelf, selfMetadata, thrownSlot };
 }
 
-function nameArgs(values: SwiftValue[], labels: (string | null)[]): SwiftHookArgs {
+function nameArgs(values: CallResult[], labels: (string | null)[]): SwiftHookArgs {
   labels.forEach((label, i) => {
     if (label !== null && !(label in values)) {
       Object.defineProperty(values, label, { value: values[i], enumerable: false });

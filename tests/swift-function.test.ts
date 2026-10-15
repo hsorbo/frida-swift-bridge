@@ -185,6 +185,22 @@ describe("Swift.function", () => {
       asyncListener.detach();
     }
   });
+
+  test("hooks an annotated function: Swift.function<string, [string]> is a hook target too", () => {
+    const greet = Swift.function<string, [string]>(module, ROBOT_GREET);
+    let seen: unknown;
+    const listener = Swift.Interceptor.attach(greet, {
+      onEnter(args) {
+        seen = args;
+      },
+    });
+    try {
+      expect(greet.bind(Swift.class("fixture.Robot")!.init("R2"))("X")).toBe("Hello X, I am R2");
+      expect(seen).toEqual(["X"]);
+    } finally {
+      listener.detach();
+    }
+  });
 });
 
 describe("Swift.function from a qualified selector", () => {

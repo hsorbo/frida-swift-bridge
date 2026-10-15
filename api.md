@@ -1197,7 +1197,7 @@ Swift.Interceptor.attach(greet, {
 ```js
 const listener = Swift.Interceptor.attach(addr, {
     onEnter(args) {
-        // args: SwiftValue[]
+        // args: CallResult[]
         console.log("addInts", args[0], args[1]);
     },
     onLeave(retval, error) {

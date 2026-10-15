@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { fixtureExport, existentialMetadata, loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
-import { Swift, type SwiftValue, type SwiftObject, type CallResult, type SwiftInvocationContext } from "../src/index.js";
+import { Swift, isSwiftObject, type SwiftValue, type SwiftObject, type CallResult, type SwiftInvocationContext } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { requireSymbolTable } from "./swift.js";
 
@@ -671,7 +671,7 @@ describe("Swift.Interceptor.attach", () => {
     let address: SwiftValue = null;
     const listener = Swift.Interceptor.attach(module.getExportByName(LINK_ADDRESS), {
       onEnter(args) {
-        address = (args[0] as SwiftObject).address;
+        address = isSwiftObject(args[0]) ? args[0].address : null;
       },
     });
     try {
