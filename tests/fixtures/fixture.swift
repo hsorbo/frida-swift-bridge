@@ -1642,6 +1642,12 @@ public func storeGenericCapturing<T>(_ value: T) {
     genericCapturingBody = { _ = value }
 }
 public func triggerGenericCapturing() { storeGenericCapturing(42) }
+public struct GenericCapturingBox<T> {
+    public var value: T
+    public init(_ value: T) { self.value = value }
+    public func storeCapturing<U>(_ u: U) { genericCapturingBody = { _ = (self.value, u) } }
+}
+public func triggerNestedGenericCapturing() { GenericCapturingBox(true).storeCapturing(7) }
 public func genericCapturingContext() -> UnsafeMutableRawPointer {
     return withUnsafePointer(to: &genericCapturingBody) { p in
         UnsafeRawPointer(p).load(fromByteOffset: MemoryLayout<Int>.size, as: UnsafeMutableRawPointer.self)

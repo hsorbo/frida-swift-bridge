@@ -19,18 +19,36 @@ const CF_NUMBER_SINT64_TYPE = 4;
 // keeps helper-allocated buffers from being GC'd once their local variable goes out of scope.
 const pinned: NativePointer[] = [];
 
-function makeCaptureDescriptor(mangledNames: string[], numBindings = 0): NativePointer {
-  const descriptor = arenaAlloc(0xc + mangledNames.length * 0x4);
+function makeCaptureDescriptor(
+  mangledNames: string[],
+  numBindings = 0,
+  metadataSources: [string, string][] = []
+): NativePointer {
+  const sourcesOffset = 0xc + mangledNames.length * 0x4;
+  const descriptor = arenaAlloc(sourcesOffset + metadataSources.length * 0x8);
   descriptor.writeU32(mangledNames.length);
-  descriptor.add(0x4).writeU32(0);
+  descriptor.add(0x4).writeU32(metadataSources.length);
   descriptor.add(0x8).writeU32(numBindings);
   mangledNames.forEach((name, i) => {
     const buf = arenaString(name);
     pinned.push(buf);
     writeRelativeDirectPointer(descriptor.add(0xc + i * 0x4), buf);
   });
+  metadataSources.forEach(([typeName, source], i) => {
+    const typeBuf = arenaString(typeName);
+    const sourceBuf = arenaString(source);
+    pinned.push(typeBuf, sourceBuf);
+    writeRelativeDirectPointer(descriptor.add(sourcesOffset + i * 0x8), typeBuf);
+    writeRelativeDirectPointer(descriptor.add(sourcesOffset + i * 0x8 + 0x4), sourceBuf);
+  });
   pinned.push(descriptor);
   return descriptor;
+}
+
+function metadataOf(mangledName: string): NativePointer {
+  const name = Memory.allocUtf8String(mangledName);
+  pinned.push(name);
+  return resolveTypeByMangledName({ address: name, length: mangledName.length })!.handle;
 }
 
 function makeHeapContext(captureDescriptor: NativePointer, offset: number): NativePointer {
@@ -101,6 +119,34 @@ describe("closure capture layout (synthetic)", () => {
 
   test("returns null for a generic-bound closure without attempting to resolve it", () => {
     const context = makeHeapContext(makeCaptureDescriptor(["Si"], 1), 0x10);
+    expect(layoutCaptures(context)).toBeNull();
+  });
+
+  test("substitutes generic parameters at two depths from the binding slots", () => {
+    requireSwift();
+    const sources: [string, string][] = [
+      ["x", "B0"],
+      ["q_", "B2"],
+      ["qd__", "B1"],
+    ];
+    const context = makeHeapContext(makeCaptureDescriptor(["qd__", "x", "q_", "SayxG"], 3, sources), 0x10);
+    context.add(0x10).writePointer(metadataOf("Si"));
+    context.add(0x18).writePointer(metadataOf("SS"));
+    context.add(0x20).writePointer(metadataOf("Sb"));
+
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual([
+      "Swift.String",
+      "Swift.Int",
+      "Swift.Bool",
+      "Swift.Array<Swift.Int>",
+    ]);
+    expect(slots.map(({ address }) => address.sub(context).toInt32())).toEqual([0x28, 0x38, 0x40, 0x48]);
+  });
+
+  test("returns null when a generic parameter comes from a capture rather than a binding", () => {
+    requireSwift();
+    const context = makeHeapContext(makeCaptureDescriptor(["x"], 1, [["x", "R0"]]), 0x10);
     expect(layoutCaptures(context)).toBeNull();
   });
 
@@ -289,7 +335,7 @@ describe("closure capture values (live runtime)", () => {
     expect(last).toBe(true);
   });
 
-  test("returns null for a closure whose captures depend on a generic parameter", () => {
+  test("decodes a capture whose type is the enclosing function's generic parameter", () => {
     requireSwift();
     const triggerGenericCapturing = new NativeFunction(fixtureExport("triggerGenericCapturing"), "void", []);
     const genericCapturingContext = new NativeFunction(fixtureExport("genericCapturingContext"), "pointer", []);
@@ -297,7 +343,20 @@ describe("closure capture values (live runtime)", () => {
     triggerGenericCapturing();
     const context = genericCapturingContext() as NativePointer;
 
-    expect(readCaptures(context)).toBeNull();
+    expect(readCaptures(context)).toEqual([int64(42)]);
+  });
+
+  test("decodes captures of a closure in a generic type's generic method", () => {
+    requireSwift();
+    const trigger = new NativeFunction(fixtureExport("triggerNestedGenericCapturing"), "void", []);
+    const genericCapturingContext = new NativeFunction(fixtureExport("genericCapturingContext"), "pointer", []);
+
+    trigger();
+    const context = genericCapturingContext() as NativePointer;
+
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual(["fixture.GenericCapturingBox<Swift.Bool>", "Swift.Int"]);
+    expect(readCaptures(context)).toEqual([{ value: true }, int64(7)]);
   });
 
   test("writeCaptures mutates a live closure, observable through a real Swift call", () => {

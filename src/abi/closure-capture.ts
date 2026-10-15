@@ -1,4 +1,9 @@
-import { captureDescriptorOf, offsetToFirstCapture, resolveCaptureType } from "./capture-descriptor.js";
+import {
+  captureDescriptorOf,
+  captureTypeResolverFromBindings,
+  offsetToFirstCapture,
+  resolveCaptureType,
+} from "./capture-descriptor.js";
 import { Metadata, MetadataKind } from "./metadata.js";
 import { classMetadataOf } from "./class-metadata.js";
 import { readValue, writeValue, SwiftValue } from "./instance.js";
@@ -8,7 +13,7 @@ export interface CaptureSlot {
   address: NativePointer;
 }
 
-// null: no closure, generic-bound, or an unresolved capture type.
+// null: no closure, a generic parameter not supplied by a binding, or an unresolved capture type.
 export function layoutCaptures(context: NativePointer): CaptureSlot[] | null {
   const direct = layoutCapturesAt(context);
   if (direct !== null) {
@@ -52,14 +57,19 @@ function layoutSoleClassCapture(context: NativePointer): CaptureSlot[] | null {
 
 function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
   const descriptor = captureDescriptorOf(context);
-  if (descriptor === null || descriptor.numBindings > 0) {
+  if (descriptor === null) {
+    return null;
+  }
+  const resolve =
+    descriptor.numBindings === 0 ? resolveCaptureType : captureTypeResolverFromBindings(context, descriptor);
+  if (resolve === null) {
     return null;
   }
 
-  let offset = offsetToFirstCapture(context);
+  let offset = offsetToFirstCapture(context) + descriptor.numBindings * Process.pointerSize;
   const slots: CaptureSlot[] = [];
   for (const record of descriptor.captureTypes) {
-    const type = resolveCaptureType(record);
+    const type = resolve(record);
     if (type === null) {
       return null;
     }

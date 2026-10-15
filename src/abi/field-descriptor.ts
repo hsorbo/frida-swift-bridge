@@ -111,6 +111,20 @@ export function resolveTypeByMangledName(
   return result.isNull() ? null : new Metadata(result);
 }
 
+export function resolveTypeByMangledNameInEnvironment(
+  name: MangledName,
+  environment: NativePointer,
+  genericArguments: NativePointer
+): Metadata | null {
+  const result = getSwiftCoreApi().swift_getTypeByMangledNameInEnvironment(
+    name.address,
+    name.length,
+    environment,
+    genericArguments
+  );
+  return result.isNull() ? null : new Metadata(result);
+}
+
 export function resolveFieldType(
   field: Field,
   context: ContextDescriptor | null = null,
