@@ -40,6 +40,7 @@ import { findType } from "../reflection/registry.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
+import { borrowedClosure } from "./closure-view.js";
 import { CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod, SwiftFunction } from "./method.js";
 import type { SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
@@ -603,7 +604,7 @@ function decodeMetatype(metadataPointer: NativePointer): SwiftValue {
 }
 
 function decodeClosure(fn: NativePointer, context: NativePointer): SwiftValue {
-  return { function: fn.strip(), context };
+  return borrowedClosure(fn.strip(), context);
 }
 
 // An async indirect result's pointer takes the first argument slot everywhere; a sync one only where

@@ -33,6 +33,8 @@ import type { StableProtocol, StableProtocolComposition } from "./runtime/protoc
 import { markResilientModule, markFrozenType } from "./runtime/calling-convention.js";
 import { resolveSwiftFunction } from "./runtime/qualified-function.js";
 import { closure } from "./runtime/closure.js";
+import { borrowedClosure } from "./runtime/closure-view.js";
+import type { SwiftClosureValue } from "./runtime/method.js";
 import { choose, ChooseOptions } from "./runtime/choose.js";
 import { moduleRegistry, ModuleRegistry } from "./runtime/module-namespace.js";
 import { ContextDescriptor } from "./abi/context-descriptor.js";
@@ -216,6 +218,10 @@ export const Swift = {
 
   adoptObject(handle: NativePointer): SwiftClassObject {
     return asSwiftObject(ClassInstance.adopt(handle));
+  },
+
+  borrowClosure(closure: NativePointer | { function: NativePointer; context: NativePointer }): SwiftClosureValue {
+    return closure instanceof NativePointer ? borrowedClosure(NULL, closure) : borrowedClosure(closure.function, closure.context);
   },
 
   choose(cls: SwiftClass, options?: ChooseOptions): SwiftClassObject[] {

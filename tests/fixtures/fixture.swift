@@ -268,6 +268,7 @@ public struct Handler {
     public var action: () -> Int
     public var label: String
 }
+public func makeHandler(_ n: Int) -> Handler { Handler(action: { n }, label: "handler") }
 private let keyPathHandlerActionValue: AnyKeyPath = \Handler.action
 private let keyPathHandlerLabelValue: AnyKeyPath = \Handler.label
 public func keyPathHandlerAction() -> UnsafeRawPointer { unsafeBitCast(keyPathHandlerActionValue, to: UnsafeRawPointer.self) }
@@ -1489,6 +1490,9 @@ public func invokeReturning<R>(_ base: UnsafeRawPointer, _ count: Int, _ body: (
 public func invokeMapping(_ n: Int, _ body: (Int) -> Int) -> Int {
     return body(n)
 }
+public func invokeMappingWithOffset(_ n: Int, _ offset: Int) -> Int { invokeMapping(n) { $0 + offset } }
+public func invokeEscaping(_ n: Int, _ body: @escaping (Int) -> Int) -> Int { body(n) }
+public func invokeEscapingWithOffset(_ n: Int, _ offset: Int) -> Int { invokeEscaping(n) { $0 + offset } }
 
 public func invokeCombine(_ a: Int, _ b: Int, _ body: (Int, Int) -> Int) -> Int {
     return body(a, b)

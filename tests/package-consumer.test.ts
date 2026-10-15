@@ -22,6 +22,7 @@ import Swift, {
   SwiftValueObject,
   SwiftField,
   SwiftBoundMethod,
+  SwiftClosureValue,
   MethodResolveOptions,
   ValueMethodResolveOptions,
   CallArg,
@@ -108,7 +109,9 @@ function acquisitionPreservesFacadeKindAtCompileTime(cls: SwiftClass, st: SwiftS
   const value: SwiftValueObject = st.$new(0);
   const made: SwiftValueObject | null = en.init();
   const kase: SwiftValueObject = en.$case("none");
-  void [borrowed, adopted, constructed, value, made, kase];
+  const closure: SwiftClosureValue = Swift.borrowClosure(NULL);
+  const captures: SwiftField[] = closure.$captures();
+  void [borrowed, adopted, constructed, value, made, kase, captures];
 }
 
 // A facade answers any Swift member name, so only its $type is checked: a misspelled reflection
@@ -212,6 +215,7 @@ void makeSwiftNativeFunction;
 test("published entry points resolve as runtime values", () => {
   expect(typeof Swift.borrowObject).toBe("function");
   expect(typeof Swift.adoptObject).toBe("function");
+  expect(typeof Swift.borrowClosure).toBe("function");
   expect(typeof Swift.NativeFunction).toBe("function");
   expect(typeof Swift.closure).toBe("function");
   expect(typeof Swift.demangle).toBe("function");

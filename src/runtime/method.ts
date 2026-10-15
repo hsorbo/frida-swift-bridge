@@ -54,6 +54,7 @@ import { probeSelfOwnership, RegisterRange } from "./value-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClass, SerialExecutorRef } from "./async-call.js";
 import { SwiftClosure, ClosureSpec, ClosureBody, ClosureWords, LoadableClosureBody, SwiftThrow, closureValueWords, isSwiftClosureValue } from "./closure.js";
+import { closurePrototype, captureFields } from "./closure-view.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName } from "./objc.js";
@@ -101,12 +102,15 @@ export type MethodKind = "method" | "init" | "subscript";
 
 export type CallResult = SwiftValue | SwiftObject | SwiftClosureValue | CallResult[];
 
-// A closure a call returned, owned: called like a method, its context released on dispose or
-// collection. `function` and `context` are its two words.
+// A closure as its two words, `function` and `context`, its captures as field views. One a call
+// returned is owned and callable, its context released on dispose or collection; a borrowed one (a
+// hook argument, closure-typed storage, Swift.borrowClosure) has no signature to be called with.
 export interface SwiftClosureValue {
   (...args: CallArg[]): CallResult;
   readonly function: NativePointer;
   readonly context: NativePointer;
+  readonly $owned: boolean;
+  $captures(): SwiftField[];
   $dispose(): void;
   [Symbol.dispose](): void;
 }
@@ -1830,12 +1834,16 @@ function adoptReturnedClosure(words: NativePointer, template: CallPlan): SwiftCl
       getSwiftCoreApi().swift_release(context);
     }
   };
-  const closure = ((...args: CallArg[]): CallResult => {
+  const checkLive = (): void => {
     if (state.disposed) {
       throw new Error(`closure ${template.selector} has been disposed`);
     }
+  };
+  const closure = ((...args: CallArg[]): CallResult => {
+    checkLive();
     return bound.call(...args) as CallResult;
   }) as SwiftClosureValue;
+  Object.setPrototypeOf(closure, closurePrototype);
   const weakId = Script.bindWeak(closure, () => {
     if (!state.disposed) {
       releaseContext();
@@ -1851,6 +1859,13 @@ function adoptReturnedClosure(words: NativePointer, template: CallPlan): SwiftCl
   return Object.defineProperties(closure, {
     function: { value: fn },
     context: { value: context },
+    $owned: { value: true },
+    $captures: {
+      value: (): SwiftField[] => {
+        checkLive();
+        return captureFields(closure, { checkLive });
+      },
+    },
     $dispose: { value: dispose },
     [Symbol.dispose]: { value: dispose },
   });

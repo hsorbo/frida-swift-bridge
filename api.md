@@ -97,6 +97,8 @@ The default export is the whole facade. Its members:
   [Closures](#closures).
 - `Swift.borrowObject(handle)`, `Swift.adoptObject(handle)`: wrap a raw class
   pointer as an object facade. See [Ownership and lifetime](#ownership-and-lifetime).
+- `Swift.borrowClosure(closure)`: view a closure's two words, or a bare context
+  pointer, with its captures. See [Closures](#closures).
 - `Swift.choose(cls, options?)`: the live instances of a class, found by
   scanning the heap. See [Finding live instances](#finding-live-instances).
 - `Swift.markResilient(moduleName)`: treat a module as built with library
@@ -1129,6 +1131,40 @@ callers of it do. A `SwiftClosureValue` is also accepted where a Swift API takes
 function-typed parameter: its two words are passed as they are, so a closure one
 call returned can be handed to the next.
 
+Every closure the bridge hands out is the same view. `$owned` says whether it
+holds the context, and `$captures()` lays the context out by its capture
+descriptor into field views (`SwiftField`: `handle`, `type`, `read()`,
+`write()`), one per capture in declaration order, each valid as long as the
+closure is. A captured object reads as its reference, a captured metatype as
+its type name, and a captured closure as another view. A closure made in a
+generic function types its captures by the arguments it was made with:
+
+```js
+const add2 = Swift.function(module, "$s5MyApp9makeAdderyS2icSiF").call(2);
+const [n] = add2.$captures();
+n.type.name;      // "Swift.Int"
+n.read();         // int64(2)
+n.write(40);
+add2(2);          // int64(42)
+```
+
+A closure argument in a `Swift.Interceptor` hook, a closure read out of a
+struct field, and `Swift.borrowClosure(x)` for a context found by hand (the two
+words as `{ function, context }`, or the bare context pointer a raw hook on a
+closure body holds in its self register) give borrowed views: `$owned` is
+false, `$dispose()` does nothing, and calling one throws, since no signature is
+known for it. A borrowed view is still accepted where a Swift API takes a
+function-typed parameter, and serializes to JSON as its two words.
+
+`$captures()` throws when the context cannot be laid out. A non-escaping
+closure's context is a frame on its caller's stack with no capture descriptor;
+a closure parameter is non-escaping unless declared `@escaping`, and a
+signature spells the two alike, so the bridge tells them apart by whether the
+context lies on the current thread's stack. A closure that captures nothing
+but one object may use that object as its context, and a capture typed by a
+generic parameter nothing supplies does not resolve. A class-typed capture is
+not writable through its view.
+
 > Closure synthesis is platform-specific — it requires an arm64 or x86-64 Swift
 > host. On other architectures `Swift.closure` is unavailable.
 
@@ -1138,7 +1174,8 @@ call returned can be handed to the next.
 your callbacks the **decoded** Swift arguments and return value — structs
 exploded to objects, strings as JS strings, class returns and values holding
 references (an Array, say) as live facades, existentials projected to their
-dynamic value. A closure argument is its two words, `{ function, context }`.
+dynamic value. A closure argument is a borrowed closure view: its two words
+`function` and `context`, with `$captures()` (see [Closures](#closures)).
 
 `target` is an address, a member found through a type's reflection, a bound
 method or a facade's bare-name method (hooked as its member; the receiver it
@@ -1321,8 +1358,10 @@ addInts(20, 22);    // int64(42), not 42
 A struct decodes to an object keyed by field name; a bridged `Array`, `Set`, or
 `Dictionary` decodes to the corresponding JS value. An `InlineArray` is a struct
 whose `_storage` field reads and writes as an array of its elements; a
-`Builtin.Borrow` reads as the value it refers to. A container returned from a
-call arrives as a value facade; `$container()` projects it:
+`Builtin.Borrow` reads as the value it refers to. A closure-typed value decodes
+to a borrowed closure view (see [Closures](#closures)), and a metatype to its
+type name. A container returned from a call arrives as a value facade;
+`$container()` projects it:
 
 ```js
 const ints = Swift.type("MyApp.Bag").$call("ints");   // a value facade
@@ -1405,6 +1444,8 @@ The acquisition names encode the reference contract:
 
 - `Swift.borrowObject(handle)` — a view; does not retain or consume.
 - `Swift.adoptObject(handle)` — takes over an existing +1 reference.
+- `Swift.borrowClosure(closure)` — a view of a closure's two words; does not
+  retain its context.
 - For value types: `$new(value)` initializes owned storage, `$borrow(address)`
   is a non-owning view, `$copy(address)` makes an independent owned copy, and
   `$adopt(address)` takes responsibility for already-initialized storage.
@@ -1507,10 +1548,11 @@ corrupts memory instead of failing cleanly.
   `cannot tell whether … is a requirement of …`, naming the
   `<Protocol>#<index>` slots the member may be, which a signature text calls
   (see [Reflection](#reflection)).
-- **Closure captures.** Capture layout comes from the closure's capture
-  descriptor. Escaping closures wrapped in a reabstraction thunk are unwrapped
-  by their structure. When a capture's type can't be resolved, the bridge
-  doesn't expose the captures.
+- **Closure captures.** `$captures()` lays a context out by its capture
+  descriptor, unwrapping the reabstraction thunk an escaping closure may be
+  wrapped in by its structure. It throws for a non-escaping closure, whose
+  context has no descriptor, for a closure that uses its single captured object
+  as its context, and for a capture whose type does not resolve.
 - **Every specialization of a generic type.** `specializations()` lists the
   metadata that exist in the process: the canonical prespecializations the
   compiler recorded on the type's descriptor, and every metadata the runtime

@@ -8,7 +8,7 @@ import {
 } from "./capture-descriptor.js";
 import { Metadata, MetadataKind } from "./metadata.js";
 import { classMetadataOf } from "./class-metadata.js";
-import { readValue, writeValue, SwiftValue } from "./instance.js";
+import { readValue, SwiftValue } from "./instance.js";
 
 export interface CaptureSlot {
   type: Metadata;
@@ -107,22 +107,4 @@ function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
 export function readCaptures(context: NativePointer): SwiftValue[] | null {
   const slots = layoutCaptures(context);
   return slots === null ? null : slots.map(({ type, address }) => readValue(type, address));
-}
-
-export function writeCaptures(context: NativePointer, values: SwiftValue[]): void {
-  const slots = layoutCaptures(context);
-  if (slots === null) {
-    throw new Error("writeCaptures: capture layout is not resolvable for this context");
-  }
-  if (values.length !== slots.length) {
-    throw new Error(`writeCaptures: expected ${slots.length} value(s), got ${values.length}`);
-  }
-  if (slots.some(({ type }) => type.kind === MetadataKind.Class)) {
-    throw new Error("writeCaptures: writing a class-typed capture is not supported");
-  }
-  slots.forEach(({ type, address }, i) => {
-    const scratch = Memory.alloc(type.typeLayout.stride);
-    writeValue(type, scratch, values[i]);
-    type.valueWitnesses.assignWithTake(address, scratch);
-  });
 }

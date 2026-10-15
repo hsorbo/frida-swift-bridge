@@ -16,7 +16,10 @@ import {
 import { ClassMetadata, classMetadataOf, enumerateClassFields } from "./class-metadata.js";
 import { typeName } from "../runtime/type-name.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
+import { borrowedClosure } from "../runtime/closure-view.js";
+import type { SwiftClosureValue } from "../runtime/method.js";
 import { createArray } from "./array.js";
+import { FunctionMetadataConvention, readFunctionType } from "./function-type.js";
 
 const STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET = 0x18;
 
@@ -37,6 +40,7 @@ export type SwiftValue =
   | NativePointer
   | { [field: string]: SwiftValue }
   | SwiftValue[]
+  | SwiftClosureValue
   | null;
 
 const U64_MASK = (1n << 64n) - 1n;
@@ -297,8 +301,13 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
       return readExistential(metadata, address);
     case MetadataKind.ExtendedExistential:
       return readExtendedExistential(metadata, address);
+    case MetadataKind.Metatype:
     case MetadataKind.ExistentialMetatype:
       return typeName(new Metadata(address.readPointer()));
+    case MetadataKind.Function:
+      return readFunctionType(metadata).convention === FunctionMetadataConvention.Swift
+        ? borrowedClosure(address.readPointer().strip(), address.add(Process.pointerSize).readPointer())
+        : address.readPointer();
     case MetadataKind.Tuple: {
       const elements: SwiftValue[] = [];
       for (const element of enumerateTupleElements(metadata)) {
@@ -355,6 +364,9 @@ export function swiftValueEquals(a: SwiftValue, b: SwiftValue): boolean {
       a.length === b.length &&
       a.every((element, i) => swiftValueEquals(element, b[i]))
     );
+  }
+  if (typeof a === "function" || typeof b === "function") {
+    return typeof a === "function" && typeof b === "function" && a.function.equals(b.function) && a.context.equals(b.context);
   }
   if (typeof a === "object" || typeof b === "object") {
     if (typeof a !== "object" || typeof b !== "object") {

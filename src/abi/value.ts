@@ -33,7 +33,7 @@ export class ValueInstance implements RawInstance {
     readonly metadata: Metadata,
     readonly handle: NativePointer,
     private readonly state: OwnedState | null,
-    private readonly parent: RawInstance | null
+    private readonly parent: Pick<RawInstance, "checkLive"> | null
   ) {
     if (state !== null) {
       const vwt = metadata.valueWitnesses;
@@ -47,7 +47,7 @@ export class ValueInstance implements RawInstance {
     }
   }
 
-  static borrow(metadata: Metadata, handle: NativePointer, parent: RawInstance | null = null): ValueInstance {
+  static borrow(metadata: Metadata, handle: NativePointer, parent: Pick<RawInstance, "checkLive"> | null = null): ValueInstance {
     return new ValueInstance(metadata, handle, null, parent);
   }
 

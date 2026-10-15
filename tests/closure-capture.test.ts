@@ -4,7 +4,7 @@ import { arenaAlloc, arenaString, writeRelativeDirectPointer } from "./arena.js"
 
 import { readObject } from "../src/abi/instance.js";
 import { metadataFor } from "../src/abi.js";
-import { layoutCaptures, readCaptures, unwrapReabstractionThunk, writeCaptures } from "../src/abi/closure-capture.js";
+import { layoutCaptures, readCaptures, unwrapReabstractionThunk } from "../src/abi/closure-capture.js";
 import { captureDescriptorOf, offsetToFirstCapture } from "../src/abi/capture-descriptor.js";
 import { resolveTypeByMangledName } from "../src/abi/field-descriptor.js";
 import { Metadata, MetadataKind } from "../src/abi/metadata.js";
@@ -447,69 +447,5 @@ describe("closure capture values (live runtime)", () => {
     const slots = layoutCaptures(context)!;
     expect(slots.map(({ type }) => typeName(type))).toEqual(["fixture.GenericCapturingBox<Swift.Bool>", "Swift.Int"]);
     expect(readCaptures(context)).toEqual([{ value: true }, int64(7)]);
-  });
-
-  test("writeCaptures mutates a live closure, observable through a real Swift call", () => {
-    requireSwift();
-    const storeCapturing = new NativeFunction(fixtureExport("storeCapturing"), "void", ["int64"]);
-    const capturingContext = new NativeFunction(fixtureExport("capturingContext"), "pointer", []);
-    const invokeCapturing = new NativeFunction(fixtureExport("invokeCapturing"), "int64", ["int64"]);
-
-    storeCapturing(7);
-    const context = capturingContext() as NativePointer;
-
-    writeCaptures(context, [100, "hi"]);
-
-    expect(invokeCapturing(5).toNumber()).toBe(107);
-  });
-
-  test("writeCaptures throws on a value-count mismatch", () => {
-    requireSwift();
-    const storeCapturing = new NativeFunction(fixtureExport("storeCapturing"), "void", ["int64"]);
-    const capturingContext = new NativeFunction(fixtureExport("capturingContext"), "pointer", []);
-
-    storeCapturing(7);
-    const context = capturingContext() as NativePointer;
-
-    expect(() => writeCaptures(context, [1])).toThrow();
-  });
-
-  test("writeCaptures correctly assigns a heap-allocated (non-inline) String capture", () => {
-    requireSwift();
-    const storeCapturing = new NativeFunction(fixtureExport("storeCapturing"), "void", ["int64"]);
-    const capturingContext = new NativeFunction(fixtureExport("capturingContext"), "pointer", []);
-    const invokeCapturing = new NativeFunction(fixtureExport("invokeCapturing"), "int64", ["int64"]);
-
-    storeCapturing(7);
-    const context = capturingContext() as NativePointer;
-
-    const longSuffix = "a string well past the small-string inline capacity of fifteen bytes";
-    writeCaptures(context, [100, longSuffix]);
-    expect(invokeCapturing(5).toNumber()).toBe(100 + 5 + longSuffix.length);
-
-    const anotherLongSuffix = "and now overwritten with a second, differently-sized heap string";
-    writeCaptures(context, [1, anotherLongSuffix]);
-    expect(invokeCapturing(5).toNumber()).toBe(1 + 5 + anotherLongSuffix.length);
-  });
-
-  test("writeCaptures rejects a class-typed capture without mutating any slot", () => {
-    requireSwift();
-    const storeMixedCapturing = new NativeFunction(fixtureExport("storeMixedCapturing"), "void", [
-      "int64",
-      "int64",
-      "int64",
-    ]);
-    const mixedCapturingContext = new NativeFunction(fixtureExport("mixedCapturingContext"), "pointer", []);
-
-    storeMixedCapturing(1, 5, 9);
-    const context = mixedCapturingContext() as NativePointer;
-    const before = readCaptures(context)!;
-
-    expect(() => writeCaptures(context, [false, 6, ptr(0)])).toThrow();
-
-    const after = readCaptures(context)!;
-    expect(after[0]).toBe(before[0]);
-    expect(after[1]).toEqual(before[1]);
-    expect((after[2] as NativePointer).equals(before[2] as NativePointer)).toBeTruthy();
   });
 });
