@@ -1,11 +1,10 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { StructType, SwiftStruct } from "../src/index.js";
-import { metadataFor, typeOf } from "../src/abi.js";
+import { Swift, SwiftStruct } from "../src/index.js";
 
 function st(name: string): SwiftStruct {
-  return (typeOf(metadataFor(name)!) as StructType).facade;
+  return Swift.struct(name)!;
 }
 
 describe("value-type property accessor self routing", () => {

@@ -2,11 +2,11 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, fixtureExport } from "./fixtures/load.js";
 import { requireSymbolTable } from "./swift.js";
 
-import { Swift, ClassType, StructType, SwiftClassObject } from "../src/index.js";
-import { ValueInstance, metadataFor, typeOf } from "../src/abi.js";
+import { Swift, SwiftClassObject } from "../src/index.js";
+import { ValueInstance } from "../src/abi.js";
 
 function robot(name: string) {
-  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init(name);
+  return Swift.class("fixture.Robot")!.init(name);
 }
 
 describe("stable object boundary", () => {
@@ -47,7 +47,7 @@ describe("stable object boundary", () => {
   test("initializer() returns a narrow view without resolution internals", (ctx) => {
     requireSymbolTable(ctx);
     loadFixtureSyms();
-    const init = (typeOf(metadataFor("fixturesyms.Point")!) as StructType).facade.$initializer() as any;
+    const init = Swift.struct("fixturesyms.Point")!.$initializer() as any;
     expect(typeof init.call).toBe("function");
     expect(init.address.isNull()).toBe(false);
     expect(init.resolved).toBeUndefined();
@@ -73,8 +73,8 @@ describe("stable object boundary", () => {
   });
 
   test("a $field view type-checks and marshals as a call argument", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const s = (typeOf(metadataFor("fixture.LoadableStruct")!) as StructType).facade.$new({ a: 3, b: 4, c: 0, d: 0 });
+    const Int = Swift.type("Swift.Int")!;
+    const s = Swift.struct("fixture.LoadableStruct")!.$new({ a: 3, b: 4, c: 0, d: 0 });
     const fieldA = s.$field("a");
     const add = Swift.NativeFunction(fixtureExport("fixture.addInts"), Int, [Int, Int]);
     expect(add(fieldA, fieldA)).toEqual(int64(6));

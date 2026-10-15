@@ -2,9 +2,6 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftClass, SwiftStruct, type SwiftValueObject, type SwiftClassObject, type CallResult, type SwiftValue } from "../src/index.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
-import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
-import { metadataFor } from "../src/abi.js";
 
 function grid(): SwiftValueObject {
   return (Swift.type("fixture.Grid") as SwiftStruct).init([1, 2, 3, 4]) as SwiftValueObject;
@@ -60,15 +57,15 @@ describe("subscripts", () => {
       onLeave(ret: CallResult) { seen[seen.length - 1].ret = ret; },
     });
     const listeners = [
-      SwiftInterceptor.attach(Grid.$type.subscript("subscript(row:column:)"), record("row:column")),
-      SwiftInterceptor.attach(Grid.$type.subscript("subscript(_:)", { accessor: "setter" }), record("set")),
-      SwiftInterceptor.attach(loadFixture().getExportByName("$s7fixture4GridV7trackedS2i_tciM"), record("modify")),
-      SwiftInterceptor.attach(Grid.$type.typeSubscript({ labels: ["unit"] }), record("unit")),
-      SwiftInterceptor.attach(fixtureExport("fixture.Grid.subscript.read : (read: Swift.Int)"), record("read")),
-      SwiftInterceptor.attach(fixtureExport("fixture.Grid.subscript.read : <A>(echo: A)"), record("echo")),
+      Swift.Interceptor.attach(Grid.$type.subscript("subscript(row:column:)"), record("row:column")),
+      Swift.Interceptor.attach(Grid.$type.subscript("subscript(_:)", { accessor: "setter" }), record("set")),
+      Swift.Interceptor.attach(loadFixture().getExportByName("$s7fixture4GridV7trackedS2i_tciM"), record("modify")),
+      Swift.Interceptor.attach(Grid.$type.typeSubscript({ labels: ["unit"] }), record("unit")),
+      Swift.Interceptor.attach(fixtureExport("fixture.Grid.subscript.read : (read: Swift.Int)"), record("read")),
+      Swift.Interceptor.attach(fixtureExport("fixture.Grid.subscript.read : <A>(echo: A)"), record("echo")),
     ];
     try {
-      expect(makeSwiftNativeFunction(fixtureExport("fixture.driveGrid"), metadataFor("Swift.Int")!, [])()!.readS64()).toEqual(int64(125));
+      expect(Swift.NativeFunction(fixtureExport("fixture.driveGrid"), Swift.type("Swift.Int")!, [])()).toEqual(int64(125));
     } finally {
       listeners.forEach((l) => l.detach());
     }

@@ -1,12 +1,12 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { ClassType, SwiftError, metadataFor, typeOf } from "../src/abi.js";
+import { Swift, SwiftError } from "../src/index.js";
 
 declare function gc(): void;
 
 function ticker() {
-  return (typeOf(metadataFor("fixture.Ticker")!) as ClassType).facade.init();
+  return Swift.class("fixture.Ticker")!.init();
 }
 
 describe("actor-isolated async calling", () => {
@@ -67,7 +67,7 @@ describe("actor-isolated async calling", () => {
 });
 
 function customTicker() {
-  return (typeOf(metadataFor("fixture.CustomExecutorTicker")!) as ClassType).facade.init();
+  return Swift.class("fixture.CustomExecutorTicker")!.init();
 }
 
 describe("custom-executor actor async calling", () => {
@@ -76,7 +76,7 @@ describe("custom-executor actor async calling", () => {
   });
 
   test("a custom-executor actor is an actor but not a default actor", () => {
-    const t = typeOf(metadataFor("fixture.CustomExecutorTicker")!) as ClassType;
+    const t = Swift.class("fixture.CustomExecutorTicker")!.$type;
     expect(t.isActor).toBe(true);
     expect(t.isDefaultActor).toBe(false);
   });

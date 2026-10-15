@@ -2,7 +2,6 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, SwiftClass, SwiftStruct, type SwiftObject, type CallResult, type SwiftValue } from "../src/index.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
 
 function robot(name: string): SwiftObject {
   return (Swift.type("fixture.Robot") as SwiftClass).init(name);
@@ -67,12 +66,12 @@ describe("hooking a member", () => {
   test("a bound method and a reflected member hook the same code with their own signature", () => {
     const seen: { labels: (string | null)[]; args: SwiftValue[] }[] = [];
     const greet = robot("R2").$method("greet");
-    const listener = SwiftInterceptor.attach(greet, {
+    const listener = Swift.Interceptor.attach(greet, {
       onEnter(args) {
         seen.push({ labels: greet.signature.labels, args });
       },
     });
-    const viaType = SwiftInterceptor.attach((Swift.type("fixture.Robot") as SwiftClass).$type.instanceMethod("greet"), {
+    const viaType = Swift.Interceptor.attach((Swift.type("fixture.Robot") as SwiftClass).$type.instanceMethod("greet"), {
       onLeave(ret) {
         seen.push({ labels: [], args: [ret as SwiftValue] });
       },
@@ -89,7 +88,7 @@ describe("hooking a member", () => {
   test("an async bound method hooks its completion", async () => {
     const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100);
     let seen: CallResult = null;
-    const listener = SwiftInterceptor.attachAsync(calc.$method("addAsync"), {
+    const listener = Swift.Interceptor.attachAsync(calc.$method("addAsync"), {
       onComplete(ret) {
         seen = ret;
       },
@@ -106,7 +105,7 @@ describe("hooking a member", () => {
     const Int = Swift.type("Swift.Int")!;
     const box = (Swift.type("fixture.Box") as SwiftClass).init();
     let seen: string[] | null = null;
-    const listener = SwiftInterceptor.attach(box.$type.instanceMethod("echo"), {
+    const listener = Swift.Interceptor.attach(box.$type.instanceMethod("echo"), {
       onEnter() {
         seen = this.typeArguments ?? null;
       },
@@ -121,7 +120,7 @@ describe("hooking a member", () => {
 
   test("a protocol-dispatched member and a plain object are refused", () => {
     const describer = (Swift.type("fixture.DefaultDescriber") as SwiftStruct).$new({ displayName: "Ada" });
-    expect(() => SwiftInterceptor.attach(describer.$method("shout"), { onEnter() {} })).toThrow(/protocol witness/);
-    expect(() => SwiftInterceptor.attach({ address: ptr(1) } as never, { onEnter() {} })).toThrow(/hook target/);
+    expect(() => Swift.Interceptor.attach(describer.$method("shout"), { onEnter() {} })).toThrow(/protocol witness/);
+    expect(() => Swift.Interceptor.attach({ address: ptr(1) } as never, { onEnter() {} })).toThrow(/hook target/);
   });
 });

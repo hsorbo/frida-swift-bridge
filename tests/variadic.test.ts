@@ -2,9 +2,6 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftClass, SwiftStruct, type SwiftObject, type SwiftValue, type SwiftValueObject } from "../src/index.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
-import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
-import { metadataFor } from "../src/abi.js";
 
 const SUM_VARIADIC = "$s7fixture11sumVariadicyS2id_tF";
 const JOIN_VARIADIC = "$s7fixture12joinVariadic_9separatorS2Sd_SStF";
@@ -40,15 +37,14 @@ describe("variadic parameters", () => {
   });
 
   test("a hook decodes a variadic argument as an Array facade", () => {
-    const Int = metadataFor("Swift.Int")!;
     let seen: SwiftValue | null = null;
-    const listener = SwiftInterceptor.attach(fixtureExport("fixture.sumVariadic"), {
+    const listener = Swift.Interceptor.attach(fixtureExport("fixture.sumVariadic"), {
       onEnter(args) {
         seen = (args[0] as SwiftObject).$container!(); // the literal dies with the call
       },
     });
     try {
-      expect(makeSwiftNativeFunction(fixtureExport("fixture.driveSumVariadic"), Int, [])()!.readS64()).toEqual(int64(6));
+      expect(Swift.NativeFunction(fixtureExport("fixture.driveSumVariadic"), Swift.type("Swift.Int")!, [])()).toEqual(int64(6));
     } finally {
       listener.detach();
     }

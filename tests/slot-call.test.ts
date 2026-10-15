@@ -13,7 +13,6 @@ import {
   metadataOf,
   readVTable,
 } from "../src/abi.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
 
 import { Swift, SwiftClass, SwiftStruct, SwiftError, type CallResult, type SwiftValue } from "../src/index.js";
 
@@ -135,7 +134,7 @@ describe("calling a vtable slot with a supplied signature", () => {
     const member = host().$type.instanceMethod(plain, INT_TO_INT);
     let seen: SwiftValue[] = [];
     let left: CallResult = null;
-    const listener = SwiftInterceptor.attach(member, {
+    const listener = Swift.Interceptor.attach(member, {
       onEnter(args) {
         seen = args;
       },
@@ -150,7 +149,7 @@ describe("calling a vtable slot with a supplied signature", () => {
     }
     expect(seen).toEqual([int64(5)]);
     expect(left).toEqual(int64(15));
-    const viaBound = SwiftInterceptor.attach(host().init(1).$method(plain, INT_TO_INT), { onEnter() {} });
+    const viaBound = Swift.Interceptor.attach(host().init(1).$method(plain, INT_TO_INT), { onEnter() {} });
     viaBound.detach();
   });
 });
@@ -183,9 +182,9 @@ describe("calling a witness slot with a supplied signature", () => {
   test("a witness slot is refused as a typed hook target, like a named requirement", () => {
     const speaker = Swift.class("fixture.BaseSpeaker")!.init();
     const bound = speaker.$method(methodSlot("fixture.Vocal"), "() -> Swift.String");
-    expect(() => SwiftInterceptor.attach(bound, { onEnter() {} })).toThrow(/protocol witness/);
+    expect(() => Swift.Interceptor.attach(bound, { onEnter() {} })).toThrow(/protocol witness/);
     const member = Swift.class("fixture.BaseSpeaker")!.$type.instanceMethod(methodSlot("fixture.Vocal"), "() -> Swift.String");
-    expect(() => SwiftInterceptor.attach(member, { onEnter() {} })).toThrow(/protocol witness/);
+    expect(() => Swift.Interceptor.attach(member, { onEnter() {} })).toThrow(/protocol witness/);
   });
 
   test("a void requirement is spelled -> ()", () => {

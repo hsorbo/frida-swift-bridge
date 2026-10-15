@@ -2,8 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadResilient } from "./fixtures/load.js";
 import { SWIFTCORE_MODULE } from "./swift.js";
 
-import { Swift, SwiftError, ClassType, SwiftObject, SwiftStruct, SwiftType } from "../src/index.js";
-import { metadataFor, typeOf } from "../src/abi.js";
+import { Swift, SwiftError, SwiftObject, SwiftStruct, SwiftType } from "../src/index.js";
 
 const ADD_INTS = "$s7fixture7addIntsyS2i_SitF";
 const STRING_LENGTH = "$s7fixture12stringLengthySiSSF";
@@ -35,8 +34,8 @@ describe("Swift.function", () => {
   let Str: SwiftType;
   beforeEach(() => {
     module = loadFixture();
-    Int = typeOf(metadataFor("Swift.Int")!);
-    Str = typeOf(metadataFor("Swift.String")!);
+    Int = Swift.type("Swift.Int")!.$type;
+    Str = Swift.type("Swift.String")!.$type;
   });
 
   test("calls a free function with Int arguments: addInts(20, 22) ⇒ 42", () => {
@@ -71,7 +70,7 @@ describe("Swift.function", () => {
   });
 
   test("binds a class receiver for a sync instance method: Robot(\"R2\").greet(\"X\")", () => {
-    const robot = (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2");
     const greet = Swift.function(module, ROBOT_GREET).bind(robot);
     expect(greet("X")).toBe("Hello X, I am R2");
   });
@@ -194,7 +193,7 @@ describe("Swift.function from a qualified selector", () => {
   });
 
   function robot(name: string) {
-    return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init(name);
+    return Swift.class("fixture.Robot")!.init(name);
   }
 
   test("an instance method takes self first: Robot.move(to:)(robot, 5) ⇒ 5, move(by:) ⇒ 50", () => {

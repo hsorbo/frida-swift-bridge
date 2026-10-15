@@ -2,7 +2,6 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, SwiftClass, SwiftStruct, type SwiftObject, type SwiftValueObject, type CallResult } from "../src/index.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
 
 function robot(name: string): SwiftObject {
   return (Swift.type("fixture.Robot") as SwiftClass).init(name);
@@ -19,7 +18,7 @@ describe("hooks on functions with inout parameters", () => {
     const n = int(21);
     let entered: SwiftValueObject | null = null;
     let left: CallResult = null;
-    const listener = SwiftInterceptor.attach(robot("Ada").$method("doubled").address, {
+    const listener = Swift.Interceptor.attach(robot("Ada").$method("doubled").address, {
       onEnter(args) {
         entered = args[0] as SwiftValueObject;
         expect(entered.$fields).toEqual(int64(21));
@@ -43,7 +42,7 @@ describe("hooks on functions with inout parameters", () => {
     const s = (Swift.type("Swift.String") as SwiftStruct).$new("hi");
     const seen: CallResult[] = [];
     let view: SwiftValueObject | null = null;
-    const listener = SwiftInterceptor.attach(robot("Ada").$method("exclaim").address, {
+    const listener = Swift.Interceptor.attach(robot("Ada").$method("exclaim").address, {
       onEnter(args) {
         view = args[0] as SwiftValueObject;
         seen.push(view.$fields);
@@ -67,7 +66,7 @@ describe("hooks on functions with inout parameters", () => {
     const seen: CallResult[][] = [];
     let views: SwiftValueObject[] = [];
     const box = (Swift.type("fixture.Box") as SwiftClass).init();
-    const listener = SwiftInterceptor.attach(box.$method("swapped", { typeArguments: [Int] }).address, {
+    const listener = Swift.Interceptor.attach(box.$method("swapped", { typeArguments: [Int] }).address, {
       onEnter(args) {
         expect(this.typeArguments).toEqual(["Swift.Int"]);
         views = args as SwiftValueObject[];
@@ -90,7 +89,7 @@ describe("hooks on functions with inout parameters", () => {
     const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100);
     const seen: CallResult[] = [];
     let view: SwiftValueObject | null = null;
-    const listener = SwiftInterceptor.attachAsync(calc.$method("accumulateAsync").address, {
+    const listener = Swift.Interceptor.attachAsync(calc.$method("accumulateAsync").address, {
       onEnter(args) {
         view = args[0] as SwiftValueObject;
         seen.push(view.$fields);

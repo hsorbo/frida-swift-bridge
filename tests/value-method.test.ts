@@ -1,8 +1,8 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadNoMetadata } from "./fixtures/load.js";
 
-import { ClassInstance, ValueInstance, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
-import { Swift, ClassType, StructType, SwiftObject } from "../src/index.js";
+import { ClassInstance, ValueInstance, metadataFor } from "../src/abi.js";
+import { Swift, SwiftObject } from "../src/index.js";
 
 function value(typeName: string, fields: { [k: string]: number }): ValueInstance {
   return ValueInstance.fromJS(metadataFor(typeName)!, fields);
@@ -71,7 +71,7 @@ describe("facade method routing on a small loadable value", () => {
   beforeEach(() => { loadFixture(); });
 
   function accumulator(total: number) {
-    return asSwiftObject(ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total }));
+    return Swift.struct("fixture.Accumulator")!.$new({ total });
   }
 
   test("string $call invokes a non-mutating method", () => {
@@ -110,14 +110,14 @@ describe("consuming methods on value types", () => {
   beforeEach(() => { loadFixture(); });
 
   function token(id: number): { facade: SwiftObject; view: ClassInstance } {
-    const facade = (typeOf(metadataFor("fixture.Token")!) as ClassType).facade.init(id);
+    const facade = Swift.class("fixture.Token")!.init(id);
     return { facade, view: new ClassInstance(facade.$handle) };
   }
 
   test("a consuming method on a small loadable struct leaves the caller's self intact", (ctx) => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(7);
-    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType).facade
+    const box = Swift.struct("fixture.TokenBox")!
       .$initializer("init(_:tag:)")
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
@@ -130,7 +130,7 @@ describe("consuming methods on value types", () => {
   test("a consuming method on a large struct leaves the caller's self intact", (ctx) => {
     if (loadFixture().findExportByName("$s7fixture7WrapperV4takeSiyF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(9);
-    const wrapper = (typeOf(metadataFor("fixture.Wrapper")!) as StructType).facade.$call("make", facade) as SwiftObject;
+    const wrapper = Swift.struct("fixture.Wrapper")!.$call("make", facade) as SwiftObject;
     const before = view.retainCount;
     const take = wrapper.$method("take", { self: "consuming" });
     expect(take.call()).toEqual(int64(9));
@@ -141,7 +141,7 @@ describe("consuming methods on value types", () => {
   test("a consuming generic method on a small loadable struct leaves the caller's self intact", (ctx) => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV10takeTaggedySixlF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(11);
-    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType).facade
+    const box = Swift.struct("fixture.TokenBox")!
       .$initializer("init(_:tag:)")
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
@@ -154,7 +154,7 @@ describe("consuming methods on value types", () => {
   test("a consuming async method on a small loadable struct leaves the caller's self intact", async (ctx) => {
     if (loadFixture().findExportByName("$s7fixture8TokenBoxV9takeAsyncSiyYaF") === null) ctx.skip("fixture compiled without consuming methods (Swift < 5.9)");
     const { facade, view } = token(13);
-    const box = (typeOf(metadataFor("fixture.TokenBox")!) as StructType).facade
+    const box = Swift.struct("fixture.TokenBox")!
       .$initializer("init(_:tag:)")
       .call(facade, 5) as SwiftObject;
     const before = view.retainCount;
@@ -195,9 +195,9 @@ describe("extension methods on Swift.String from another module", () => {
   });
 
   test("a mutating one writes back through self", () => {
-    const s = ValueInstance.fromJS(metadataFor("Swift.String")!, "kake");
-    s.method("exclaim").call();
-    s.method("exclaim").call();
-    expect(s.read()).toBe("kake!!");
+    const s = Swift.struct("Swift.String")!.$new("kake");
+    s.$method("exclaim").call();
+    s.$method("exclaim").call();
+    expect(s.$fields).toBe("kake!!");
   });
 });

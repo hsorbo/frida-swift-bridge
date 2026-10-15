@@ -1,11 +1,10 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { ClassType, StructType, ValueInstance, BoundMethod, SwiftError, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
+import { Swift, SwiftError } from "../src/index.js";
 
-import { Swift } from "../src/index.js";
 function calc(base: number) {
-  return (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).facade.init(base);
+  return Swift.class("fixture.AsyncCalc")!.init(base);
 }
 
 describe("async method", () => {
@@ -17,7 +16,7 @@ describe("async method", () => {
 
   test("$method hands back a narrow bound method, not the concrete binder", async () => {
     const m = calc(100).$method("addAsync");
-    expect(m instanceof BoundMethod).toBe(false);
+    expect((m as { plan?: unknown }).plan).toBeUndefined();
     expect(m.address.isNull()).toBe(false);
     expect(await m.call(5)).toEqual(int64(105));
   });
@@ -41,25 +40,25 @@ describe("async method", () => {
   });
 
   test("$method on an async generic method also hands back a narrow bound method", () => {
-    const Int = metadataFor("Swift.Int")!;
-    const m = calc(100).$method("echoAsync", { typeArguments: [typeOf(Int)] });
-    expect(m instanceof BoundMethod).toBe(false);
+    const Int = Swift.type("Swift.Int")!;
+    const m = calc(100).$method("echoAsync", { typeArguments: [Int] });
+    expect((m as { plan?: unknown }).plan).toBeUndefined();
     expect(typeof m.call).toBe("function");
   });
 
   test("drives an async generic method (metadata only): echoAsync<Int>(21) ⇒ 21", async () => {
-    const Int = metadataFor("Swift.Int")!;
-    expect(await calc(100).$method("echoAsync", { typeArguments: [typeOf(Int)] }).call(21)).toEqual(int64(21));
+    const Int = Swift.type("Swift.Int")!;
+    expect(await calc(100).$method("echoAsync", { typeArguments: [Int] }).call(21)).toEqual(int64(21));
   });
 
   test("round-trips a non-POD generic argument: echoAsync<String>(\"hi\") ⇒ \"hi\"", async () => {
-    const Str = metadataFor("Swift.String")!;
-    expect(await calc(100).$method("echoAsync", { typeArguments: [typeOf(Str)] }).call("hi")).toBe("hi");
+    const Str = Swift.type("Swift.String")!;
+    expect(await calc(100).$method("echoAsync", { typeArguments: [Str] }).call("hi")).toBe("hi");
   });
 
   test("passes a witness table for a constrained generic: pickLargerAsync<Int>(3, 8) ⇒ 8", async () => {
-    const Int = metadataFor("Swift.Int")!;
-    expect(await calc(100).$method("pickLargerAsync", { typeArguments: [typeOf(Int)] }).call(3, 8)).toEqual(int64(8));
+    const Int = Swift.type("Swift.Int")!;
+    expect(await calc(100).$method("pickLargerAsync", { typeArguments: [Int] }).call(3, 8)).toEqual(int64(8));
   });
 
   test("passes a loadable closure to an async method: calc(100).mapAsync(7, n => n * 6) ⇒ 142", async () => {
@@ -67,60 +66,60 @@ describe("async method", () => {
   });
 
   test("passes a closure producing the generic result to an async generic method: produceAsync<Int>", async () => {
-    const Int = metadataFor("Swift.Int")!;
-    const produced = calc(100).$method("produceAsync", { typeArguments: [typeOf(Int)] }).call(7, Swift.closure((n: number) => Number(n) + 1));
+    const Int = Swift.type("Swift.Int")!;
+    const produced = calc(100).$method("produceAsync", { typeArguments: [Int] }).call(7, Swift.closure((n: number) => Number(n) + 1));
     expect(await produced).toEqual(int64(8));
   });
 
   test("async method on a small loadable value type trails self after the args: Accumulator.peekAsync(10) ⇒ 15", async () => {
-    const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
-    expect(await acc.method("peekAsync", { self: "borrowing" }).call(10)).toEqual(int64(15));
+    const acc = Swift.struct("fixture.Accumulator")!.$new({ total: 5 });
+    expect(await acc.$method("peekAsync", { self: "borrowing" }).call(10)).toEqual(int64(15));
   });
 
   test("a non-mutating async method on a small loadable value needs no self option", async () => {
-    const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
-    expect(await acc.method("peekAsync").call(10)).toEqual(int64(15));
+    const acc = Swift.struct("fixture.Accumulator")!.$new({ total: 5 });
+    expect(await acc.$method("peekAsync").call(10)).toEqual(int64(15));
   });
 
   test("a mutating async method on a small loadable value needs no self option", async () => {
-    const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
-    await acc.method("depositAsync").call(3);
-    expect((acc.read() as { total: number }).total).toEqual(int64(8));
+    const acc = Swift.struct("fixture.Accumulator")!.$new({ total: 5 });
+    await acc.$method("depositAsync").call(3);
+    expect((acc.$fields as { total: number }).total).toEqual(int64(8));
   });
 
   test('a mutating async method still accepts { self: "mutating" }', async () => {
-    const acc = ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 });
-    await acc.method("depositAsync", { self: "mutating" }).call(3);
-    expect((acc.read() as { total: number }).total).toEqual(int64(8));
+    const acc = Swift.struct("fixture.Accumulator")!.$new({ total: 5 });
+    await acc.$method("depositAsync", { self: "mutating" }).call(3);
+    expect((acc.$fields as { total: number }).total).toEqual(int64(8));
   });
 
   test('an async method whose trailing self overflows the registers asks for { self: "mutating" }', () => {
-    const quad = ValueInstance.fromJS(metadataFor("fixture.DoubleQuad")!, { a: 1, b: 2, c: 3, d: 4 });
-    expect(() => quad.method("shiftAsync").call(1, 1, 1, 1, 2)).toThrow('{ self: "mutating" }');
+    const quad = Swift.struct("fixture.DoubleQuad")!.$new({ a: 1, b: 2, c: 3, d: 4 });
+    expect(() => quad.$method("shiftAsync").call(1, 1, 1, 1, 2)).toThrow('{ self: "mutating" }');
   });
 
   test('{ self: "borrowing" } passes a trailing self past the registers on the stack', async () => {
-    const quad = ValueInstance.fromJS(metadataFor("fixture.DoubleQuad")!, { a: 1, b: 2, c: 3, d: 4 });
-    expect(await quad.method("weighAsync", { self: "borrowing" }).call(1, 10, 100, 1000, 2)).toBe(8642);
+    const quad = Swift.struct("fixture.DoubleQuad")!.$new({ a: 1, b: 2, c: 3, d: 4 });
+    expect(await quad.$method("weighAsync", { self: "borrowing" }).call(1, 10, 100, 1000, 2)).toBe(8642);
   });
 
   test('{ self: "mutating" } keeps self out of the async argument registers', async () => {
-    const quad = ValueInstance.fromJS(metadataFor("fixture.DoubleQuad")!, { a: 1, b: 2, c: 3, d: 4 });
-    await quad.method("shiftAsync", { self: "mutating" }).call(1, 1, 1, 1, 2);
-    expect(quad.read()).toEqual({ a: 4, b: 6, c: 8, d: 10 });
+    const quad = Swift.struct("fixture.DoubleQuad")!.$new({ a: 1, b: 2, c: 3, d: 4 });
+    await quad.$method("shiftAsync", { self: "mutating" }).call(1, 1, 1, 1, 2);
+    expect(quad.$fields).toEqual({ a: 4, b: 6, c: 8, d: 10 });
   });
 
   test("property-style invocation of an async method on a small loadable value", async () => {
-    expect(await asSwiftObject(ValueInstance.fromJS(metadataFor("fixture.Accumulator")!, { total: 5 })).peekAsync(10)).toEqual(int64(15));
+    expect(await Swift.struct("fixture.Accumulator")!.$new({ total: 5 }).peekAsync(10)).toEqual(int64(15));
   });
 
   test("static async method on a value type (no self): Accumulator.sumStaticAsync(4, 5) ⇒ 9", async () => {
-    const t = (typeOf(metadataFor("fixture.Accumulator")!) as StructType).facade;
+    const t = Swift.struct("fixture.Accumulator")!;
     expect(await t.$call("sumStaticAsync", 4, 5)).toEqual(int64(9));
   });
 
   test("static async method on a class: AsyncCalc.combineAsync(3, 4) ⇒ 34", async () => {
-    const t = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).facade;
+    const t = Swift.class("fixture.AsyncCalc")!;
     expect(await t.$call("combineAsync", 3, 4)).toEqual(int64(34));
   });
 });

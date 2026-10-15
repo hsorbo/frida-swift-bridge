@@ -3,7 +3,6 @@ import { fixtureExport } from "./fixtures/load.js";
 
 import { readValue, type SwiftValue, type CallResult, metadataFor } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
 
 import { Swift } from "../src/index.js";
 function doubles(metadata: ReturnType<typeof metadataFor>, values: number[]): NativePointer {
@@ -55,7 +54,7 @@ describe("homogeneous float aggregates (HFA)", () => {
     const DoublePair = metadataFor("fixture.DoublePair")!;
     const addr = fixtureExport("fixture.sumDoublePair");
     let seenArgs: SwiftValue[] | null = null;
-    const listener = SwiftInterceptor.attach(addr, {
+    const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
         seenArgs = args;
       },
@@ -66,7 +65,7 @@ describe("homogeneous float aggregates (HFA)", () => {
 
     const mkAddr = fixtureExport("fixture.makeDoublePair");
     let seenRet: CallResult = null;
-    const l2 = SwiftInterceptor.attach(mkAddr, {
+    const l2 = Swift.Interceptor.attach(mkAddr, {
       onLeave(ret) {
         seenRet = ret;
       },

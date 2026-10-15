@@ -9,7 +9,6 @@ import {
 } from "./fixtures/load.js";
 
 import { Swift, SwiftClass, SwiftStruct } from "../src/index.js";
-import { resolveMethod } from "../src/runtime/method.js";
 
 describe("a bound method's origin", () => {
   beforeEach(() => {
@@ -62,7 +61,7 @@ describe("two modules extending a type with the same method", () => {
     loadFixture();
     loadNoMetadata();
     loadConformance();
-    const ambiguous = () => resolveMethod("fixture.Robot", "hover");
+    const ambiguous = () => Swift.class("fixture.Robot")!.$type.instanceMethod("hover");
     expect(ambiguous).toThrow(new RegExp(`hover\\(\\) \\(\\) -> Swift\\.String in ${NOMETADATA_MODULE.replace(".", "\\.")}`));
     expect(ambiguous).toThrow(new RegExp(`in ${CONFORMANCE_MODULE.replace(".", "\\.")}`));
   });

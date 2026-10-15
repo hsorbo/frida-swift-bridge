@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftClosureValue } from "../src/index.js";
-import { ClassInstance, makeSwiftNativeFunction, metadataFor, typeOf } from "../src/abi.js";
+import { ClassInstance, makeSwiftNativeFunction, metadataFor } from "../src/abi.js";
 
 const MAKE_ADDER = "$s7fixture9makeAdderyS2icSiF";
 const MAKE_LABELER = "$s7fixture11makeLabelerySSSicSSF";
@@ -34,8 +34,8 @@ describe("closure results", () => {
   });
 
   test("a closure returned from a generic function takes and returns its type parameter by address", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const Double = typeOf(metadataFor("Swift.Double")!);
+    const Int = Swift.type("Swift.Int")!;
+    const Double = Swift.type("Swift.Double")!;
     const triple = Swift.function(module, MAKE_SCALER, { typeArguments: [Int] }).call(3) as SwiftClosureValue;
     expect(triple(5)).toEqual(int64(15));
     const halve = Swift.function(module, MAKE_SCALER, { typeArguments: [Double] }).call(0.5) as SwiftClosureValue;

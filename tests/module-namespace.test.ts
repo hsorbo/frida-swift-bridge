@@ -1,8 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift, SwiftClass, SwiftStruct } from "../src/index.js";
-import type { StableProtocol } from "../src/runtime/protocol.js";
+import { Swift, SwiftClass, SwiftStruct, type Protocol } from "../src/index.js";
 
 describe("Swift.modules", () => {
   beforeEach(() => { loadFixture(); });
@@ -48,7 +47,7 @@ describe("Swift.modules", () => {
   });
 
   test("resolves a protocol in the module by its bare name", () => {
-    expect((Swift.modules.fixture.Greeter as StableProtocol).fullName).toBe("fixture.Greeter");
+    expect((Swift.modules.fixture.Greeter as Protocol).fullName).toBe("fixture.Greeter");
   });
 
   test("an unknown member reads as undefined", () => {

@@ -2,7 +2,6 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, SwiftClass, type SwiftObject, type SwiftValue } from "../src/index.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
 
 function robotType(): SwiftClass {
   return Swift.type("fixture.Robot") as SwiftClass;
@@ -27,7 +26,7 @@ describe("a facade's method as a hook target", () => {
 
   test("hooks through Swift.Interceptor.attach like the bound method", () => {
     const seen: SwiftValue[] = [];
-    const listener = SwiftInterceptor.attach(robot("Ada").greet, {
+    const listener = Swift.Interceptor.attach(robot("Ada").greet, {
       onEnter(args) {
         seen.push(args[0]);
       },
@@ -45,13 +44,13 @@ describe("a facade's method as a hook target", () => {
     expect(r.at(1)).toEqual(int64(1));
     expect(r.at(1, 2)).toEqual(int64(3));
     expect(() => r.at.address).toThrow(/ambiguous method at on fixture\.Robot/);
-    expect(() => SwiftInterceptor.attach(r.at, { onEnter() {} })).toThrow(/ambiguous method at/);
+    expect(() => Swift.Interceptor.attach(r.at, { onEnter() {} })).toThrow(/ambiguous method at/);
   });
 
   test("a type facade's static method is hookable the same way", () => {
     const type = robotType();
     expect(type.make.address.equals(type.$typeMethod("make").address)).toBe(true);
-    const listener = SwiftInterceptor.attach(type.make, { onEnter() {} });
+    const listener = Swift.Interceptor.attach(type.make, { onEnter() {} });
     listener.detach();
   });
 });

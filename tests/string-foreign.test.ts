@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { requireDarwin } from "./swift.js";
+import { requireDarwin, requireSwift } from "./swift.js";
 
-import { readString } from "../src/abi/string.js";
+import { Swift } from "../src/index.js";
 
 const K_CF_STRING_ENCODING_UTF8 = 0x08000100;
 
@@ -25,9 +25,10 @@ function makeCocoaString(text: string): NativePointer | null {
   return s.isNull() ? null : s;
 }
 
-describe("readString (cocoa)", () => {
+describe("String read (cocoa)", () => {
   test("decodes a cocoa-backed string through the ObjC runtime", (ctx) => {
     requireDarwin(ctx);
+    requireSwift();
     // long + non-ASCII so it is a real heap string, not a tagged pointer
     const text = "héllo wörld with ünicode ✓ and enough length";
     const cocoa = makeCocoaString(text);
@@ -42,7 +43,7 @@ describe("readString (cocoa)", () => {
       const storage = Memory.alloc(16);
       storage.writeU64(0); // count word; unused for the cocoa path
       storage.add(8).writePointer(cocoa.or(ptr(discriminator)));
-      expect(readString(storage)).toBe(text);
+      expect(Swift.struct("Swift.String")!.$borrow(storage).$fields).toBe(text);
     }
   });
 });

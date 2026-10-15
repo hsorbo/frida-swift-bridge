@@ -2,13 +2,12 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadResilient } from "./fixtures/load.js";
 
 import { Swift, SwiftStruct } from "../src/index.js";
-import { metadataFor, typeOf } from "../src/abi.js";
 
 // resilient.ResilientHolder wraps a class ref (like Foundation.URL wraps NSURL): resilient ABI
 // (returned @out) yet non-POD. Optional<ResilientHolder> must inherit that address-only ABI and be
 // decoded/destroyed through its payload, not the Optional wrapper.
 function optionalHolder() {
-  return typeOf(metadataFor("Swift.Optional", [metadataFor("resilient.ResilientHolder")!])!);
+  return Swift.type("Swift.Optional<resilient.ResilientHolder>")!;
 }
 
 function fn(mod: Module, mangled: string, ret: unknown, args: unknown[]) {

@@ -2,15 +2,14 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 import { requireDarwin } from "./swift.js";
 
-import { Swift, ClassType, SwiftClass } from "../src/index.js";
+import { Swift, SwiftClass } from "../src/index.js";
 
-import { metadataFor, typeOf, typeName, metadataOf, ValueInstance, asSwiftObject } from "../src/abi.js";
 function robot(name: string) {
-  return (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init(name);
+  return Swift.class("fixture.Robot")!.init(name);
 }
 
 function cat() {
-  return (typeOf(metadataFor("fixture.Cat")!) as ClassType).facade.init();
+  return Swift.class("fixture.Cat")!.init();
 }
 
 describe("Swift object method sugar", () => {
@@ -71,14 +70,14 @@ describe("Swift object intrinsics", () => {
   });
 
   test("assigning a writable property on a value facade routes to its setter", () => {
-    const rect = asSwiftObject(ValueInstance.fromJS(metadataFor("fixture.Rect")!, { width: 3 }));
+    const rect = Swift.struct("fixture.Rect")!.$new({ width: 3 });
     rect.scaled = 10;
     expect(rect.width).toEqual(int64(5));
     expect(rect.scaled).toEqual(int64(10));
   });
 
   test("assigning a read-only or unknown property throws", () => {
-    const point = asSwiftObject(ValueInstance.fromJS(metadataFor("fixture.Point")!, { x: 2 }));
+    const point = Swift.struct("fixture.Point")!.$new({ x: 2 });
     expect(() => { point.doubled = 8; }).toThrow("doubled on fixture.Point is read-only");
     expect(() => { robot("R2").nope = 1; }).toThrow("no property nope on fixture.Robot");
     expect(() => { robot("R2").greet = 1; }).toThrow("no property greet on fixture.Robot");
@@ -138,7 +137,6 @@ describe("Swift object intrinsics", () => {
   test("$type / $handle expose the wrapped object", () => {
     const o = robot("R2");
     expect(o.$type.name).toBe("fixture.Robot");
-    expect(typeName(metadataOf(o.$type))).toBe("fixture.Robot");
     expect(o.$handle.isNull()).toBe(false);
   });
 
@@ -198,7 +196,7 @@ describe("Swift object intrinsics", () => {
 });
 
 function clash(handle: number) {
-  return (typeOf(metadataFor("fixture.Clash")!) as ClassType).facade.init(handle);
+  return Swift.class("fixture.Clash")!.init(handle);
 }
 
 describe("Swift object collision-proofing", () => {

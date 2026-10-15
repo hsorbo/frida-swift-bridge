@@ -2,8 +2,6 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, loadOptimized, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftObject, type CallResult, SwiftClass, SwiftStruct } from "../src/index.js";
-import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
-import { metadataFor } from "../src/abi.js";
 
 function robot(name: string): SwiftObject {
   return (Swift.type("fixture.Robot") as SwiftClass).init(name);
@@ -147,7 +145,7 @@ describe("Interceptor self", () => {
       },
     });
     try {
-      makeSwiftNativeFunction(fixtureExport("fixture.driveKeyed"), metadataFor("Swift.Int")!, [])();
+      Swift.NativeFunction(fixtureExport("fixture.driveKeyed"), Swift.type("Swift.Int")!, [])();
     } finally {
       listener.detach();
     }

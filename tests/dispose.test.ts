@@ -1,26 +1,25 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift } from "./swift.js";
 
-import { ValueInstance, metadataFor } from "../src/abi.js";
+import { Swift, SwiftValueObject } from "../src/index.js";
 
-import { Swift } from "../src/index.js";
 describe("Symbol.dispose", () => {
-  test("[Symbol.dispose]() aliases dispose() and is idempotent", () => {
+  test("[Symbol.dispose]() aliases $dispose() and is idempotent", () => {
     requireSwift();
-    const v = ValueInstance.fromJS(metadataFor("Swift.Int")!, 42);
+    const v = Swift.struct("Swift.Int")!.$new(42);
     v[Symbol.dispose]();
     v[Symbol.dispose]();
-    expect(() => v.read()).toThrow();
+    expect(() => v.$fields).toThrow();
   });
 
   test("using disposes an owned value at block scope", () => {
     requireSwift();
-    let captured: ValueInstance;
+    let captured: SwiftValueObject;
     {
-      using v = ValueInstance.fromJS(metadataFor("Swift.Int")!, 7);
+      using v = Swift.struct("Swift.Int")!.$new(7);
       captured = v;
-      expect(v.read()).toEqual(int64(7));
+      expect(v.$fields).toEqual(int64(7));
     }
-    expect(() => captured.read()).toThrow();
+    expect(() => captured.$fields).toThrow();
   });
 });

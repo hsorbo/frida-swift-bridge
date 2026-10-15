@@ -2,7 +2,6 @@ import { test, expect, describe } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftError, type SwiftClassObject, type CallResult, type SwiftValue } from "../src/index.js";
-import { SwiftInterceptor } from "../src/runtime/interceptor.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { metadataFor } from "../src/abi.js";
 
@@ -128,7 +127,7 @@ describe("typed throws", () => {
     const Int = metadataFor("Swift.Int")!;
     const seen: { ret: CallResult; error: CallResult | undefined }[] = [];
     const listeners = [fixtureExport("fixture.throwsCoded"), fixtureExport("fixture.throwsWide")].map((target) =>
-      SwiftInterceptor.attach(target, {
+      Swift.Interceptor.attach(target, {
         onLeave(ret, error) {
           seen.push({ ret, error });
         },
@@ -157,7 +156,7 @@ describe("typed throws", () => {
     const seen: { ret: CallResult; error: CallResult | undefined }[] = [];
     const module = loadFixture();
     const listeners = [THROWS_CODED_ASYNC, THROWS_WIDE_ASYNC].map((name) =>
-      SwiftInterceptor.attachAsync(module.getExportByName(name), {
+      Swift.Interceptor.attachAsync(module.getExportByName(name), {
         onComplete(ret, error) {
           seen.push({ ret, error });
         },
