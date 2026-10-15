@@ -41,7 +41,7 @@ import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descrip
 import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { borrowedClosure } from "./closure-view.js";
-import { CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod, SwiftFunction } from "./method.js";
+import { CallArg, CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod, SwiftFunction } from "./method.js";
 import type { SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
 import type { SwiftFunctionMatch } from "./function-listing.js";
@@ -57,9 +57,37 @@ export interface SwiftHookArgs extends Array<CallResult> {
   readonly [label: string]: any;
 }
 
-export interface SwiftInvocationCallbacks {
-  onEnter?: (this: SwiftInvocationContext, args: SwiftHookArgs) => void;
-  onLeave?: (this: SwiftInvocationContext, retval: CallResult, error?: CallResult) => void;
+declare const HOOK: unique symbol;
+// The decoded types a generated declaration carries, read off a hook target's static type.
+export interface SwiftHookTypes<Ret = CallResult, Args extends CallResult[] = CallResult[], Named = {}> {
+  readonly [HOOK]: { ret: Ret; args: Args; named: Named };
+}
+
+type IsAny<T> = 0 extends 1 & T ? true : false;
+
+export type HookArgsOf<T> = IsAny<T> extends true
+  ? SwiftHookArgs
+  : T extends SwiftHookTypes<any, infer A, infer N>
+    ? A & Omit<N, keyof any[]>
+    : T extends SwiftFunction<any, infer A>
+      ? CallArg[] extends A
+        ? SwiftHookArgs
+        : A
+      : SwiftHookArgs;
+
+export type HookRetOf<T> = IsAny<T> extends true
+  ? CallResult
+  : T extends SwiftHookTypes<infer R, any, any>
+    ? R
+    : T extends SwiftFunction<infer R, any>
+      ? IsAny<R> extends true
+        ? CallResult
+        : Awaited<R>
+      : CallResult;
+
+export interface SwiftInvocationCallbacks<Args = SwiftHookArgs, Ret = CallResult> {
+  onEnter?: (this: SwiftInvocationContext, args: Args) => void;
+  onLeave?: (this: SwiftInvocationContext, retval: Ret, error?: CallResult) => void;
 }
 
 export interface SwiftInterceptorOptions {
@@ -999,6 +1027,7 @@ interface SwiftInvocationState {
   thrownSlot?: NativePointer;
 }
 
+function attach<T extends HookableTarget>(hookable: T, callbacks: SwiftInvocationCallbacks<HookArgsOf<T>, HookRetOf<T>>, options?: SwiftInterceptorOptions): InvocationListener;
 function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
   const entry = hookEntry(hookable);
   const target = entry.address;
@@ -1356,11 +1385,11 @@ function directYieldScalars(scalars: LoweredScalar[]): number {
   return n;
 }
 
-export interface SwiftAsyncCallbacks {
-  onEnter?: (this: SwiftInvocationContext, args: SwiftHookArgs, context: NativePointer) => void;
+export interface SwiftAsyncCallbacks<Args = SwiftHookArgs, Ret = CallResult> {
+  onEnter?: (this: SwiftInvocationContext, args: Args, context: NativePointer) => void;
   // The entry partial function returning: reached the first suspension, not logical completion.
   onFirstSuspend?: (this: InvocationContext) => void;
-  onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: CallResult, error?: CallResult) => void;
+  onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: Ret, error?: CallResult) => void;
 }
 
 function resolveAsyncEntry(target: NativePointer): NativePointer {
@@ -1549,6 +1578,7 @@ function writeX64CompletionTrampoline(slot: NativePointer, pc: NativePointer): v
   w.flush();
 }
 
+function attachAsync<T extends HookableTarget>(hookable: T, callbacks: SwiftAsyncCallbacks<HookArgsOf<T>, HookRetOf<T>>, options?: SwiftInterceptorOptions): InvocationListener;
 function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
   if (callbacks.onEnter === undefined && callbacks.onFirstSuspend === undefined && callbacks.onComplete === undefined) {
     throw new Error("attachAsync requires onEnter, onFirstSuspend, or onComplete");
@@ -1657,8 +1687,8 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
 }
 
 export interface SwiftInterceptorApi {
-  attach(target: HookableTarget, callbacks: SwiftInvocationCallbacks, options?: SwiftInterceptorOptions): InvocationListener;
-  attachAsync(target: HookableTarget, callbacks: SwiftAsyncCallbacks, options?: SwiftInterceptorOptions): InvocationListener;
+  attach<T extends HookableTarget>(target: T, callbacks: SwiftInvocationCallbacks<HookArgsOf<T>, HookRetOf<T>>, options?: SwiftInterceptorOptions): InvocationListener;
+  attachAsync<T extends HookableTarget>(target: T, callbacks: SwiftAsyncCallbacks<HookArgsOf<T>, HookRetOf<T>>, options?: SwiftInterceptorOptions): InvocationListener;
 }
 
 export const SwiftInterceptor: SwiftInterceptorApi = { attach, attachAsync };

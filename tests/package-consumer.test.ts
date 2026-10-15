@@ -32,6 +32,12 @@ import Swift, {
   NativeFunctionType,
   MarshalledFunctionOptions,
   SwiftError,
+  SwiftFunction,
+  FacadeCallable,
+  HookableTarget,
+  SwiftHookArgs,
+  SwiftHookTypes,
+  SwiftInvocationCallbacks,
 } from "frida-swift-bridge2";
 import {
   Metadata,
@@ -202,7 +208,88 @@ function rawOpsStayOffTheFacadeAtCompileTime(o: SwiftObject) {
   o.$vtableMethod();
 }
 
+// The generator's prelude: a facade function and a bound method carrying the types they decode to.
+interface $Callable<In extends CallArg[], Out extends CallResult[], Ret extends CallResult | Promise<CallResult>, Named = {}>
+  extends FacadeCallable, SwiftHookTypes<Ret, Out, Named> {
+  (...args: In): Ret;
+}
+interface $Bound<In extends CallArg[], Out extends CallResult[], Ret extends CallResult | Promise<CallResult>, Named = {}>
+  extends SwiftBoundMethod, SwiftHookTypes<Ret, Out, Named> {
+  call(...args: In): Ret;
+}
+type Same<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type HookCallbacks<T extends HookableTarget> = Parameters<typeof Swift.Interceptor.attach<T>>[1];
+
+function hookCallbacksFollowTheTargetAtCompileTime(
+  greet: $Callable<[string], [string], string>,
+  move: $Bound<[number | Int64], [Int64], Int64, { to: Int64 }>,
+  padded: $Bound<[number | Int64], [Int64], Int64, { length: Int64 }>,
+  annotated: SwiftFunction<Promise<Int64>, [number]>,
+) {
+  Swift.Interceptor.attach(greet, {
+    onEnter(args) {
+      const who: string = args[0];
+      void who;
+    },
+    onLeave(retval) {
+      const said: string = retval;
+      void said;
+    },
+  });
+  const greeting: string = greet("x");
+  const callable: FacadeCallable = greet;
+  void [greeting, callable];
+
+  Swift.Interceptor.attach(move, {
+    onEnter(args) {
+      const by: Int64 = args[0];
+      const to: Int64 = args.to;
+      void [by, to];
+      // @ts-expect-error a label the member does not have
+      args.too;
+    },
+  });
+  Swift.Interceptor.attach(padded, {
+    onEnter(args) {
+      args.length.toFixed(); // a label an Array owns is the Array's, not the member's
+    },
+  });
+
+  Swift.Interceptor.attachAsync(annotated, {
+    onEnter(args) {
+      const by: number = args[0];
+      void by;
+    },
+    onComplete(retval) {
+      const sum: Int64 = retval;
+      void sum;
+    },
+  });
+  Swift.Interceptor.attach(annotated, {
+    onLeave(retval) {
+      const sum: Int64 = retval;
+      void sum;
+    },
+  });
+
+  // Everything else, a member read off a facade (any) and a HookableTarget parameter included, keeps today's types.
+  const untypedTargetsKeepTodaysCallbacks: Same<
+    | HookCallbacks<NativePointer>
+    | HookCallbacks<SwiftMember>
+    | HookCallbacks<SwiftBoundMethod>
+    | HookCallbacks<FacadeCallable>
+    | HookCallbacks<SwiftFunction>
+    | HookCallbacks<HookableTarget>
+    | HookCallbacks<SwiftClassObject["greet"]>,
+    SwiftInvocationCallbacks
+  > = true;
+  void untypedTargetsKeepTodaysCallbacks;
+  // @ts-expect-error not a hook target
+  Swift.Interceptor.attach(42, {});
+}
+
 void facadeKindContractsHoldAtCompileTime;
+void hookCallbacksFollowTheTargetAtCompileTime;
 void acquisitionPreservesFacadeKindAtCompileTime;
 void reflectionIsStrictAtCompileTime;
 void structuralReflectionHasNoDynamicMembersAtCompileTime;
