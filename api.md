@@ -343,8 +343,8 @@ across the loaded modules. A constrained extension (`extension P where Self: Bas
 `where Item: Numeric`) contributes only to types that meet its `where` clause,
 and its members shadow the same members of a less constrained extension. An
 extension whose clause the bridge can't check is left out: one with a same-type
-(`==`), `AnyObject`, marker or `@objc` protocol requirement, or with a
-requirement on a nested associated type (`Item.Index`).
+(`==`), marker or `@objc` protocol requirement, or with a requirement on a
+nested associated type (`Item.Index`).
 
 A stripped binary keeps a class's vtable and every witness table, so the
 listing still shows what is dispatched. A method slot that no symbol names
