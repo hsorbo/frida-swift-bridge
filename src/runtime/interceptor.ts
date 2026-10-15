@@ -51,8 +51,14 @@ import { SWIFTCC, FP_ARG_REGISTERS, GP_RESULT_REGISTERS, putSseScalarMove } from
 
 export type SwiftInvocationContext = InvocationContext & { self?: CallResult; typeArguments?: string[] };
 
+// Positional, and a labeled parameter also by its label: move(to:) names args.to. An unlabeled
+// parameter and a label an Array already owns (length, map) stay positional.
+export interface SwiftHookArgs extends Array<SwiftValue> {
+  readonly [label: string]: any;
+}
+
 export interface SwiftInvocationCallbacks {
-  onEnter?: (this: SwiftInvocationContext, args: SwiftValue[]) => void;
+  onEnter?: (this: SwiftInvocationContext, args: SwiftHookArgs) => void;
   onLeave?: (this: SwiftInvocationContext, retval: CallResult, error?: CallResult) => void;
 }
 
@@ -130,6 +136,7 @@ function typeKeyArgumentCount(type: ContextDescriptor): number {
 
 interface CallShape {
   args: TypePlan[];
+  labels: (string | null)[];
   ret: TypePlan | null;
   thrown: TypePlan | null; // throws(E)
   witnessWords: number; // witness tables after the generic metadata, ahead of a typed error's buffer
@@ -439,6 +446,8 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     const indices = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, gp), p.text) : planType(p.type, gp)));
     const element = parsed.result === null ? null : planType(parsed.result, gp);
     const args = accessor === "setter" ? [element!, ...indices] : indices;
+    const indexLabels = parsed.params.map((p) => p.label);
+    const labels = accessor === "setter" ? [null, ...indexLabels] : indexLabels;
     const ret = accessor === "setter" ? null : element;
     const ownWords = parsed.genericParams.length + witnessTableCount(parsed);
     const probe = (metadata: Metadata, typeKeyArguments = 0): SelfOwnership | null =>
@@ -455,6 +464,7 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     }
     const shape: CallShape = {
       args,
+      labels,
       ret,
       thrown: parsed.thrownType === null ? null : planType(parsed.thrownType, gp),
       witnessWords: witnessTableCount(parsed),
@@ -473,13 +483,13 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
   const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null };
   switch (parsed.kind) {
     case "getter":
-      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
+      return { args: [], labels: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
     case "setter":
-      return { args: [member], ret: null, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
+      return { args: [member], labels: [null], ret: null, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating") };
     case "read":
-      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing"), coroutine: "read" };
+      return { args: [], labels: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing"), coroutine: "read" };
     default:
-      return { args: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: "modify" };
+      return { args: [], labels: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: "modify" };
   }
 }
 
@@ -746,7 +756,7 @@ function words(metadata: Metadata): number {
 }
 
 interface MaterializedArgs {
-  values(): SwiftValue[];
+  values(): SwiftHookArgs;
   generics: Metadata[];
   trailingSelf: NativePointer | null;
   selfMetadata: Metadata | null;
@@ -758,6 +768,7 @@ interface MaterializedArgs {
 function materializeArgs(
   context: CpuContext,
   args: TypePlan[],
+  labels: (string | null)[],
   environment: GenericEnvironment,
   startReg = 0,
   receiver: Receiver | null = null,
@@ -827,8 +838,8 @@ function materializeArgs(
     thrownSlot = cursor.gp();
   }
 
-  const values = (): SwiftValue[] =>
-    slots.map((s) => {
+  const values = (): SwiftHookArgs =>
+    nameArgs(slots.map((s) => {
       if (s.plan.kind === "metatype") {
         return decodeMetatype(s.address);
       }
@@ -842,8 +853,17 @@ function materializeArgs(
       return metadata.kind === MetadataKind.Class
         ? readValue(metadata, s.address)
         : decodeBorrowedValue(metadata, s.address);
-    });
+    }), labels);
   return { values, generics, trailingSelf, selfMetadata, thrownSlot };
+}
+
+function nameArgs(values: SwiftValue[], labels: (string | null)[]): SwiftHookArgs {
+  labels.forEach((label, i) => {
+    if (label !== null && !(label in values)) {
+      Object.defineProperty(values, label, { value: values[i], enumerable: false });
+    }
+  });
+  return values as SwiftHookArgs;
 }
 
 function materializeThrown(
@@ -1012,7 +1032,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
             state.indirectReturn = indirectResultRegister(context);
           }
           if (wantsArgs) {
-            const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, environment, argRegBase, receiver, takesThrownSlot ? shape.witnessWords : null);
+            const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, shape.labels, environment, argRegBase, receiver, takesThrownSlot ? shape.witnessWords : null);
             state.generics = generics;
             exposeTypeArguments(this, generics);
             if (trailingSelf !== null) {
@@ -1182,7 +1202,7 @@ function attachModify(target: NativePointer, shape: CallShape, callbacks: SwiftI
   const onEnter = function (this: SwiftInvocationContext) {
     const context = this.context;
     const state = this as unknown as CoroutineInvocationState;
-    const { values, trailingSelf, selfMetadata } = materializeArgs(context, shape.args, shape.generics, 1, receiver);
+    const { values, trailingSelf, selfMetadata } = materializeArgs(context, shape.args, shape.labels, shape.generics, 1, receiver);
     state.buffer = gpArg(context, 0);
     state.selfAddress = trailingSelf ?? selfRegister(context);
     if (selfMetadata !== null) {
@@ -1252,7 +1272,7 @@ function attachRead(target: NativePointer, shape: CallShape, callbacks: SwiftInv
   const onEnter = function (this: SwiftInvocationContext) {
     const context = this.context;
     const state = this as unknown as CoroutineInvocationState;
-    const { values, generics, trailingSelf, selfMetadata } = materializeArgs(context, shape.args, shape.generics, 1, receiver);
+    const { values, generics, trailingSelf, selfMetadata } = materializeArgs(context, shape.args, shape.labels, shape.generics, 1, receiver);
     state.generics = generics;
     state.selfAddress = trailingSelf ?? selfRegister(context);
     if (selfMetadata !== null) {
@@ -1337,7 +1357,7 @@ function directYieldScalars(scalars: LoweredScalar[]): number {
 }
 
 export interface SwiftAsyncCallbacks {
-  onEnter?: (this: SwiftInvocationContext, args: SwiftValue[], context: NativePointer) => void;
+  onEnter?: (this: SwiftInvocationContext, args: SwiftHookArgs, context: NativePointer) => void;
   // The entry partial function returning: reached the first suspension, not logical completion.
   onFirstSuspend?: (this: InvocationContext) => void;
   onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: CallResult, error?: CallResult) => void;
@@ -1586,7 +1606,7 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
           let generics: Metadata[] | null = null;
           let thrownSlot: NativePointer | null = null;
           if (wantsArgs || capturesGenerics) {
-            const materialized = materializeArgs(context, args, environment, argRegBase, receiver, takesThrownSlot ? shape.witnessWords : null);
+            const materialized = materializeArgs(context, args, shape.labels, environment, argRegBase, receiver, takesThrownSlot ? shape.witnessWords : null);
             generics = materialized.generics;
             thrownSlot = materialized.thrownSlot;
             exposeTypeArguments(this, generics);

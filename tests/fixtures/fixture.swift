@@ -2123,7 +2123,10 @@ public struct Grid {
         get { cells[i] }
         set { cells[i] = newValue }
     }
-    public subscript(row r: Int, column c: Int) -> Int { cells[r * 2 + c] }
+    public subscript(row r: Int, column c: Int) -> Int {
+        get { cells[r * 2 + c] }
+        set { cells[r * 2 + c] = newValue }
+    }
     public subscript<T: BinaryInteger>(scaled k: T) -> Int { cells[0] * Int(k) }
     public static subscript(unit n: Int) -> Int { n * 100 }
     public subscript(tracked i: Int) -> Int {
@@ -2136,6 +2139,7 @@ public struct Grid {
 public final class Board {
     public var cells: [String]
     public init(cells: [String]) { self.cells = cells }
+    public func padded(length n: Int) -> Int { cells.count + n }
     public subscript(i: Int) -> String {
         get { cells[i] }
         set { cells[i] = newValue }

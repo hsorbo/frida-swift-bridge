@@ -118,6 +118,7 @@ export type { ChooseOptions } from "./runtime/choose.js";
 export {
   SwiftInterceptorApi,
   SwiftInvocationCallbacks,
+  SwiftHookArgs,
   SwiftAsyncCallbacks,
   SwiftInvocationContext,
   SwiftInterceptorOptions,
