@@ -51,11 +51,14 @@ function metadataOf(mangledName: string): NativePointer {
   return resolveTypeByMangledName({ address: name, length: mangledName.length })!.handle;
 }
 
-// a direct symbolic reference to the type's descriptor followed by the given mangling.
+// an indirect symbolic reference to the type's descriptor followed by the given mangling: the
+// descriptor lives in another image, which a relative pointer from the arena need not reach.
 function symbolicTypeName(metadata: NativePointer, suffix: string): NativePointer {
+  const descriptorSlot = arenaAlloc(Process.pointerSize);
+  descriptorSlot.writePointer(new Metadata(metadata).description.handle);
   const name = arenaAlloc(5 + suffix.length + 1);
-  name.writeU8(0x01);
-  writeRelativeDirectPointer(name.add(1), new Metadata(metadata).description.handle);
+  name.writeU8(0x02);
+  writeRelativeDirectPointer(name.add(1), descriptorSlot);
   name.add(5).writeUtf8String(suffix);
   return name;
 }
