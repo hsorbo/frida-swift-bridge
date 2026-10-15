@@ -20,7 +20,7 @@ const CF_NUMBER_SINT64_TYPE = 4;
 const pinned: NativePointer[] = [];
 
 function makeCaptureDescriptor(
-  mangledNames: string[],
+  mangledNames: (string | NativePointer)[],
   numBindings = 0,
   metadataSources: [string, string][] = []
 ): NativePointer {
@@ -30,7 +30,7 @@ function makeCaptureDescriptor(
   descriptor.add(0x4).writeU32(metadataSources.length);
   descriptor.add(0x8).writeU32(numBindings);
   mangledNames.forEach((name, i) => {
-    const buf = arenaString(name);
+    const buf = typeof name === "string" ? arenaString(name) : name;
     pinned.push(buf);
     writeRelativeDirectPointer(descriptor.add(0xc + i * 0x4), buf);
   });
@@ -49,6 +49,15 @@ function metadataOf(mangledName: string): NativePointer {
   const name = Memory.allocUtf8String(mangledName);
   pinned.push(name);
   return resolveTypeByMangledName({ address: name, length: mangledName.length })!.handle;
+}
+
+// a direct symbolic reference to the type's descriptor followed by the given mangling.
+function symbolicTypeName(metadata: NativePointer, suffix: string): NativePointer {
+  const name = arenaAlloc(5 + suffix.length + 1);
+  name.writeU8(0x01);
+  writeRelativeDirectPointer(name.add(1), new Metadata(metadata).description.handle);
+  name.add(5).writeUtf8String(suffix);
+  return name;
 }
 
 function makeHeapContext(captureDescriptor: NativePointer, offset: number): NativePointer {
@@ -144,9 +153,27 @@ describe("closure capture layout (synthetic)", () => {
     expect(slots.map(({ address }) => address.sub(context).toInt32())).toEqual([0x28, 0x38, 0x40, 0x48]);
   });
 
-  test("returns null when a generic parameter comes from a capture rather than a binding", () => {
+  test("derives a generic parameter from a captured metatype placed before its type resolves", () => {
     requireSwift();
-    const context = makeHeapContext(makeCaptureDescriptor(["x"], 1, [["x", "R0"]]), 0x10);
+    const boxOfBool = metadataOf("7fixture19GenericCapturingBoxVySbG");
+    const metatypeOfBoxOfT = symbolicTypeName(boxOfBool, "yxGm");
+    const context = makeHeapContext(makeCaptureDescriptor([metatypeOfBoxOfT, "x"], 0, [["x", "G0M0_"]]), 0x10);
+    context.add(0x10).writePointer(boxOfBool);
+
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual(["fixture.GenericCapturingBox<Swift.Bool>.Type", "Swift.Bool"]);
+    expect(slots.map(({ address }) => address.sub(context).toInt32())).toEqual([0x10, 0x18]);
+  });
+
+  test("returns null when a reference source does not land on a class-typed capture", () => {
+    requireSwift();
+    const context = makeHeapContext(makeCaptureDescriptor(["x"], 0, [["x", "R0"]]), 0x10);
+    expect(layoutCaptures(context)).toBeNull();
+  });
+
+  test("returns null for a metadata source it does not understand", () => {
+    requireSwift();
+    const context = makeHeapContext(makeCaptureDescriptor(["x"], 0, [["x", "S"]]), 0x10);
     expect(layoutCaptures(context)).toBeNull();
   });
 
@@ -344,6 +371,60 @@ describe("closure capture values (live runtime)", () => {
     const context = genericCapturingContext() as NativePointer;
 
     expect(readCaptures(context)).toEqual([int64(42)]);
+  });
+
+  test("decodes a sole captured generic class instance through the object-as-context shape", () => {
+    requireSwift();
+    const trigger = new NativeFunction(fixtureExport("triggerRefCapturing"), "void", []);
+    const genericCapturingContext = new NativeFunction(fixtureExport("genericCapturingContext"), "pointer", []);
+
+    trigger();
+    const values = readCaptures(genericCapturingContext() as NativePointer)!;
+    expect(readObject(values[0] as NativePointer)).toEqual({ value: int64(9) });
+  });
+
+  test("derives a generic parameter from a captured class instance's metadata", () => {
+    requireSwift();
+    const trigger = new NativeFunction(fixtureExport("triggerRefAndArrayCapturing"), "void", []);
+    const genericCapturingContext = new NativeFunction(fixtureExport("genericCapturingContext"), "pointer", []);
+
+    trigger();
+    const context = genericCapturingContext() as NativePointer;
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual([
+      "fixture.GenericCapturingRef<Swift.Int>",
+      "Swift.Array<Swift.Int>",
+    ]);
+    const values = readCaptures(context)!;
+    expect(readObject(values[0] as NativePointer)).toEqual({ value: int64(3) });
+  });
+
+  test("counts a closure's explicit parameters before its captures in a capture source", () => {
+    requireSwift();
+    const trigger = new NativeFunction(fixtureExport("triggerRefAndArrayCapturingWithParam"), "void", []);
+    const paramContext = new NativeFunction(fixtureExport("genericCapturingParamContext"), "pointer", []);
+
+    trigger();
+    const context = paramContext() as NativePointer;
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual([
+      "fixture.GenericCapturingRef<Swift.String>",
+      "Swift.Array<Swift.String>",
+    ]);
+    const values = readCaptures(context)!;
+    expect(readObject(values[0] as NativePointer)).toEqual({ value: "q" });
+  });
+
+  test("decodes a captured metatype of a generic parameter", () => {
+    requireSwift();
+    const trigger = new NativeFunction(fixtureExport("triggerMetatypeCapturing"), "void", []);
+    const genericCapturingContext = new NativeFunction(fixtureExport("genericCapturingContext"), "pointer", []);
+
+    trigger();
+    const context = genericCapturingContext() as NativePointer;
+    const slots = layoutCaptures(context)!;
+    expect(slots.map(({ type }) => typeName(type))).toEqual(["Swift.Bool.Type"]);
+    expect(slots[0].address.readPointer().equals(metadataOf("Sb"))).toBeTruthy();
   });
 
   test("decodes captures of a closure in a generic type's generic method", () => {

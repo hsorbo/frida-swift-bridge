@@ -5,6 +5,8 @@ import {
   symbolicMangledNameLength,
 } from "./field-descriptor.js";
 import { Metadata, MetadataKind } from "./metadata.js";
+import { ClassMetadata, classMetadataOf } from "./class-metadata.js";
+import { ContextDescriptorKind, symbolicallyReferencedDescriptor } from "./context-descriptor.js";
 import { RelativeDirectPointer } from "../basic/relative-pointer.js";
 
 // TargetHeapLocalVariableMetadata: Kind, OffsetToFirstCapture, CaptureDescription.
@@ -24,7 +26,9 @@ const GENERIC_PARAM_DESCRIPTOR_KEY_TYPE = 0x80;
 // GENERIC-PARAM-INDEX: 'x' is depth 0 index 0, 'q' INDEX is depth 0 index + 1, 'qd' INDEX INDEX is depth + 1 index.
 const MANGLED_INDEX = String.raw`(_|\d+_)`;
 const GENERIC_PARAM = new RegExp(`^(?:x|q(?:d${MANGLED_INDEX})?${MANGLED_INDEX})$`);
-const CLOSURE_BINDING_SOURCE = /^B(\d+)$/;
+// METADATA-SOURCE: 'B' slot (binding), 'R' capture (isa of a class instance), 'M' capture (a metatype),
+// 'G' index source '_' (generic argument of another source's metadata).
+const METADATA_SOURCE_HEAD = /^([BRMG])(\d+)/;
 
 export class CaptureTypeRecord {
   constructor(readonly handle: NativePointer) {}
@@ -105,11 +109,20 @@ export function resolveCaptureType(record: CaptureTypeRecord): Metadata | null {
   return mangled === null ? null : resolveTypeByMangledName(mangled);
 }
 
-interface BoundGenericParam {
+interface GenericParam {
   depth: number;
   index: number;
-  metadata: NativePointer;
 }
+
+interface CaptureRoot {
+  kind: "referenceCapture" | "metadataCapture";
+  capture: number;
+}
+
+type MetadataSource =
+  | { kind: "binding"; slot: number }
+  | CaptureRoot
+  | { kind: "genericArgument"; index: number; base: MetadataSource };
 
 function mangledText(name: MangledName): string {
   return String.fromCharCode(...new Uint8Array(name.address.readByteArray(name.length)!));
@@ -119,7 +132,7 @@ function mangledIndex(text: string): number {
   return text === "_" ? 0 : parseInt(text, 10) + 1;
 }
 
-function parseGenericParam(name: MangledName | null): { depth: number; index: number } | null {
+function parseGenericParam(name: MangledName | null): GenericParam | null {
   const match = name === null ? null : GENERIC_PARAM.exec(mangledText(name));
   if (match === null) {
     return null;
@@ -132,16 +145,106 @@ function parseGenericParam(name: MangledName | null): { depth: number; index: nu
     : { depth: mangledIndex(match[1]) + 1, index: mangledIndex(match[2]) };
 }
 
-function parseClosureBindingSlot(source: MangledName | null): number | null {
-  const match = source === null ? null : CLOSURE_BINDING_SOURCE.exec(mangledText(source));
-  return match === null ? null : parseInt(match[1], 10);
+function parseMetadataSource(text: string, at: number): [MetadataSource, number] | null {
+  const match = METADATA_SOURCE_HEAD.exec(text.slice(at));
+  if (match === null) {
+    return null;
+  }
+  const operand = parseInt(match[2], 10);
+  const next = at + match[0].length;
+  switch (match[1]) {
+    case "B":
+      return [{ kind: "binding", slot: operand }, next];
+    case "R":
+      return [{ kind: "referenceCapture", capture: operand }, next];
+    case "M":
+      return [{ kind: "metadataCapture", capture: operand }, next];
+    default: {
+      const base = parseMetadataSource(text, next);
+      if (base === null || text[base[1]] !== "_") {
+        return null;
+      }
+      return [{ kind: "genericArgument", index: operand, base: base[0] }, base[1] + 1];
+    }
+  }
+}
+
+function parseWholeMetadataSource(name: MangledName | null): MetadataSource | null {
+  if (name === null) {
+    return null;
+  }
+  const text = mangledText(name);
+  const parsed = parseMetadataSource(text, 0);
+  return parsed === null || parsed[1] !== text.length ? null : parsed[0];
+}
+
+function captureRoot(source: MetadataSource): CaptureRoot | null {
+  switch (source.kind) {
+    case "binding":
+      return null;
+    case "genericArgument":
+      return captureRoot(source.base);
+    default:
+      return source;
+  }
+}
+
+function withCaptureShift(source: MetadataSource, shift: number): MetadataSource {
+  switch (source.kind) {
+    case "binding":
+      return source;
+    case "genericArgument":
+      return { ...source, base: withCaptureShift(source.base, shift) };
+    default:
+      return { ...source, capture: source.capture - shift };
+  }
+}
+
+function isClassReference(record: CaptureTypeRecord): boolean {
+  const mangled = record.mangledTypeName;
+  if (mangled === null || !mangledText(mangled).endsWith("G")) {
+    return false;
+  }
+  const descriptor = symbolicallyReferencedDescriptor(mangled.address);
+  return descriptor !== null && descriptor.kind === ContextDescriptorKind.Class;
+}
+
+function isMetatype(record: CaptureTypeRecord): boolean {
+  const mangled = record.mangledTypeName;
+  return mangled !== null && /m$|XM[To]$/.test(mangledText(mangled));
+}
+
+export function isReferenceSizedCaptureType(record: CaptureTypeRecord): boolean {
+  return isClassReference(record) || isMetatype(record);
+}
+
+// A capture source indexes the callee's parameters, which put the closure's explicit parameters
+// before the captures; the descriptor does not record their count, so take the smallest one under
+// which every source lands on a capture of its shape.
+function explicitParameterCount(sources: MetadataSource[], records: CaptureTypeRecord[]): number | null {
+  const roots = sources.map(captureRoot).filter((root): root is CaptureRoot => root !== null);
+  if (roots.length === 0) {
+    return 0;
+  }
+  const indices = roots.map((root) => root.capture);
+  const lowest = Math.max(0, Math.max(...indices) - records.length + 1);
+  for (let count = lowest; count <= Math.min(...indices); count++) {
+    const fits = roots.every((root) =>
+      (root.kind === "referenceCapture" ? isClassReference : isMetatype)(records[root.capture - count])
+    );
+    if (fits) {
+      return count;
+    }
+  }
+  return null;
 }
 
 // TargetGenericEnvironment: flags holding the level count, the cumulative parameter count per level,
-// one key type parameter descriptor per parameter, no requirements.
-function makeGenericEnvironment(params: BoundGenericParam[]): {
+// one key type parameter descriptor per parameter, no requirements. The arguments start out null.
+function makeGenericEnvironment(params: GenericParam[]): {
   environment: NativePointer;
   genericArguments: NativePointer;
+  flatIndexOf: (param: GenericParam) => number;
 } {
   const countPerLevel: number[] = [];
   for (const { depth, index } of params) {
@@ -168,35 +271,93 @@ function makeGenericEnvironment(params: BoundGenericParam[]): {
   for (let i = 0; i < total; i++) {
     genericArguments.add(i * Process.pointerSize).writePointer(NULL);
   }
-  for (const { depth, index, metadata } of params) {
-    const flatIndex = (depth === 0 ? 0 : cumulative[depth - 1]) + index;
-    genericArguments.add(flatIndex * Process.pointerSize).writePointer(metadata);
-  }
-  return { environment, genericArguments };
+  const flatIndexOf = ({ depth, index }: GenericParam) => (depth === 0 ? 0 : cumulative[depth - 1]) + index;
+  return { environment, genericArguments, flatIndexOf };
 }
 
-// A closure made in a generic function spells its capture types with that function's generic
-// parameters; each metadata source names the binding slot after the heap object header holding one.
-export function captureTypeResolverFromBindings(
+function genericArgumentsOf(handle: NativePointer): NativePointer {
+  const metadata = new Metadata(handle);
+  return metadata.kind === MetadataKind.Class ? new ClassMetadata(handle).genericArguments : metadata.genericArguments;
+}
+
+// null until the capture a source reads from has been placed.
+function readMetadataSource(
   context: NativePointer,
-  descriptor: CaptureDescriptor
-): ((record: CaptureTypeRecord) => Metadata | null) | null {
-  const bindings = context.add(2 * Process.pointerSize);
-  const params: BoundGenericParam[] = [];
-  for (const source of descriptor.metadataSources) {
-    const param = parseGenericParam(source.mangledTypeName);
-    const slot = parseClosureBindingSlot(source.mangledMetadataSource);
-    if (param === null || slot === null) {
+  source: MetadataSource,
+  captureAddresses: NativePointer[]
+): NativePointer | null {
+  switch (source.kind) {
+    case "binding":
+      return context.add((2 + source.slot) * Process.pointerSize).readPointer();
+    case "referenceCapture":
+      return source.capture < captureAddresses.length
+        ? classMetadataOf(captureAddresses[source.capture].readPointer()).handle
+        : null;
+    case "metadataCapture":
+      return source.capture < captureAddresses.length ? captureAddresses[source.capture].readPointer() : null;
+    case "genericArgument": {
+      const base = readMetadataSource(context, source.base, captureAddresses);
+      if (base === null) {
+        return null;
+      }
+      return genericArgumentsOf(base).add(source.index * Process.pointerSize).readPointer();
+    }
+  }
+}
+
+// The generic parameters a closure's capture types are spelled with, filled in from the metadata
+// sources as the captures they read from get placed.
+export class CaptureGenericArguments {
+  private constructor(
+    private readonly context: NativePointer,
+    private pending: { param: GenericParam; source: MetadataSource }[],
+    private readonly environment: NativePointer,
+    private readonly genericArguments: NativePointer,
+    private readonly flatIndexOf: (param: GenericParam) => number
+  ) {}
+
+  static of(context: NativePointer, descriptor: CaptureDescriptor): CaptureGenericArguments | null {
+    const entries: { param: GenericParam; source: MetadataSource }[] = [];
+    for (const record of descriptor.metadataSources) {
+      const param = parseGenericParam(record.mangledTypeName);
+      const source = parseWholeMetadataSource(record.mangledMetadataSource);
+      if (param === null || source === null) {
+        return null;
+      }
+      entries.push({ param, source });
+    }
+    if (entries.length === 0) {
       return null;
     }
-    params.push({ ...param, metadata: bindings.add(slot * Process.pointerSize).readPointer() });
+    const shift = explicitParameterCount(
+      entries.map(({ source }) => source),
+      descriptor.captureTypes
+    );
+    if (shift === null) {
+      return null;
+    }
+    const { environment, genericArguments, flatIndexOf } = makeGenericEnvironment(
+      entries.map(({ param }) => param)
+    );
+    const pending = entries.map(({ param, source }) => ({ param, source: withCaptureShift(source, shift) }));
+    return new CaptureGenericArguments(context, pending, environment, genericArguments, flatIndexOf);
   }
-  if (params.length === 0) {
-    return null;
+
+  derive(captureAddresses: NativePointer[]): void {
+    this.pending = this.pending.filter(({ param, source }) => {
+      const metadata = readMetadataSource(this.context, source, captureAddresses);
+      if (metadata === null) {
+        return true;
+      }
+      this.genericArguments.add(this.flatIndexOf(param) * Process.pointerSize).writePointer(metadata);
+      return false;
+    });
   }
-  const { environment, genericArguments } = makeGenericEnvironment(params);
-  return (record) => {
+
+  resolve(record: CaptureTypeRecord): Metadata | null {
     const mangled = record.mangledTypeName;
-    return mangled === null ? null : resolveTypeByMangledNameInEnvironment(mangled, environment, genericArguments);
-  };
+    return mangled === null
+      ? null
+      : resolveTypeByMangledNameInEnvironment(mangled, this.environment, this.genericArguments);
+  }
 }

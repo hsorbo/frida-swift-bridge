@@ -1,6 +1,8 @@
 import {
+  CaptureGenericArguments,
+  CaptureTypeRecord,
   captureDescriptorOf,
-  captureTypeResolverFromBindings,
+  isReferenceSizedCaptureType,
   offsetToFirstCapture,
   resolveCaptureType,
 } from "./capture-descriptor.js";
@@ -13,7 +15,7 @@ export interface CaptureSlot {
   address: NativePointer;
 }
 
-// null: no closure, a generic parameter not supplied by a binding, or an unresolved capture type.
+// null: no closure, a generic parameter no metadata source supplies, or an unresolved capture type.
 export function layoutCaptures(context: NativePointer): CaptureSlot[] | null {
   const direct = layoutCapturesAt(context);
   if (direct !== null) {
@@ -55,30 +57,49 @@ function layoutSoleClassCapture(context: NativePointer): CaptureSlot[] | null {
   }
 }
 
+// A class reference or metatype capture is placed before its type resolves, since the generic
+// parameters that type needs may come from the capture itself.
 function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
   const descriptor = captureDescriptorOf(context);
   if (descriptor === null) {
     return null;
   }
-  const resolve =
-    descriptor.numBindings === 0 ? resolveCaptureType : captureTypeResolverFromBindings(context, descriptor);
-  if (resolve === null) {
+  const generic = descriptor.numBindings > 0 || descriptor.numMetadataSources > 0;
+  const generics = generic ? CaptureGenericArguments.of(context, descriptor) : null;
+  if (generic && generics === null) {
     return null;
   }
+  const resolve = (record: CaptureTypeRecord) =>
+    generics === null ? resolveCaptureType(record) : generics.resolve(record);
 
+  const records = descriptor.captureTypes;
   let offset = offsetToFirstCapture(context) + descriptor.numBindings * Process.pointerSize;
-  const slots: CaptureSlot[] = [];
-  for (const record of descriptor.captureTypes) {
+  const addresses: NativePointer[] = [];
+  const types: (Metadata | null)[] = [];
+  for (const record of records) {
+    generics?.derive(addresses);
     const type = resolve(record);
-    if (type === null) {
+    if (type === null && !(generics !== null && isReferenceSizedCaptureType(record))) {
       return null;
     }
-    const { size, alignment } = type.typeLayout;
+    const { size, alignment } =
+      type === null ? { size: Process.pointerSize, alignment: Process.pointerSize } : type.typeLayout;
     if (size !== 0) {
       offset = (offset + alignment - 1) & ~(alignment - 1);
     }
-    slots.push({ type, address: context.add(offset) });
+    addresses.push(context.add(offset));
+    types.push(type);
     offset += size;
+  }
+  generics?.derive(addresses);
+
+  const slots: CaptureSlot[] = [];
+  for (let i = 0; i < records.length; i++) {
+    const type = types[i] ?? resolve(records[i]);
+    if (type === null) {
+      return null;
+    }
+    slots.push({ type, address: addresses[i] });
   }
   return slots;
 }

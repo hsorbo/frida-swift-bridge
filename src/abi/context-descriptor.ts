@@ -93,16 +93,7 @@ export class ContextDescriptor {
     if (mangled === null) {
       return null;
     }
-    const kind = mangled.readU8();
-    const relative = mangled.add(1);
-    if (kind === SYMBOLIC_REF_DIRECT) {
-      return new ContextDescriptor(relative.add(relative.readS32()));
-    }
-    if (kind === SYMBOLIC_REF_INDIRECT) {
-      const target = relative.add(relative.readS32()).readPointer().strip();
-      return target.isNull() ? null : new ContextDescriptor(target);
-    }
-    return null;
+    return symbolicallyReferencedDescriptor(mangled);
   }
 
   private memoizedFullTypeName: string | null | undefined;
@@ -145,4 +136,17 @@ export class ContextDescriptor {
     const module = ctx?.kind === ContextDescriptorKind.Module ? ctx.name : this.moduleName;
     return module === null ? components.join(".") : `${module}.${components.join(".")}`;
   }
+}
+
+export function symbolicallyReferencedDescriptor(mangled: NativePointer): ContextDescriptor | null {
+  const kind = mangled.readU8();
+  const relative = mangled.add(1);
+  if (kind === SYMBOLIC_REF_DIRECT) {
+    return new ContextDescriptor(relative.add(relative.readS32()));
+  }
+  if (kind === SYMBOLIC_REF_INDIRECT) {
+    const target = relative.add(relative.readS32()).readPointer().strip();
+    return target.isNull() ? null : new ContextDescriptor(target);
+  }
+  return null;
 }

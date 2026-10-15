@@ -2155,3 +2155,24 @@ public func scaleVoxel(_ v: Voxel, _ k: Int) -> Voxel {
     Voxel(cells: [v.cells[0] * k, v.cells[1] * k, v.cells[2] * k])
 }
 #endif
+
+public final class GenericCapturingRef<T> {
+    public var value: T
+    public init(_ value: T) { self.value = value }
+}
+public func storeRefCapturing<T>(_ ref: GenericCapturingRef<T>) { genericCapturingBody = { _ = ref } }
+public func triggerRefCapturing() { storeRefCapturing(GenericCapturingRef(9)) }
+public func storeMetatypeCapturing<T>(_ type: T.Type) { genericCapturingBody = { _ = type } }
+public func triggerMetatypeCapturing() { storeMetatypeCapturing(Bool.self) }
+public func storeRefAndArrayCapturing<T>(_ ref: GenericCapturingRef<T>, _ xs: [T]) { genericCapturingBody = { _ = (ref, xs) } }
+public func triggerRefAndArrayCapturing() { storeRefAndArrayCapturing(GenericCapturingRef(3), [4, 5]) }
+var genericCapturingParamBody: (Int) -> Void = { _ in }
+public func genericCapturingParamContext() -> UnsafeMutableRawPointer {
+    return withUnsafePointer(to: &genericCapturingParamBody) { p in
+        UnsafeRawPointer(p).load(fromByteOffset: MemoryLayout<Int>.size, as: UnsafeMutableRawPointer.self)
+    }
+}
+public func storeRefAndArrayCapturingWithParam<T>(_ ref: GenericCapturingRef<T>, _ xs: [T]) {
+    genericCapturingParamBody = { n in _ = (n, ref, xs) }
+}
+public func triggerRefAndArrayCapturingWithParam() { storeRefAndArrayCapturingWithParam(GenericCapturingRef("q"), ["r"]) }
