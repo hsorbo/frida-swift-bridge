@@ -12,9 +12,11 @@ import { typeName } from "../src/runtime/type-name.js";
 import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
 import { Swift } from "../src/index.js";
+import { ARM64E_ABI } from "../src/basic/pac.js";
 const HEAP_LOCAL_VARIABLE = 0x400;
 const NOT_A_CLOSURE = 0x0;
 const CF_NUMBER_SINT64_TYPE = 4;
+const TYPE_DESCRIPTOR_DISCRIMINATOR = 0xae86;
 
 // keeps helper-allocated buffers from being GC'd once their local variable goes out of scope.
 const pinned: NativePointer[] = [];
@@ -53,9 +55,13 @@ function metadataOf(mangledName: string): NativePointer {
 
 // an indirect symbolic reference to the type's descriptor followed by the given mangling: the
 // descriptor lives in another image, which a relative pointer from the arena need not reach.
+// arm64e authenticates the slot: DA, TypeDescriptor, diversified on the slot's address.
 function symbolicTypeName(metadata: NativePointer, suffix: string): NativePointer {
+  const descriptor = new Metadata(metadata).description.handle;
   const descriptorSlot = arenaAlloc(Process.pointerSize);
-  descriptorSlot.writePointer(new Metadata(metadata).description.handle);
+  descriptorSlot.writePointer(
+    ARM64E_ABI ? descriptor.sign("da", descriptorSlot.blend(TYPE_DESCRIPTOR_DISCRIMINATOR)) : descriptor
+  );
   const name = arenaAlloc(5 + suffix.length + 1);
   name.writeU8(0x02);
   writeRelativeDirectPointer(name.add(1), descriptorSlot);
