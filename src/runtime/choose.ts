@@ -13,12 +13,13 @@ export interface ChooseOptions {
   subclasses?: boolean;
 }
 
-// Strips PAC and nonpointer-isa bits, so an isa or metadata word compares as the plain address. The
-// nonpointer layout differs per platform and ABI, so libobjc's exported mask is the authority.
+// Darwin isa words carry PAC and nonpointer bits, so they compare under libobjc's exported mask, the
+// authority on a layout that differs per ABI. Elsewhere an isa is the bare pointer and a word must match
+// it exactly, which keeps out the runtime's type-name cache keys: the same pointer with its low bits tagged.
 const ISA_MASK =
   Process.platform === "darwin"
     ? Module.getGlobalExportByName("objc_debug_isa_class_mask").readPointer()
-    : ptr("0x00007ffffffffff8");
+    : ptr(0).not();
 
 export function choose(cls: SwiftClass, options: ChooseOptions = {}): SwiftClassObject[] {
   if (!(cls?.$type instanceof ClassType)) {
@@ -59,10 +60,10 @@ export function choose(cls: SwiftClass, options: ChooseOptions = {}): SwiftClass
   );
   const instances: NativePointer[] = [];
   while (classes.length > 0) {
-    const instanceSizes = new Map(classes.map((c) => [c.handle.and(ISA_MASK).toString(), c.instanceSize]));
+    const byIsa = new Map(classes.map((c) => [c.handle.and(ISA_MASK).toString(), c]));
     const found: ClassMetadata[] = [];
     for (const { address, value } of findWordsEqualTo(heap, classes.map((c) => c.handle))) {
-      if (isInstanceBlock(address, instanceSizes.get(value.and(ISA_MASK).toString())!)) {
+      if (isInstanceBlock(address, byIsa.get(value.and(ISA_MASK).toString())!)) {
         instances.push(address);
       } else if (subclasses) {
         const subclass = classMetadataAt(address.sub(OFFSETOF_SUPERCLASS));
@@ -81,13 +82,16 @@ function isImageRange(range: RangeDetails): boolean {
   return range.file !== undefined || (Process.platform === "windows" && Process.findModuleByAddress(range.base) !== null);
 }
 
-// Darwin asks the allocator. Linux has no size query that is safe on an arbitrary pointer, so the glibc
-// chunk header before the block and a native refcount word that reads as live (side table, or unowned >= 1
-// and not deiniting) stand in. The Windows heap's queries fault on a pointer it does not own, so there the
-// refcount word alone decides, read to its full shape.
-function isInstanceBlock(address: NativePointer, instanceSize: number): boolean {
+// A system-malloc block can start with a class pointer without being an instance: the runtime's type-name
+// cache keys metadata pointers, each followed by a string pointer and a length. So the word after the isa
+// must have a native object's refcount shape, unless the class refcounts through ObjC and has no such word.
+// Darwin also asks the allocator for the size. Linux has no size query that is safe on an arbitrary
+// pointer, so the glibc chunk header before the block stands in. The Windows heap's queries fault on a
+// pointer it does not own, so there the refcount word alone decides.
+function isInstanceBlock(address: NativePointer, cls: ClassMetadata): boolean {
+  const instanceSize = cls.instanceSize;
   if (Process.platform === "darwin") {
-    return mallocSize(address) >= instanceSize;
+    return mallocSize(address) >= instanceSize && (!cls.usesSwiftRefcounting || hasNativeRefcountShape(address));
   }
   if (!address.and(0xf).isNull()) {
     return false;
@@ -98,7 +102,7 @@ function isInstanceBlock(address: NativePointer, instanceSize: number): boolean 
     }
     const chunkSize = address.sub(8).readU32() & ~7;
     const chunkSizeHigh = address.sub(4).readU32();
-    return chunkSizeHigh === 0 && (chunkSize & 8) === 0 && chunkSize >= instanceSize + 8 && hasLiveRefcount(address);
+    return chunkSizeHigh === 0 && (chunkSize & 8) === 0 && chunkSize >= instanceSize + 8 && hasNativeRefcountShape(address);
   } catch {
     return false;
   }
@@ -114,12 +118,6 @@ function hasNativeRefcountShape(address: NativePointer): boolean {
   }
   const unowned = refCountsLow >>> 1;
   return (refCountsLow & 1) === 1 && unowned !== 0 && unowned < 0x10000 && (refCountsHigh & 1) === 0;
-}
-
-function hasLiveRefcount(address: NativePointer): boolean {
-  const refCountsLow = address.add(8).readU32();
-  const refCountsHigh = address.add(12).readU32();
-  return (refCountsHigh & 0x80000000) !== 0 || ((refCountsLow & 0xfffffffe) !== 0 && (refCountsHigh & 1) === 0);
 }
 
 // Every metadata built so far for a generic declaration: the compiler's specializations listed on

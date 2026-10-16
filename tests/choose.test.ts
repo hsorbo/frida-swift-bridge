@@ -53,6 +53,30 @@ describe("Swift.choose", () => {
     expect(handles(Swift.choose(Swift.class("fixture.Starling")!))).toContain(starling.$handle.toString());
   });
 
+  test("rejects malloc blocks shaped like the runtime's type-name cache buckets", () => {
+    const HenCoop = Swift.class("fixture.HenCoop")!;
+    const coop = HenCoop.init();
+    const isa = coop.$handle.readPointer();
+    const malloc = new NativeFunction(Module.getGlobalExportByName("malloc"), "pointer", ["size_t"]);
+    const free = new NativeFunction(Module.getGlobalExportByName("free"), "void", ["pointer"]);
+    const buckets = [isa, isa.or(4)].map((key) => {
+      const block = malloc(64);
+      block.writePointer(key).add(8).writePointer(block.add(32)).add(8).writeU64(15);
+      return block;
+    });
+    try {
+      const found = handles(Swift.choose(HenCoop));
+      expect(found).toContain(coop.$handle.toString());
+      for (const block of buckets) {
+        expect(found).not.toContain(block.toString());
+      }
+    } finally {
+      for (const block of buckets) {
+        free(block);
+      }
+    }
+  });
+
   test("rejects anything but a class facade", () => {
     expect(() => Swift.choose(Swift.struct("fixture.Point")! as any)).toThrow("takes a class facade");
   });
