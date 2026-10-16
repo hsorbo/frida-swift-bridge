@@ -139,10 +139,11 @@ Swift.type("Geometry.Point");   // resolves
 ```
 
 A generic type named with its type arguments, `Module.Name<Args>`, resolves
-to that specialization: its metadata is built, so type methods and `init` can
-be called. The type named without arguments is the declaration, whose members
-are found and hookable but not callable. Each argument is spelled the same way;
-an argument that doesn't resolve makes the whole lookup `null`.
+to that specialization: its metadata is built, so type methods, static
+properties and `init` can be called. The type named without arguments is the
+declaration, whose members are found and hookable but not callable. Each
+argument is spelled the same way; an argument that doesn't resolve makes the
+whole lookup `null`.
 
 ```js
 const Keyed = Swift.type("MyApp.Keyed");              // the declaration

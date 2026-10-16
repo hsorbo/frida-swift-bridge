@@ -210,11 +210,11 @@ export class ClassInstance implements RawInstance {
   }
 
   get(name: string): CallResult {
-    return getProperty(this.handle, this.typeName, name);
+    return getProperty(this.handle, this.dynamicType, this.typeName, name);
   }
 
   set(name: string, value: CallArg): void {
-    setProperty(this.handle, this.typeName, name, value);
+    setProperty(this.handle, this.dynamicType, this.typeName, name, value);
   }
 
   // An ObjC object's isa has no Swift descriptor; its Swift members live under the imported __C. name.

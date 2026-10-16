@@ -1344,6 +1344,38 @@ public func driveKeyed() -> Int {
     _ = KeyedHolder<String>.label(12)
     return cellPaired(Cell("f"), 10)
 }
+// Accessors on a generic type. A value type's getter takes self as its methods do (by value when
+// the layout is fixed in the generic context, else in x20) and trails its Self metadata; a setter's
+// self is inout. A class reads the arguments off the isa; a value type's static accessor takes the
+// key arguments since its metatype is thin.
+public struct Scoreboard<T: Scalable> {
+    public var items: [T]
+    public var bonus: Int
+    public init(_ items: [T], bonus: Int = 0) { self.items = items; self.bonus = bonus }
+    public var count: Int { items.count }
+    public var head: T? { items.first }
+    public var scaledTotal: Int {
+        get { items.reduce(bonus) { $0 + $1.scaled(by: 2) } }
+        set { bonus = newValue }
+    }
+    public static var label: String { "scoreboard of \(T.self)" }
+}
+public struct Pouch<T: Scalable> {
+    public var value: T
+    public init(_ value: T) { self.value = value }
+    public var tripled: Int { value.scaled(by: 3) }
+    public var copy: T { value }
+}
+public final class ScoreboardHolder<T: Scalable> {
+    public var tally: Scoreboard<T>
+    public init(_ tally: Scoreboard<T>) { self.tally = tally }
+    public var count: Int { tally.items.count }
+    public var head: T? { tally.items.first }
+    public static var label: String { "holder of \(T.self)" }
+}
+public func makeScoreboard(upTo n: Int) -> Scoreboard<Int> { Scoreboard(n == 0 ? [] : Array(1...n)) }
+public func makePouch(_ x: Int) -> Pouch<Int> { Pouch(x) }
+public func makeScoreboardHolder(upTo n: Int) -> ScoreboardHolder<Int> { ScoreboardHolder(makeScoreboard(upTo: n)) }
 // A generic initializer beside a plain one, like CryptoKit's SymmetricKey.init<D: ContiguousBytes>(data:).
 public struct Sized {
     public var count: Int

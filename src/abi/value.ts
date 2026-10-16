@@ -81,12 +81,12 @@ export class ValueInstance implements RawInstance {
 
   get(name: string): CallResult {
     this.checkLive();
-    return getProperty(this.handle, typeName(this.metadata), name);
+    return getProperty(this.handle, this.metadata, typeName(this.metadata), name);
   }
 
   set(name: string, value: CallArg): void {
     this.checkLive();
-    setProperty(this.handle, typeName(this.metadata), name, value);
+    setProperty(this.handle, this.metadata, typeName(this.metadata), name, value);
   }
 
   read(): SwiftValue {

@@ -3022,43 +3022,62 @@ interface ResolvedAccessor {
 
 // Instance accessors only, walking the superclass chain like enumerateProperties so a subclass
 // shadows an inherited property and a static accessor of the same name is never mistaken for it.
-function resolveAccessor(typeName: string, member: string, kind: AccessorKind): ResolvedAccessor {
-  const owner = resolveMemberOwner(typeName);
-  const resolved = findAccessor(owner, member, kind);
-  if (resolved === null) {
-    throw new Error(`no ${kind} for ${member} on ${owner.fullName}`);
-  }
-  return resolved;
-}
-
-function findAccessor(owner: MemberOwner, member: string, kind: AccessorKind, isStatic = false): ResolvedAccessor | null {
-  return (
-    resolveAccessorIn(owner, member, kind, isStatic, definingModuleMembers) ??
-    resolveAccessorIn(owner, member, kind, isStatic, allLoadedModuleMembers)
-  );
-}
-
-function resolveAccessorIn(
+function findAccessorCandidate(
   owner: MemberOwner,
   member: string,
   kind: AccessorKind,
-  isStatic: boolean,
-  members: MemberSource
-): ResolvedAccessor | null {
-  for (const level of classChain(owner)) {
-    const candidate = members(level).accessors.find(
-      (a) => a.member === member && a.kind === kind && a.isStatic === isStatic
-    );
-    if (candidate === undefined) {
-      continue;
+  isStatic: boolean
+): { candidate: AccessorCandidate; level: MemberOwner } | null {
+  for (const members of [definingModuleMembers, allLoadedModuleMembers]) {
+    for (const level of classChain(owner)) {
+      const candidate = members(level).accessors.find(
+        (a) => a.member === member && a.kind === kind && a.isStatic === isStatic
+      );
+      if (candidate !== undefined) {
+        return { candidate, level };
+      }
     }
-    const type = resolveParsedType(candidate.type, () => null);
-    if (type === null) {
-      throw new Error(`cannot resolve ${kind} type ${candidate.typeName} of ${level.fullName}.${member}`);
-    }
-    return { address: candidate.address, type, kind };
   }
   return null;
+}
+
+function findAccessor(owner: MemberOwner, member: string, kind: AccessorKind, isStatic = false): ResolvedAccessor | null {
+  const found = findAccessorCandidate(owner, member, kind, isStatic);
+  if (found === null) {
+    return null;
+  }
+  const { candidate, level } = found;
+  const type = resolveParsedType(candidate.type, () => null);
+  if (type === null) {
+    throw new Error(`cannot resolve ${kind} type ${candidate.typeName} of ${level.fullName}.${member}`);
+  }
+  return { address: candidate.address, type, kind };
+}
+
+function isGenericOwner(owner: MemberOwner): boolean {
+  return owner.kind !== "objcClass" && owner.descriptor.isGeneric;
+}
+
+// An accessor of a generic type substitutes the property type from the specialization. A class
+// reads the type's parameters off the isa. A value type's self is a source of them only when passed
+// by address, where it trails its Self metadata; a self passed by value (a getter on a layout fixed
+// in the generic context) and a static accessor's thin metatype take the key arguments instead.
+function bindGenericTypeAccessor(receiver: Metadata, candidate: AccessorCandidate, kind: AccessorKind, self: NativePointer | null): BoundMethod {
+  const { unboundName, typeParams, typeArguments } = genericTypeArguments(receiver);
+  const classBound = classBoundTypeParams(findType(unboundName)!, typeParams);
+  const typePlan = planTypeMemberArg(candidate.type, typeParams, typeArguments, classBound);
+  if (receiver.kind === MetadataKind.Class) {
+    return new BoundMethod(accessorCallPlan(candidate.address, typePlan, kind), { self: self ?? receiver.handle });
+  }
+  if (self === null) {
+    return new BoundMethod(accessorCallPlan(candidate.address, typePlan, kind, keyGenericArguments(receiver)));
+  }
+  const routing: SelfRouting =
+    kind === "getter" && hasFixedLayoutInGenericContext(receiver.description)
+      ? valueSelfRouting(receiver, kind, "borrowing")
+      : { indirect: true };
+  const implicit = routing.indirect ? { typeArguments: [receiver] } : keyGenericArguments(receiver);
+  return new BoundMethod(accessorCallPlan(candidate.address, typePlan, kind, implicit), { self, routing });
 }
 
 // A getter borrows self, so a small loadable value receiver rides in registers by value — passed as a
@@ -3078,7 +3097,15 @@ function accessorPlan(
   abstract = false,
   implicit: { typeArguments?: Metadata[]; witnessTables?: NativePointer[] } = {}
 ): CallPlan {
-  const typePlan: ArgPlan = abstract ? { kind: "abstractIndirect", metadata: type } : { kind: "concrete", metadata: type };
+  return accessorCallPlan(address, abstract ? { kind: "abstractIndirect", metadata: type } : { kind: "concrete", metadata: type }, kind, implicit);
+}
+
+function accessorCallPlan(
+  address: NativePointer,
+  typePlan: ArgPlan,
+  kind: AccessorKind,
+  implicit: { typeArguments?: Metadata[]; witnessTables?: NativePointer[] } = {}
+): CallPlan {
   return {
     address,
     selector: kind,
@@ -3092,40 +3119,63 @@ function accessorPlan(
   };
 }
 
-export function getProperty(self: NativePointer, typeName: string, member: string): CallResult {
-  const owner = resolveMemberOwner(typeName);
-  const accessor = findAccessor(owner, member, "getter");
-  if (accessor === null) {
-    return conformanceGetProperty(owner, self, member);
+// null when the type declares no such accessor, so the caller may try its protocol extensions.
+function bindAccessor(
+  owner: MemberOwner,
+  receiver: Metadata,
+  typeName: string,
+  member: string,
+  kind: AccessorKind,
+  self: NativePointer | null
+): BoundMethod | null {
+  const isStatic = self === null;
+  if (isGenericOwner(owner)) {
+    const found = findAccessorCandidate(owner, member, kind, isStatic);
+    return found === null ? null : bindGenericTypeAccessor(receiver, found.candidate, kind, self);
   }
-  const selfByValue = getterSelfByValue(typeName);
+  const accessor = findAccessor(owner, member, kind, isStatic);
+  if (accessor === null) {
+    return null;
+  }
+  const plan = accessorPlan(accessor.address, accessor.type, kind);
+  if (self === null) {
+    // Self is the metatype: thick (the metadata) for a class or a protocol extension, erased for a value type.
+    return new BoundMethod(plan, { self: metatypeSelf(receiver) });
+  }
+  const selfByValue = kind === "getter" ? getterSelfByValue(typeName) : null; // setter self is inout
   const routing: SelfRouting = selfByValue === null ? { indirect: true } : { indirect: false, receiver: selfByValue };
-  return new BoundMethod(accessorPlan(accessor.address, accessor.type, "getter"), { self, routing }).call() as CallResult;
+  return new BoundMethod(plan, { self, routing });
 }
 
-// Self is the metatype: thick (the metadata) for a class or a protocol extension, erased for a value type.
+export function getProperty(self: NativePointer, receiver: Metadata, typeName: string, member: string): CallResult {
+  const owner = resolveMemberOwner(typeName);
+  const bound = bindAccessor(owner, receiver, typeName, member, "getter", self);
+  return bound === null ? conformanceGetProperty(owner, self, member) : (bound.call() as CallResult);
+}
+
 export function getStaticProperty(receiver: Metadata, member: string): CallResult {
-  const owner = resolveMemberOwner(typeName(receiver));
-  const accessor = findAccessor(owner, member, "getter", true);
-  if (accessor === null) {
-    return conformanceGetProperty(owner, metatypeSelf(receiver), member, true);
-  }
-  return new BoundMethod(accessorPlan(accessor.address, accessor.type, "getter"), { self: metatypeSelf(receiver) }).call() as CallResult;
+  const name = typeName(receiver);
+  const owner = resolveMemberOwner(name);
+  const bound = bindAccessor(owner, receiver, name, member, "getter", null);
+  return bound === null ? conformanceGetProperty(owner, metatypeSelf(receiver), member, true) : (bound.call() as CallResult);
 }
 
 export function setStaticProperty(receiver: Metadata, member: string, value: CallArg): void {
   const name = typeName(receiver);
-  const accessor = findAccessor(resolveMemberOwner(name), member, "setter", true);
-  if (accessor === null) {
+  const bound = bindAccessor(resolveMemberOwner(name), receiver, name, member, "setter", null);
+  if (bound === null) {
     throw new Error(`no static setter for ${member} on ${name}`);
   }
-  new BoundMethod(accessorPlan(accessor.address, accessor.type, "setter"), { self: metatypeSelf(receiver) }).call(value);
+  bound.call(value);
 }
 
-// Setter self is inout (mutating), so it stays indirect.
-export function setProperty(self: NativePointer, typeName: string, member: string, value: CallArg): void {
-  const accessor = resolveAccessor(typeName, member, "setter");
-  new BoundMethod(accessorPlan(accessor.address, accessor.type, "setter"), { self }).call(value);
+export function setProperty(self: NativePointer, receiver: Metadata, typeName: string, member: string, value: CallArg): void {
+  const owner = resolveMemberOwner(typeName);
+  const bound = bindAccessor(owner, receiver, typeName, member, "setter", self);
+  if (bound === null) {
+    throw new Error(`no setter for ${member} on ${owner.fullName}`);
+  }
+  bound.call(value);
 }
 
 interface ConformanceMembers {
