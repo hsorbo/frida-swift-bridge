@@ -521,6 +521,24 @@ public struct Pair<T> {
 extension Pair: Greeter where T: Greeter {
     public func greet() -> String { "\(first.greet()) & \(second.greet())" }
 }
+extension Pair where T: Greeter {
+    public func bothGreet() -> String { first.greet() + " / " + second.greet() }
+}
+extension Pair where T == Int {
+    public func sum() -> Int { first + second }
+}
+extension Cell where T: Greeter {
+    public func cellGreet() -> String { value.greet() }
+}
+public func makeGreeterCell(_ name: String) -> Cell<PoliteGreeter> { Cell(PoliteGreeter(name: name)) }
+public struct ScaledGreeter: Scalable, Greeter {
+    public let base: Int
+    public func scaled(by factor: Int) -> Int { base * factor }
+    public func greet() -> String { "scalar \(base)" }
+}
+extension PhantomScaled where T: Greeter {
+    public func greetScaled(_ x: T, by k: Int) -> String { x.greet() + " " + String(raw + x.scaled(by: k)) }
+}
 
 public protocol Named: AnyObject {
     var label: String { get }
@@ -996,6 +1014,14 @@ public final class HenCoop: Coop<Int>, Perchable {
 extension Perchable where Self: Coop<Int> {
     public func coopChirp() -> String { "coop " + chirp() }
 }
+public struct Ring: RawRepresentable, Perchable {
+    public let rawValue: Int
+    public init(rawValue: Int) { self.rawValue = rawValue }
+    public func chirp() -> String { "ring" }
+}
+extension Perchable where Self: RawRepresentable, RawValue == Int {
+    public func rawChirp() -> String { "\(rawValue) " + chirp() }
+}
 
 #if canImport(ObjectiveC)
 import ObjectiveC
@@ -1005,6 +1031,9 @@ public final class Starling: NSObject, Perchable {
 }
 extension Perchable where Self: NSObject {
     public func objcChirp() -> String { "objc " + chirp() }
+}
+extension Perchable where Self: NSObjectProtocol {
+    public func objcProtocolChirp() -> String { "objc protocol " + chirp() }
 }
 #endif
 
@@ -1072,6 +1101,32 @@ extension Clutch where Egg: BinaryInteger {
 }
 extension Clutch {
     public var firstEgg: Egg { egg }
+}
+extension Nest where Egg == Int {
+    public func eggPlusOne() -> Int { egg + 1 }
+}
+extension Nest where Egg: Sendable {
+    public func sendableEgg() -> String { "\(egg)" }
+}
+
+// Home.Egg reaches the nested associated type through Home's own Nest conformance.
+public protocol Hatchery {
+    associatedtype Home: Nest
+    var home: Home { get }
+}
+public struct IntHatchery: Hatchery {
+    public let home: IntNest
+    public init(_ egg: Int) { home = IntNest(egg: egg) }
+}
+public struct WordHatchery: Hatchery {
+    public let home: WordNest
+    public init(_ egg: String) { home = WordNest(egg: egg) }
+}
+extension Hatchery where Home.Egg: BinaryInteger {
+    public func hatchCount() -> Int { Int(home.egg) * 4 }
+}
+extension Hatchery where Home.Egg == String {
+    public func hatchWord() -> String { home.egg + "!" }
 }
 
 public protocol Hatchable {
@@ -1379,6 +1434,12 @@ extension Box {
 }
 public final class Bat: NSObject, Winged {
     public func flap() -> Int { 2 }
+}
+extension Bat: Perchable {
+    public func chirp() -> String { "squeak" }
+}
+extension Perchable where Self: Winged {
+    public func wingedChirp() -> String { "winged \(flap()) " + chirp() }
 }
 public final class ObjCRefBox<T: NSObjectProtocol> {
     public let value: T

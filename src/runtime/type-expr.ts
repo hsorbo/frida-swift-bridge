@@ -83,7 +83,8 @@ export interface SwiftFunctionSignature {
   returnTypeName: string | null;
   selector: string; // e.g. "greet(name:to:)"
   conformanceRequirements: GenericRequirement[];
-  // A constrained extension's context demangles as `P< where A: Q>`; the clauses, context bare.
+  // A constrained extension's context demangles as `P< where A: Q>` or `T<A where A: Q>`; the
+  // clauses, context bare.
   contextConstraints: string[];
 }
 
@@ -502,10 +503,15 @@ function parseEntityPath(parser: Parser): EntityPath {
   }
   const last = segments.pop()!;
   const outer = segments[segments.length - 1];
-  const constrained = outer?.clause?.startsWith("< where ") === true;
-  const contextConstraints = constrained ? splitRequirements(outer.clause!.slice("< where ".length, -1)) : [];
+  const constrained = outer?.clause != null;
+  const contextConstraints = constrained ? whereRequirements(outer.clause!) : [];
   const contextEnd = outer === undefined ? 0 : constrained ? outer.start + outer.name.length : last.start - 1;
   return { context: parser.s.slice(0, contextEnd), name: last.name, clause: last.clause, contextConstraints };
+}
+
+function whereRequirements(clause: string): string[] {
+  const where = clause.indexOf(" where ");
+  return where === -1 ? [] : splitRequirements(clause.slice(where + " where ".length, -1));
 }
 
 function parseAccessor(s: string): ParsedSwiftSignature | null {

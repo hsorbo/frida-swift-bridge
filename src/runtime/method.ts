@@ -32,6 +32,7 @@ import {
   symbolicate,
   OBJC_MODULE_PREFIX,
   importedObjCIdentifier,
+  resolveTypeExpr,
 } from "./symbolication.js";
 import {
   makeSwiftNativeFunction,
@@ -57,7 +58,7 @@ import { SwiftClosure, ClosureSpec, ClosureBody, ClosureWords, LoadableClosureBo
 import { closurePrototype, captureFields } from "./closure-view.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
-import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName } from "./objc.js";
+import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName, objcClassConformsToProtocol } from "./objc.js";
 import { getSwiftCoreApi } from "./api.js";
 import { readString, createString } from "../abi/string.js";
 import {
@@ -384,6 +385,8 @@ interface AccessorCandidate {
 interface TypeMembers {
   methods: MethodCandidate[];
   accessors: AccessorCandidate[];
+  // A generic type's members from its constrained extensions, applied per specialization.
+  conditional: MethodCandidate[];
 }
 
 const tableCache = new Map<string, TypeMembers>();
@@ -871,11 +874,11 @@ function foreignMembers(owner: MemberOwner, mayName: SymbolFilter | null = null)
   }
   const module = Process.findModuleByAddress(owner.descriptor.handle);
   if (module === null) {
-    return { methods: [], accessors: [] };
+    return { methods: [], accessors: [], conditional: [] };
   }
   const token = provenToken(fullName, owner.descriptor, module);
   if (token === null) {
-    return { methods: [], accessors: [] };
+    return { methods: [], accessors: [], conditional: [] };
   }
   return exportedMembersAcrossModules(fullName, token, mayName, module);
 }
@@ -883,22 +886,26 @@ function foreignMembers(owner: MemberOwner, mayName: SymbolFilter | null = null)
 function exportedMembersAcrossModules(fullName: string, token: string, mayName: SymbolFilter | null, except: Module | null): TypeMembers {
   const methods: MethodCandidate[] = [];
   const accessors: AccessorCandidate[] = [];
+  const conditional: MethodCandidate[] = [];
   for (const module of Process.enumerateModules()) {
     if (except !== null && module.base.equals(except.base)) {
       continue;
     }
-    forEachExportedMembers(module, [{ fullName, token, withConstrainedExtensions: false }], mayName, (_, found) => {
+    forEachExportedMembers(module, [{ fullName, token, constrainedInline: false }], mayName, (_, found) => {
       methods.push(...found.methods);
       accessors.push(...found.accessors);
+      conditional.push(...found.conditional);
     });
   }
-  return { methods, accessors };
+  return { methods, accessors, conditional };
 }
 
 interface MemberTarget {
   fullName: string;
   token: string;
-  withConstrainedExtensions: boolean;
+  // Constrained members join the main lists (a protocol's, filtered per conformance) or the
+  // conditional one (a generic type's).
+  constrainedInline: boolean;
 }
 
 function forEachExportedMembers(
@@ -928,10 +935,10 @@ function forEachExportedMembers(
 }
 
 function membersAmong(exports: PrefixedExport[], target: MemberTarget): TypeMembers {
-  const members: TypeMembers = { methods: [], accessors: [] };
+  const members: TypeMembers = { methods: [], accessors: [], conditional: [] };
   const seen = new Set<string>();
   for (const e of exports) {
-    considerMember(members, seen, target.fullName, e.name, e.address, false, target.withConstrainedExtensions);
+    considerMember(members, seen, target.fullName, e.name, e.address, false, target.constrainedInline);
   }
   return members;
 }
@@ -995,11 +1002,11 @@ function protocolToken(protocol: ContextDescriptor): string | null {
 function protocolExtensionTarget(protocol: ContextDescriptor): MemberTarget | null {
   const fullName = protocol.fullTypeName;
   const token = protocolToken(protocol);
-  return fullName === null || token === null ? null : { fullName, token, withConstrainedExtensions: true };
+  return fullName === null || token === null ? null : { fullName, token, constrainedInline: true };
 }
 
 function protocolExtensionMembersOfAll(protocols: ContextDescriptor[], mayName: SymbolFilter | null = null): TypeMembers[] {
-  const result = protocols.map((): TypeMembers => ({ methods: [], accessors: [] }));
+  const result = protocols.map((): TypeMembers => ({ methods: [], accessors: [], conditional: [] }));
   const targets: MemberTarget[] = [];
   const slots: number[] = [];
   protocols.forEach((protocol, i) => {
@@ -1038,6 +1045,7 @@ function allLoadedModuleMembers(owner: MemberOwner): TypeMembers {
   return {
     methods: [...own.methods, ...foreign.methods],
     accessors: [...own.accessors, ...foreign.accessors],
+    conditional: [...own.conditional, ...foreign.conditional],
   };
 }
 
@@ -1071,12 +1079,12 @@ function tokenIsSpelled(module: Module, token: string): boolean {
 
 function scanMembers(module: Module, fullName: string, token: string | null): TypeMembers {
   if (token === null) {
-    const exported = exportedByContext(module).get(fullName) ?? { methods: [], accessors: [] };
+    const exported = exportedByContext(module).get(fullName) ?? { methods: [], accessors: [], conditional: [] };
     const seen = new Set(exported.methods.map((c) => c.address.strip().toString()));
     const inits = (initializersByContext(module).get(fullName)?.methods ?? []).filter((c) => !seen.has(c.address.strip().toString()));
-    return { methods: [...exported.methods, ...inits], accessors: exported.accessors };
+    return { methods: [...exported.methods, ...inits], accessors: exported.accessors, conditional: exported.conditional };
   }
-  const members: TypeMembers = { methods: [], accessors: [] };
+  const members: TypeMembers = { methods: [], accessors: [], conditional: [] };
   const seen = new Set<string>();
   const prefix = `$s${token}`;
   for (const e of swiftExportsOfTokens(module, [token])[0]) {
@@ -1121,16 +1129,16 @@ function indexByContext(symbols: PrefixedExport[], initsOnly: boolean): Map<stri
     }
     seen.add(key);
     const demangled = demangledMember(s.name);
-    const parsed = demangled === null ? null : parseMember(demangled, s.name, s.address, initsOnly, false);
+    const parsed = demangled === null ? null : parseMember(demangled, s.name, s.address, initsOnly);
     if (parsed === null) {
       continue;
     }
     let members = byContext.get(parsed.context);
     if (members === undefined) {
-      members = { methods: [], accessors: [] };
+      members = { methods: [], accessors: [], conditional: [] };
       byContext.set(parsed.context, members);
     }
-    addMember(members, parsed);
+    addMember(members, parsed, false);
   }
   return byContext;
 }
@@ -1142,7 +1150,7 @@ function considerMember(
   name: string,
   address: NativePointer,
   initsOnly: boolean,
-  withConstrainedExtensions: boolean
+  constrainedInline: boolean
 ): void {
   const key = address.strip().toString();
   if (address.isNull() || seen.has(key)) {
@@ -1153,9 +1161,9 @@ function considerMember(
   if (demangled === null || !demangled.includes(fullName)) {
     return;
   }
-  const parsed = parseMember(demangled, name, address, initsOnly, withConstrainedExtensions);
+  const parsed = parseMember(demangled, name, address, initsOnly);
   if (parsed !== null && parsed.context === fullName) {
-    addMember(members, parsed);
+    addMember(members, parsed, constrainedInline);
   }
 }
 
@@ -1169,13 +1177,7 @@ function demangledMember(name: string): string | null {
   return demangle(name)?.replace(PRIVATE_DECL_NAME, "$1") ?? null;
 }
 
-function parseMember(
-  demangled: string,
-  name: string,
-  address: NativePointer,
-  initsOnly: boolean,
-  withConstrainedExtensions: boolean
-): ParsedMember | null {
+function parseMember(demangled: string, name: string, address: NativePointer, initsOnly: boolean): ParsedMember | null {
   const signature = parseSwiftSignature(demangled);
   if (signature === null) {
     return null;
@@ -1184,13 +1186,13 @@ function parseMember(
     if ((initsOnly && signature.name !== "init") || signature.accessor === "modify" || signature.accessor === "read") {
       return null;
     }
-    const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
+    const { context, isStatic, constraints } = memberContext(signature);
     return { context, method: { address, name: signature.name, mangled: name, isStatic, signature, constraints }, accessor: null };
   }
   if (initsOnly) {
     return null;
   }
-  const { context, isStatic, constraints } = memberContext(signature, withConstrainedExtensions);
+  const { context, isStatic, constraints } = memberContext(signature);
   return {
     context,
     method: null,
@@ -1198,26 +1200,17 @@ function parseMember(
   };
 }
 
-function addMember(members: TypeMembers, parsed: ParsedMember): void {
+// A constrained extension's accessors on a generic type are not reached yet.
+function addMember(members: TypeMembers, parsed: ParsedMember, constrainedInline: boolean): void {
   if (parsed.method !== null) {
-    members.methods.push(parsed.method);
-  } else if (parsed.accessor !== null) {
+    (constrainedInline || parsed.method.constraints.length === 0 ? members.methods : members.conditional).push(parsed.method);
+  } else if (parsed.accessor !== null && (constrainedInline || parsed.accessor.constraints.length === 0)) {
     members.accessors.push(parsed.accessor);
   }
 }
 
-// A constrained protocol extension's members demangle under `P< where A: Q, A.T == U>`; unless
-// those are wanted, the member is kept out by a context no type is named as.
-function memberContext(
-  signature: ParsedSwiftSignature,
-  withConstrainedExtensions: boolean
-): { context: string; isStatic: boolean; constraints: string[] } {
-  const receiver = stripReceiverKeyword(signature.context);
-  const constraints = signature.contextConstraints;
-  if (constraints.length > 0 && !withConstrainedExtensions) {
-    return { context: `${receiver.context}< where ${constraints.join(", ")}>`, isStatic: receiver.isStatic, constraints: [] };
-  }
-  return { ...receiver, constraints };
+function memberContext(signature: ParsedSwiftSignature): { context: string; isStatic: boolean; constraints: string[] } {
+  return { ...stripReceiverKeyword(signature.context), constraints: signature.contextConstraints };
 }
 
 export type TypeScope = "thisType" | "withSuperclasses";
@@ -1258,6 +1251,7 @@ export function enumerateMethods(
   for (const level of types === "withSuperclasses" ? classChain(owner) : [owner]) {
     members(level).methods.forEach(add);
   }
+  conditionalMethods(owner, typeArgumentsNamed(typeName), members).forEach(add);
   if (modules === "allLoadedModules" && types === "withSuperclasses") {
     for (const conformance of conformanceMembers(owner)) {
       conformance.members.methods.filter(isConformanceMethod).forEach(add);
@@ -2679,12 +2673,30 @@ function inferClosureTypeArguments(signature: SwiftFunctionSignature): Metadata[
 function matchingMethods(
   owner: MemberOwner,
   options: RawMethodResolveOptions,
-  match: (candidate: MethodCandidate) => boolean
+  match: (candidate: MethodCandidate) => boolean,
+  typeArguments: Metadata[] | null = null
 ): MethodCandidate[] {
-  const own = applyOverloadFilters(definingModuleMembers(owner).methods.filter(match), options);
-  return own.length > 0 || options.deep === false
-    ? own
-    : applyOverloadFilters(allLoadedModuleMembers(owner).methods.filter(match), options);
+  const matching = (source: MemberSource): MethodCandidate[] =>
+    applyOverloadFilters([...source(owner).methods, ...conditionalMethods(owner, typeArguments, source)].filter(match), options);
+  const own = matching(definingModuleMembers);
+  return own.length > 0 || options.deep === false ? own : matching(allLoadedModuleMembers);
+}
+
+function conditionalMethods(owner: MemberOwner, typeArguments: Metadata[] | null, members: MemberSource): MethodCandidate[] {
+  if (typeArguments === null || owner.kind === "objcClass") {
+    return [];
+  }
+  const { descriptor } = owner;
+  return members(owner).conditional.filter((c) => clauseArguments(descriptor, typeArguments, c.constraints) !== null);
+}
+
+function typeArgumentsNamed(name: string): Metadata[] | null {
+  const parsed = parseTypeExpr(name);
+  if (parsed === null || parsed.kind !== "nominal" || parsed.args.length === 0) {
+    return null;
+  }
+  const typeArguments = parsed.args.map((arg) => resolveParsedType(arg, () => null));
+  return typeArguments.every((t): t is Metadata => t !== null) ? typeArguments : null;
 }
 
 // planGenericMethod also binds a non-generic method whose closure parameter needs ArgPlan lowering.
@@ -2878,13 +2890,19 @@ function genericTypeArguments(receiver: Metadata): { unboundName: string; typePa
 // value: its bytes, address-only in the generic context). A value type trails its Self metadata
 // — the callee reads T's metadata + witnesses from that vector; a class recovers them from the isa.
 // A value type whose layout is fixed in the generic context is routed by bindGenericTypeValueMethod.
-function planGenericTypeMethod(receiver: Metadata, methodName: string, options: RawMethodResolveOptions, trailsSelfMetadata: boolean): CallPlan {
+function planGenericTypeMethod(
+  receiver: Metadata,
+  methodName: string,
+  options: RawMethodResolveOptions,
+  trailsSelfMetadata: boolean
+): { plan: CallPlan; clause: ClauseArguments | null } {
   const { unboundName, typeParams, typeArguments } = genericTypeArguments(receiver);
   const owner = resolveMemberOwner(unboundName);
   const candidates = matchingMethods(
     owner,
     options,
-    (c) => c.name === methodName && c.signature.genericParams.length === 0 && c.signature.simpleGenerics
+    (c) => c.name === methodName && c.signature.genericParams.length === 0 && c.signature.simpleGenerics,
+    typeArguments
   );
   if (candidates.length === 0) {
     throw noMethodError(unboundName, methodName);
@@ -2893,9 +2911,14 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     const overloads = describeOverloads(candidates);
     throw new Error(`ambiguous method ${methodName} on ${unboundName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`);
   }
-  const { address, signature, mangled } = candidates[0];
+  const { address, signature, mangled, constraints } = candidates[0];
+  const descriptor = findType(unboundName)!;
+  const clause = constraints.length === 0 ? null : clauseArguments(descriptor, typeArguments, constraints)!;
   const params = splitParams(signature.params);
-  const classBound = classBoundTypeParams(findType(unboundName)!, typeParams);
+  const classBound = classBoundTypeParams(descriptor, typeParams);
+  for (const subject of clause?.classBound ?? []) {
+    classBound.add(subject);
+  }
   const argPlans = params.types.map((n, i) =>
     planParam(planTypeMemberArg(n, typeParams, typeArguments, classBound), params.conventions[i], signature.selector)
   );
@@ -2912,7 +2935,7 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
       throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
     }
   }
-  return setterPlan({
+  const plan = setterPlan({
     address: address.strip(),
     selector: signature.selector,
     argPlans,
@@ -2922,11 +2945,12 @@ function planGenericTypeMethod(receiver: Metadata, methodName: string, options: 
     async: signature.async,
     asyncFunctionPointer,
     typeArguments: trailsSelfMetadata ? [receiver] : [],
-    witnessTables: [],
+    witnessTables: clause?.added.map((w) => w.witness) ?? [],
     argConventions: params.conventions,
     origin: memberOrigin(address, owner),
     signature,
   });
+  return { plan, clause };
 }
 
 export function bindGenericTypeValueMethod(
@@ -2935,16 +2959,20 @@ export function bindGenericTypeValueMethod(
   methodName: string,
   options: RawValueMethodResolveOptions = {}
 ): BoundMethod {
-  const plan = planGenericTypeMethod(receiver, methodName, options, true);
+  const { plan, clause } = planGenericTypeMethod(receiver, methodName, options, true);
   let routing: SelfRouting = { indirect: true };
-  if (hasFixedLayoutInGenericContext(receiver.description)) {
-    const keyArguments = keyGenericArguments(receiver);
+  const concrete = clause?.concrete === true;
+  if (concrete) {
+    Object.assign(plan, { typeArguments: [], witnessTables: [] });
+  }
+  if (concrete || hasFixedLayoutInGenericContext(receiver.description)) {
+    const implicit = concrete ? { typeArguments: [], witnessTables: [] } : clauseKeyArguments(receiver, clause);
     routing = genericValueSelfRouting(receiver, plan, options.self, {
-      trailingSelf: keyArguments.typeArguments.length + keyArguments.witnessTables.length,
+      trailingSelf: implicit.typeArguments.length + implicit.witnessTables.length,
       selfInRegister: plan.typeArguments.length,
     });
     if (!routing.indirect) {
-      Object.assign(plan, keyArguments);
+      Object.assign(plan, implicit);
     }
   }
   return new BoundMethod(plan, { self, routing, consumedSelf: consumedSelf(receiver, options) });
@@ -2956,17 +2984,17 @@ export function bindGenericTypeClassMethod(
   methodName: string,
   options: RawMethodResolveOptions = {}
 ): BoundMethod {
-  return new BoundMethod(planGenericTypeMethod(receiver, methodName, options, false), { self });
+  return new BoundMethod(planGenericTypeMethod(receiver, methodName, options, false).plan, { self });
 }
 
 // A type method of a specialization. A class takes its metadata as the thick metatype self; a value
 // type's metatype is thin, so the specialization's key arguments trail the formal ones instead.
 export function bindGenericTypeStaticMethod(receiver: Metadata, methodName: string, options: RawMethodResolveOptions = {}): BoundMethod {
-  const plan = planGenericTypeMethod(receiver, methodName, { ...options, static: true }, false);
+  const { plan, clause } = planGenericTypeMethod(receiver, methodName, { ...options, static: true }, false);
   if (receiver.kind === MetadataKind.Class) {
     return new BoundMethod(plan, { self: receiver.handle });
   }
-  Object.assign(plan, keyGenericArguments(receiver));
+  Object.assign(plan, clauseKeyArguments(receiver, clause));
   return new BoundMethod(plan);
 }
 
@@ -2974,13 +3002,13 @@ export function bindGenericTypeStaticMethod(receiver: Metadata, methodName: stri
 // metadata. The arguments are consumed and the +1 result adopted, as bindValueInitializer does.
 export function bindGenericTypeInitializer(receiver: Metadata, options: RawMethodResolveOptions = {}): SwiftBoundInitializer {
   const isClass = receiver.kind === MetadataKind.Class;
-  const plan = planGenericTypeMethod(receiver, isClass ? "__allocating_init" : "init", options, false);
+  const { plan, clause } = planGenericTypeMethod(receiver, isClass ? "__allocating_init" : "init", options, false);
   const argConventions = plan.argPlans.map((_, i): ParamConvention => (plan.argConventions?.[i] === "inout" ? "inout" : "owned"));
   let bound: BoundMethod;
   if (isClass) {
     bound = new BoundMethod({ ...plan, argConventions }, { self: receiver.handle });
   } else {
-    Object.assign(plan, keyGenericArguments(receiver));
+    Object.assign(plan, clauseKeyArguments(receiver, clause));
     bound = new BoundMethod({ ...plan, argConventions }, { adoptResult: true });
   }
   return { address: bound.address, call: (...args) => bound.call(...args) as SwiftValueObject | null };
@@ -3137,7 +3165,7 @@ function conformanceMembers(owner: MemberOwner, mayName: SymbolFilter | null = n
 function applicableMembers(members: TypeMembers, table: WitnessTable): TypeMembers {
   const applies = (c: { constraints: string[] }): boolean =>
     c.constraints.length === 0 || selfSignature(table, c.constraints) !== null;
-  return { methods: members.methods.filter(applies), accessors: members.accessors.filter(applies) };
+  return { ...members, methods: members.methods.filter(applies), accessors: members.accessors.filter(applies) };
 }
 
 function unshadowedMembers<T extends { constraints: string[] }>(candidates: T[], identity: (c: T) => string): T[] {
@@ -3169,46 +3197,99 @@ function selfSignature(table: WitnessTable, constraints: string[]): SelfSignatur
     classBound.add("A");
   }
   let impliesProtocol = false;
+  const resolve: ResolveParam = (name) => resolveWitnessSelfOrAssociatedType(table, name, constraints);
   for (const constraint of constraints) {
-    const match = /^(A(?:\.\w+)?): (.+)$/.exec(constraint);
-    const subject = match === null ? null : resolveWitnessSelfOrAssociatedType(table, match[1]);
-    if (match === null || subject === null) {
+    const requirement = parseRequirement(constraint);
+    const subject = requirement === null ? null : resolve(requirement.subject);
+    if (requirement === null || subject === null) {
       return null;
     }
-    const [, subjectName, bound] = match;
-    if (bound === "AnyObject") {
-      if (!isAnyClass(subject)) {
+    const subjectName = requirement.subject;
+    if (requirement.relation === "==") {
+      // Self fixed to one type leaves nothing generic to pass, which this signature can't say.
+      if (subjectName === "A" || !sameType(subject, requirement.bound, resolve)) {
         return null;
       }
-      classBound.add(subjectName);
       continue;
     }
-    const superclass =
-      subject.kind === MetadataKind.Class ? selfOrSuperclassNamed(new ClassMetadata(subject.handle), bound) : null;
-    if (superclass !== null) {
-      classBound.add(subjectName);
-      impliesProtocol ||= subjectName === "A" && conformsToProtocol(superclass, protocol) !== null;
-      continue;
-    }
-    const required = whereClauseProtocol(bound);
-    const witness = required === null ? null : conformsToProtocol(subject, required);
-    if (required === null || witness === null) {
+    const met = meetsBound(subject, requirement.bound);
+    if (met === null) {
       return null;
     }
-    if (protocolClassConstraint(required) === 0) {
+    if (met.kind === "marker") {
+      continue;
+    }
+    if (met.kind === "class") {
+      classBound.add(subjectName);
+      impliesProtocol ||= subjectName === "A" && met.superclass !== null && conformsToProtocol(met.superclass, protocol) !== null;
+      continue;
+    }
+    if (protocolClassConstraint(met.protocol) === 0) {
       classBound.add(subjectName);
     }
     if (subjectName !== "A") {
-      associatedWitnesses.push(witness);
+      associatedWitnesses.push(met.witness);
       continue;
     }
-    selfWitnesses.push({ protocol: required, witness });
-    impliesProtocol ||= refinesProtocol(required, protocol);
+    selfWitnesses.push({ protocol: met.protocol, witness: met.witness });
+    impliesProtocol ||= refinesProtocol(met.protocol, protocol);
   }
   const selfWitnessTables = (impliesProtocol ? selfWitnesses.slice(1) : selfWitnesses)
     .sort((a, b) => compareProtocolDescriptors(a.protocol, b.protocol))
     .map((w) => w.witness);
   return { witnessTables: [...selfWitnessTables, ...associatedWitnesses], classBound };
+}
+
+interface WhereRequirement {
+  subject: string;
+  relation: ":" | "==";
+  bound: string;
+}
+
+// `A.Egg: P` or `A.Egg == T`; a generic type's parameters are spelled A, B, ... by declaration order.
+function parseRequirement(constraint: string): WhereRequirement | null {
+  const match = /^([A-Z](?:\.\w+)*)(: | == )(.+)$/.exec(constraint);
+  return match === null ? null : { subject: match[1], relation: match[2].trim() as ":" | "==", bound: match[3] };
+}
+
+function sameType(subject: Metadata, bound: string, resolve: ResolveParam): boolean {
+  const other = resolveTypeExpr(bound, resolve);
+  return other !== null && other.handle.equals(subject.handle);
+}
+
+type MetBound =
+  | { kind: "witness"; protocol: ContextDescriptor; witness: NativePointer }
+  | { kind: "class"; superclass: Metadata | null }
+  | { kind: "marker" };
+
+// How a subject meets a where-clause bound: with a witness table (a Swift protocol), as a bare
+// reference (AnyObject, a superclass, an ObjC protocol) or with nothing at all (a marker protocol).
+function meetsBound(subject: Metadata, bound: string): MetBound | null {
+  if (bound === "AnyObject") {
+    return isAnyClass(subject) ? { kind: "class", superclass: null } : null;
+  }
+  const superclass =
+    subject.kind === MetadataKind.Class ? selfOrSuperclassNamed(new ClassMetadata(subject.handle), bound) : null;
+  if (superclass !== null) {
+    return { kind: "class", superclass };
+  }
+  const required = whereClauseProtocol(bound);
+  if (required !== null) {
+    const witness = conformsToProtocol(subject, required);
+    return witness === null ? null : { kind: "witness", protocol: required, witness };
+  }
+  if (MARKER_PROTOCOLS.has(bound)) {
+    return { kind: "marker" };
+  }
+  const objcProtocol = lookUpObjCProtocol(
+    bound.startsWith(OBJC_MODULE_PREFIX) ? bound.slice(OBJC_MODULE_PREFIX.length) : objCRuntimeName(bound)
+  );
+  const cls = objcClassPointer(subject);
+  return objcProtocol !== null && cls !== null && objcClassConformsToProtocol(cls, objcProtocol) ? { kind: "class", superclass: null } : null;
+}
+
+function objcClassPointer(type: Metadata): NativePointer | null {
+  return type.kind === MetadataKind.Class ? type.handle : type.kind === MetadataKind.ObjCClassWrapper ? objcClassOf(type) : null;
 }
 
 function isAnyClass(type: Metadata): boolean {
@@ -3217,6 +3298,117 @@ function isAnyClass(type: Metadata): boolean {
     type.kind === MetadataKind.ObjCClassWrapper ||
     type.kind === MetadataKind.ForeignClass
   );
+}
+
+interface ConformanceWitness {
+  subject: string;
+  protocol: ContextDescriptor;
+  witness: NativePointer;
+}
+
+interface ClauseArguments {
+  // The requirements the clause adds to the type's own, in clause order; Self metadata or the isa
+  // supplies the type's own, so these alone trail a call that passes either.
+  added: ConformanceWitness[];
+  // The subjects a same-type requirement fixes, and with them every path below.
+  fixed: string[];
+  // Every parameter fixed: the member is a plain method of the concrete type.
+  concrete: boolean;
+  classBound: Set<string>;
+}
+
+// Checks an extension's where clause against a specialization's type arguments. null when the
+// specialization misses a requirement or one isn't checkable here.
+function clauseArguments(descriptor: ContextDescriptor, typeArguments: Metadata[], constraints: string[]): ClauseArguments | null {
+  const requirements = constraints.map(parseRequirement);
+  if (requirements.some((r) => r === null)) {
+    return null;
+  }
+  const resolve = nominalSubjectResolver(descriptor, typeArguments, constraints);
+  const fixed = requirements.filter((r) => r!.relation === "==").map((r) => r!.subject);
+  const added: ConformanceWitness[] = [];
+  const classBound = new Set<string>();
+  for (const requirement of requirements as WhereRequirement[]) {
+    const subject = resolve(requirement.subject);
+    if (subject === null) {
+      return null;
+    }
+    if (requirement.relation === "==") {
+      if (!sameType(subject, requirement.bound, resolve)) {
+        return null;
+      }
+      continue;
+    }
+    const met = meetsBound(subject, requirement.bound);
+    if (met === null) {
+      return null;
+    }
+    if (met.kind === "class" || (met.kind === "witness" && protocolClassConstraint(met.protocol) === 0)) {
+      classBound.add(requirement.subject);
+    }
+    if (met.kind === "witness" && !isFixed(requirement.subject, fixed)) {
+      added.push({ subject: requirement.subject, protocol: met.protocol, witness: met.witness });
+    }
+  }
+  return { added, fixed, concrete: typeArguments.every((_, i) => fixed.includes(paramNamed(i))), classBound };
+}
+
+function paramNamed(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+function isFixed(subject: string, fixed: string[]): boolean {
+  return fixed.some((f) => subject === f || subject.startsWith(`${f}.`));
+}
+
+// A conditional member's own generic signature: the type's requirements plus the clause's, in
+// canonical order (parameters by position, then their members, each subject's protocols in
+// protocol order), less whatever a same-type requirement made concrete.
+function clauseKeyArguments(receiver: Metadata, clause: ClauseArguments | null): { typeArguments: Metadata[]; witnessTables: NativePointer[] } {
+  const own = keyGenericArguments(receiver);
+  if (clause === null) {
+    return own;
+  }
+  const ownWitnesses = genericRequirements(receiver.description)
+    .filter((r) => r.kind === GenericRequirementKind.Protocol && r.hasKeyArgument && r.protocol !== null)
+    .map((r, i): ConformanceWitness => ({ subject: paramNamed(typeParamIndex(mangledParam(r))!), protocol: r.protocol!, witness: own.witnessTables[i] }));
+  const witnesses = [...ownWitnesses, ...clause.added]
+    .filter((w) => !isFixed(w.subject, clause.fixed))
+    .sort((a, b) => compareSubjects(a.subject, b.subject) || compareProtocolDescriptors(a.protocol, b.protocol));
+  return {
+    typeArguments: own.typeArguments.filter((_, i) => !clause.fixed.includes(paramNamed(i))),
+    witnessTables: witnesses.map((w) => w.witness),
+  };
+}
+
+// Parameters come before their members; among members, by root and then path.
+function compareSubjects(a: string, b: string): number {
+  return a.split(".").length - b.split(".").length || a.localeCompare(b);
+}
+
+function typeParamNamed(subject: string): number | null {
+  return /^[A-Z]$/.test(subject) ? subject.charCodeAt(0) - 65 : null;
+}
+
+function ownProtocolRequirements(descriptor: ContextDescriptor, index: number): ContextDescriptor[] {
+  return genericRequirements(descriptor)
+    .filter((r) => r.kind === GenericRequirementKind.Protocol && r.protocol !== null && typeParamIndex(mangledParam(r)) === index)
+    .map((r) => r.protocol!);
+}
+
+// A parameter's associated types are reached through its conformances: those the clause names and
+// those the type's own signature requires.
+function nominalSubjectResolver(descriptor: ContextDescriptor, typeArguments: Metadata[], constraints: string[]): ResolveParam {
+  return (name) => {
+    const root = name.split(".")[0];
+    const index = typeParamNamed(root);
+    if (index === null || index >= typeArguments.length) {
+      return null;
+    }
+    const metadata = typeArguments[index];
+    const protocols = [...clauseProtocols(constraints, root), ...ownProtocolRequirements(descriptor, index)];
+    return resolveSubjectPath({ metadata, tables: witnessTablesOf(metadata, protocols, root) }, root, name, constraints);
+  };
 }
 
 // swift_getTypeName names a pure ObjC class without its __C module.
@@ -3451,18 +3643,81 @@ function witnessCandidates(table: WitnessTable): NamedRequirement[] {
 }
 
 // witness signatures mangle Self as "A" and its associated types as "A.<name>"
-function resolveWitnessSelfOrAssociatedType(table: WitnessTable, name: string): Metadata | null {
-  if (name === "A") {
-    return table.conformingType;
-  }
-  if (name.startsWith("A.")) {
-    try {
-      return table.associatedType(name.slice(2));
-    } catch {
+function resolveWitnessSelfOrAssociatedType(table: WitnessTable, name: string, constraints: string[] = []): Metadata | null {
+  return name === "A" || name.startsWith("A.")
+    ? resolveSubjectPath({ metadata: table.conformingType, tables: [{ table, root: "A" }] }, "A", name, constraints)
+    : null;
+}
+
+interface RootedTable {
+  table: WitnessTable;
+  // The subject path the table's protocol takes as Self, which its requirement signature spells A.
+  root: string;
+}
+
+interface PathStep {
+  metadata: Metadata;
+  tables: RootedTable[];
+}
+
+// Walks `A.Home.Egg` one associated type at a time; an ambiguous one is spelled with its protocol,
+// `A.Swift.RawRepresentable.RawValue`. Each step's witness tables are the conformances of the type
+// reached to the protocols constraining that path: in the where clause, or in the requirement
+// signature of the protocol that declared the associated type.
+function resolveSubjectPath(root: PathStep, rootName: string, path: string, constraints: string[]): Metadata | null {
+  let step = root;
+  let sofar = rootName;
+  const segments = path.split(".").slice(1);
+  for (let i = 0; i < segments.length; ) {
+    const qualifier = i + 2 < segments.length ? whereClauseProtocol(`${segments[i]}.${segments[i + 1]}`) : null;
+    const tables = qualifier === null ? step.tables : witnessTablesOf(step.metadata, [qualifier], sofar);
+    const name = segments[qualifier === null ? i : i + 2];
+    const spelled = segments.slice(i, qualifier === null ? i + 1 : i + 3).join(".");
+    i += qualifier === null ? 1 : 3;
+    let resolved: Metadata | null = null;
+    let via: RootedTable | null = null;
+    for (const candidate of tables) {
+      try {
+        resolved = candidate.table.associatedType(name);
+        via = candidate;
+        break;
+      } catch {
+        continue;
+      }
+    }
+    if (resolved === null || via === null) {
       return null;
     }
+    sofar = `${sofar}.${spelled}`;
+    if (i === segments.length) {
+      return resolved;
+    }
+    const protocols = [...clauseProtocols(constraints, sofar), ...signatureProtocols(protocolOf(via.table), `A.${name}`)];
+    step = { metadata: resolved, tables: witnessTablesOf(resolved, protocols, sofar) };
   }
-  return null;
+  return step.metadata;
+}
+
+function clauseProtocols(constraints: string[], subject: string): ContextDescriptor[] {
+  return constraints.flatMap((constraint) => {
+    const requirement = parseRequirement(constraint);
+    const protocol =
+      requirement !== null && requirement.relation === ":" && requirement.subject === subject ? whereClauseProtocol(requirement.bound) : null;
+    return protocol === null ? [] : [protocol];
+  });
+}
+
+function signatureProtocols(protocol: ContextDescriptor, subject: string): ContextDescriptor[] {
+  return readRequirementSignature(protocol)
+    .filter((r) => r.kind === GenericRequirementKind.Protocol && r.protocol !== null && requirementSubject(r) === subject)
+    .map((r) => r.protocol!);
+}
+
+function witnessTablesOf(metadata: Metadata, protocols: ContextDescriptor[], root: string): RootedTable[] {
+  return protocols.flatMap((protocol) => {
+    const witness = conformsToProtocol(metadata, protocol);
+    return witness === null ? [] : [{ table: new WitnessTable(witness, metadata), root }];
+  });
 }
 
 export function resolveWitnessMethod(table: WitnessTable, methodName: string): ResolvedMethod {

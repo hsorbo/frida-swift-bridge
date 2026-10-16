@@ -209,6 +209,45 @@ describe("constrained protocol-extension members", () => {
     expect(type.$new({ perch: 4 }).totalHeight()).toEqual(int64(43));
   });
 
+  test("a same-type constraint on an associated type is met by that type only", () => {
+    const type = Swift.type("fixture.IntNest") as SwiftStruct;
+    expect(type.$type.instanceMethods({ deep: true })).toContain("eggPlusOne()");
+    expect(type.$new({ egg: 41 }).eggPlusOne()).toEqual(int64(42));
+    expect((Swift.type("fixture.WordNest") as SwiftStruct).$type.instanceMethods({ deep: true })).not.toContain("eggPlusOne()");
+  });
+
+  test("a same-type constraint on an associated type reached through a where-clause conformance is checked", () => {
+    const type = Swift.type("fixture.Ring") as SwiftStruct;
+    expect(type.$type.instanceMethods({ deep: true })).toContain("rawChirp()");
+    expect(type.$new({ rawValue: 7 }).rawChirp()).toBe("7 ring");
+    expect((Swift.type("fixture.Lark") as SwiftStruct).$type.instanceMethods({ deep: true })).not.toContain("rawChirp()");
+  });
+
+  test("a marker protocol constraint is taken as met and passes no witness table", () => {
+    const type = Swift.type("fixture.WordNest") as SwiftStruct;
+    expect(type.$type.instanceMethods({ deep: true })).toContain("sendableEgg()");
+    expect(type.$new({ egg: "wren" }).sendableEgg()).toBe("wren");
+  });
+
+  test("a constraint on a nested associated type is checked through the intermediate conformance", () => {
+    const ints = Swift.type("fixture.IntHatchery") as SwiftStruct;
+    expect(ints.$type.instanceMethods({ deep: true })).toContain("hatchCount()");
+    expect(ints.$type.instanceMethods({ deep: true })).not.toContain("hatchWord()");
+    expect(ints.init(5)!.hatchCount()).toEqual(int64(20));
+    const words = Swift.type("fixture.WordHatchery") as SwiftStruct;
+    expect(words.$type.instanceMethods({ deep: true })).toContain("hatchWord()");
+    expect(words.$type.instanceMethods({ deep: true })).not.toContain("hatchCount()");
+    expect(words.init("wren")!.hatchWord()).toBe("wren!");
+  });
+
+  test("an @objc protocol constraint is met by a conforming class, which passes self as a reference", (ctx) => {
+    requireDarwin(ctx);
+    const type = Swift.type("fixture.Bat") as SwiftClass;
+    expect(type.$type.instanceMethods({ deep: true })).toContain("wingedChirp()");
+    expect(type.init().wingedChirp()).toBe("winged 2 squeak");
+    expect((Swift.type("fixture.Starling") as SwiftClass).$type.instanceMethods({ deep: true })).not.toContain("wingedChirp()");
+  });
+
   test("a member of a constrained extension shadows the same member of a less constrained one", () => {
     const banded = (Swift.type("fixture.BandedBird") as SwiftStruct).$new({ band: 7 });
     expect(banded.greeting()).toBe("banded hello peep");

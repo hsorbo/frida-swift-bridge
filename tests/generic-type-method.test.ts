@@ -105,6 +105,47 @@ describe("async methods on a generic value type", () => {
   });
 });
 
+describe("members of a constrained extension of a generic type", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("a specialization meeting the clause lists the member and passes the clause's witness table", () => {
+    const Pair = Swift.struct("fixture.Pair<fixture.PoliteGreeter>")!;
+    expect(Pair.$type.instanceMethods()).toContain("bothGreet()");
+    const pair = Pair.$new({ first: { name: "Ada" }, second: { name: "Bob" } });
+    expect(pair.$method("bothGreet").call()).toBe("Hello, Ada / Hello, Bob");
+  });
+
+  test("a same-type clause is met by the matching specialization only", () => {
+    const ints = Swift.struct("fixture.Pair<Swift.Int>")!;
+    expect(ints.$type.instanceMethods()).toContain("sum()");
+    expect(ints.$type.instanceMethods()).not.toContain("bothGreet()");
+    expect(ints.$new({ first: 20, second: 22 }).$method("sum").call()).toEqual(int64(42));
+    expect(Swift.struct("fixture.Pair<fixture.PoliteGreeter>")!.$type.instanceMethods()).not.toContain("sum()");
+  });
+
+  test("a generic type named without its arguments lists no conditional member", () => {
+    const methods = Swift.struct("fixture.Pair")!.$type.instanceMethods();
+    expect(methods).not.toContain("bothGreet()");
+    expect(methods).not.toContain("sum()");
+  });
+
+  test("a class recovers its own arguments from the isa and takes the clause's witness table alone", () => {
+    const Cell = Swift.class("fixture.Cell<fixture.PoliteGreeter>")!;
+    expect(Cell.$type.instanceMethods()).toContain("cellGreet()");
+    const fn = [...loadFixture().enumerateExports()].find((e) => Swift.demangle(e.name)?.includes("fixture.makeGreeterCell("))!;
+    const cell = Swift.NativeFunction(fn.address, Cell, [Swift.type("Swift.String")!])("Bob") as SwiftClassObject;
+    expect(cell.$method("cellGreet").call()).toBe("Hello, Bob");
+  });
+
+  test("a fixed-layout value passes the clause's tables with its own, in signature order", () => {
+    const Scaled = Swift.struct("fixture.PhantomScaled<fixture.ScaledGreeter>")!;
+    const scaled = Scaled.$new({ raw: 10 });
+    const scalar = Swift.struct("fixture.ScaledGreeter")!.$new({ base: 3 });
+    expect(Scaled.$type.instanceMethods()).toContain("greetScaled(_:by:)");
+    expect(scaled.$method("greetScaled").call(scalar, 7)).toBe("scalar 3 31");
+  });
+});
+
 describe("members of a generic type named without its type arguments", () => {
   beforeEach(() => { loadFixture(); });
 

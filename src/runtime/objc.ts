@@ -93,6 +93,23 @@ export function objcSuperclass(cls: NativePointer): NativePointer | null {
   return superclass.isNull() ? null : superclass;
 }
 
+let cachedClassConformsToProtocol: NativeFunction<number, [NativePointerValue, NativePointerValue]> | null = null;
+
+// class_conformsToProtocol asks one class; a conformance is inherited.
+export function objcClassConformsToProtocol(cls: NativePointer, protocol: NativePointer): boolean {
+  if (cachedClassConformsToProtocol === null) {
+    const libobjc = Process.getModuleByName("libobjc.A.dylib");
+    cachedClassConformsToProtocol = new NativeFunction(libobjc.getExportByName("class_conformsToProtocol"), "bool", ["pointer", "pointer"]);
+  }
+  const conforms = cachedClassConformsToProtocol;
+  for (let c: NativePointer | null = cls; c !== null; c = objcSuperclass(c)) {
+    if (conforms(c, protocol) !== 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function objcClassName(cls: NativePointer): string {
   if (cachedClassGetName === null) {
     const libobjc = Process.getModuleByName("libobjc.A.dylib");

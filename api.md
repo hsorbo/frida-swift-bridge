@@ -340,11 +340,13 @@ provides through a protocol extension, stdlib protocols such as `Sequence`
 included; a `Collection` conformer gains dozens. Lookup by name needs no
 option: it searches the defining module first and falls back to one query
 across the loaded modules. A constrained extension (`extension P where Self: Base`,
-`where Item: Numeric`) contributes only to types that meet its `where` clause,
-and its members shadow the same members of a less constrained extension. An
-extension whose clause the bridge can't check is left out: one with a same-type
-(`==`), marker or `@objc` protocol requirement, or with a requirement on a
-nested associated type (`Item.Index`).
+`where Item: Numeric`, `where Element == Int`, `where Self: SomeObjCProtocol`,
+`where Items.Element: Hashable`) contributes only to types that meet its `where`
+clause, and its members shadow the same members of a less constrained extension.
+One fixing `Self` itself (`where Self == Color`) is left out. A constrained
+extension of a generic type (`extension Array where Element: Equatable`) adds
+its methods to the specializations that meet the clause: they show on a type
+named with its arguments, not on the bare one. Its properties are not reached.
 
 A stripped binary keeps a class's vtable and every witness table, so the
 listing still shows what is dispatched. A method slot that no symbol names
