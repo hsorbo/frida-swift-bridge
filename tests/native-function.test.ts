@@ -1,15 +1,15 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
-import { Swift, SwiftObject, SwiftError, ClassType } from "../src/index.js";
+import { Swift, SwiftObject, SwiftError } from "../src/index.js";
+import { ClassInstance } from "../src/abi.js";
 
-import { ClassInstance, ProtocolComposition, metadataFor, typeOf } from "../src/abi.js";
 describe("Swift.NativeFunction (marshalled)", () => {
   beforeEach(() => { loadFixture(); });
 
   test("projects an existential return and boxes a conforming value or object into an existential argument", () => {
-    const String_ = typeOf(metadataFor("Swift.String")!);
-    const Greeter = typeOf(ProtocolComposition.fromSignature("fixture.Greeter").metadata);
+    const String_ = Swift.type("Swift.String")!;
+    const Greeter = Swift.reflect("any fixture.Greeter")!;
     const make = Swift.NativeFunction(fixtureExport("fixture.makeGreeterExistential"), Greeter, []);
     expect(make()).toEqual({ name: "Ada" });
     const greet = Swift.NativeFunction(fixtureExport("fixture.greetExistential"), String_, [Greeter]);
@@ -25,40 +25,40 @@ describe("Swift.NativeFunction (marshalled)", () => {
   });
 
   test("boxes a value too large for the inline buffer and a composition with one witness table per protocol", () => {
-    const String_ = typeOf(metadataFor("Swift.String")!);
-    const Greeter = typeOf(ProtocolComposition.fromSignature("fixture.Greeter").metadata);
+    const String_ = Swift.type("Swift.String")!;
+    const Greeter = Swift.reflect("any fixture.Greeter")!;
     const greet = Swift.NativeFunction(fixtureExport("fixture.greetExistential"), String_, [Greeter]);
     const pair = Swift.struct("fixture.Pair<fixture.PoliteGreeter>")!.$new({ first: { name: "A" }, second: { name: "B" } });
     expect(greet(pair)).toBe("Hello, A & Hello, B");
-    const GreeterAged = typeOf(ProtocolComposition.fromSignature("fixture.Greeter & fixture.Aged").metadata);
+    const GreeterAged = Swift.reflect("any fixture.Greeter & fixture.Aged")!;
     const describe = Swift.NativeFunction(fixtureExport("fixture.describeGreeterAged"), String_, [GreeterAged]);
     expect(describe(Swift.struct("fixture.Person")!.$new({ name: "Cy", age: 9 }))).toBe("Hi, Cy (9)");
     expect(() => describe(Swift.struct("fixture.PoliteGreeter")!.$new({ name: "Ada" }))).toThrow(/value, expected .*fixture\.Aged/);
   });
 
   test("boxes an object into a class-bound existential argument", () => {
-    const String_ = typeOf(metadataFor("Swift.String")!);
-    const Named = typeOf(ProtocolComposition.fromSignature("fixture.Named").metadata);
+    const String_ = Swift.type("Swift.String")!;
+    const Named = Swift.reflect("any fixture.Named")!;
     const label = Swift.NativeFunction(fixtureExport("fixture.labelOfNamed"), String_, [Named]);
     expect(label(Swift.class("fixture.Widget")!.init("Bee"))).toBe("Bee");
   });
 
   test("marshals JS ints through an add, returning a JS number", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
+    const Int = Swift.type("Swift.Int")!;
     const add = Swift.NativeFunction(fixtureExport("fixture.addInts"), Int, [Int, Int]);
     expect(add(20, 22)).toEqual(int64(42));
   });
 
   test("marshals a JS object into a struct argument", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const Loadable = typeOf(metadataFor("fixture.LoadableStruct")!);
+    const Int = Swift.type("Swift.Int")!;
+    const Loadable = Swift.type("fixture.LoadableStruct")!;
     const sum = Swift.NativeFunction(fixtureExport("fixture.sumLoadable"), Int, [Loadable]);
     expect(sum({ a: 1, b: 2, c: 3, d: 4 })).toEqual(int64(10));
   });
 
   test("adopts a class return as a Swift object facade", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const Token = typeOf(metadataFor("fixture.Token")!);
+    const Int = Swift.type("Swift.Int")!;
+    const Token = Swift.type("fixture.Token")!;
     const make = Swift.NativeFunction(fixtureExport("fixture.makeToken"), Token, [Int]);
     const token = make(7) as SwiftObject;
     expect(token.$kind).toBe("object");
@@ -66,8 +66,8 @@ describe("Swift.NativeFunction (marshalled)", () => {
   });
 
   test("borrows a String argument, leaving an owned caller value intact", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const String_ = typeOf(metadataFor("Swift.String")!);
+    const Int = Swift.type("Swift.Int")!;
+    const String_ = Swift.type("Swift.String")!;
     const makeStr = Swift.NativeFunction(fixtureExport("fixture.makeString"), String_, []);
     const len = Swift.NativeFunction(fixtureExport("fixture.stringLength"), Int, [String_]);
     expect(len("hello")).toEqual(int64(5));
@@ -78,9 +78,9 @@ describe("Swift.NativeFunction (marshalled)", () => {
   });
 
   test("passes a class instance argument, borrowing the caller's object", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const Token = typeOf(metadataFor("fixture.Token")!);
-    const Wrapper = typeOf(metadataFor("fixture.Wrapper")!);
+    const Int = Swift.type("Swift.Int")!;
+    const Token = Swift.type("fixture.Token")!;
+    const Wrapper = Swift.type("fixture.Wrapper")!;
     const makeToken = Swift.NativeFunction(fixtureExport("fixture.makeToken"), Token, [Int]);
     const makeWrapper = Swift.NativeFunction(fixtureExport("fixture.makeWrapper"), Wrapper, [Token]);
     const token = makeToken(7) as SwiftObject;
@@ -91,18 +91,18 @@ describe("Swift.NativeFunction (marshalled)", () => {
   });
 
   test("accepts a subclass but rejects an unrelated class and a raw pointer", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const Animal = typeOf(metadataFor("fixture.Animal")!) as ClassType;
+    const Int = Swift.type("Swift.Int")!;
+    const Animal = Swift.class("fixture.Animal")!;
     const describe = Swift.NativeFunction(fixtureExport("fixture.describeAnimal"), Int, [Animal]);
-    const cat = (typeOf(metadataFor("fixture.Cat")!) as ClassType).facade.init();
+    const cat = Swift.class("fixture.Cat")!.init();
     expect(describe(cat)).toEqual(int64(4));
-    const robot = (typeOf(metadataFor("fixture.Robot")!) as ClassType).facade.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2");
     expect(() => describe(robot)).toThrow(/expected fixture\.Animal/);
     expect(() => describe(cat.$handle)).toThrow(/raw pointer is only accepted via \/abi/);
   });
 
   test("surfaces a thrown error and returns the value otherwise", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
+    const Int = Swift.type("Swift.Int")!;
     const fn = Swift.NativeFunction(fixtureExport("fixture.mightThrow"), Int, [Int], {
       throws: true,
     });
@@ -117,16 +117,16 @@ describe("Swift.NativeFunction (marshalled)", () => {
   });
 
   test("rejects an argument-count mismatch instead of marshalling a bad call", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
+    const Int = Swift.type("Swift.Int")!;
     const add = Swift.NativeFunction(fixtureExport("fixture.addInts"), Int, [Int, Int]);
     expect(() => add(1)).toThrow(/2 argument/);
     expect(() => add(1, 2, 3)).toThrow(/2 argument/);
   });
 
   test("destroys the initialized prefix when a later argument fails to marshal", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const Token = typeOf(metadataFor("fixture.Token")!);
-    const Wrapper = typeOf(metadataFor("fixture.Wrapper")!);
+    const Int = Swift.type("Swift.Int")!;
+    const Token = Swift.type("fixture.Token")!;
+    const Wrapper = Swift.type("fixture.Wrapper")!;
     const makeToken = Swift.NativeFunction(fixtureExport("fixture.makeToken"), Token, [Int]);
     const makeWrapper = Swift.NativeFunction(fixtureExport("fixture.makeWrapper"), Wrapper, [Token]);
     // Never invoked: the second argument fails to marshal first.
@@ -142,9 +142,9 @@ describe("Swift.NativeFunction (marshalled)", () => {
   });
 
   test("rejects a class instance where a value type is expected", () => {
-    const Int = typeOf(metadataFor("Swift.Int")!);
-    const String_ = typeOf(metadataFor("Swift.String")!);
-    const Token = typeOf(metadataFor("fixture.Token")!);
+    const Int = Swift.type("Swift.Int")!;
+    const String_ = Swift.type("Swift.String")!;
+    const Token = Swift.type("fixture.Token")!;
     const makeToken = Swift.NativeFunction(fixtureExport("fixture.makeToken"), Token, [Int]);
     const len = Swift.NativeFunction(fixtureExport("fixture.stringLength"), Int, [String_]);
     const token = makeToken(7) as SwiftObject;
