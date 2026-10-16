@@ -111,8 +111,8 @@ function isInstanceBlock(address: NativePointer, cls: ClassMetadata): boolean {
 // Inline refcounts of a live native object: PureSwiftDealloc set, a modest unowned count, not deiniting;
 // or a side table. A pointer or a length stored after a class pointer rarely reads that way.
 function hasNativeRefcountShape(address: NativePointer): boolean {
-  const refCountsLow = address.add(8).readU32();
-  const refCountsHigh = address.add(12).readU32();
+  const refCountsLow = address.readU32(8);
+  const refCountsHigh = address.readU32(12);
   if ((refCountsHigh & 0x80000000) !== 0) {
     return true;
   }
@@ -156,7 +156,7 @@ const CACHE_ENTRY_HEADER_WORDS = 8;
 
 function cacheEntryMetadata(descriptor: ContextDescriptor, entry: NativePointer): NativePointer | null {
   for (let i = 0; i < CACHE_ENTRY_HEADER_WORDS; i++) {
-    const candidate = metadataNaming(descriptor, entry.add(i * Process.pointerSize).readPointer());
+    const candidate = metadataNaming(descriptor, entry.readPointer(i * Process.pointerSize));
     if (candidate !== null) {
       return candidate;
     }
@@ -170,7 +170,7 @@ function metadataNaming(descriptor: ContextDescriptor, candidate: NativePointer)
     return null;
   }
   const wordOffset = isClass ? OFFSETOF_DESCRIPTION : Process.pointerSize;
-  return candidate.add(wordOffset).readPointer().strip().equals(descriptor.handle) ? candidate : null;
+  return candidate.readPointer(wordOffset).strip().equals(descriptor.handle) ? candidate : null;
 }
 
 function valueMetadataAt(address: NativePointer): Metadata | null {

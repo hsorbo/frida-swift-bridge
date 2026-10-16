@@ -48,7 +48,7 @@ export function projectBox(box: NativePointer): NativePointer {
 
 export function enumTag(metadata: Metadata, address: NativePointer): number {
   const fn = new NativeFunction(
-    signCode(metadata.valueWitnessTable.add(VWT_OFFSETOF_GET_ENUM_TAG).readPointer()),
+    signCode(metadata.valueWitnessTable.readPointer(VWT_OFFSETOF_GET_ENUM_TAG)),
     "uint",
     ["pointer", "pointer"]
   );
@@ -76,7 +76,7 @@ export function readEnumCase(metadata: Metadata, address: NativePointer): EnumCa
 
 export function projectEnumData(metadata: Metadata, address: NativePointer): void {
   const fn = new NativeFunction(
-    signCode(metadata.valueWitnessTable.add(VWT_OFFSETOF_DESTRUCTIVE_PROJECT_ENUM_DATA).readPointer()),
+    signCode(metadata.valueWitnessTable.readPointer(VWT_OFFSETOF_DESTRUCTIVE_PROJECT_ENUM_DATA)),
     "void",
     ["pointer", "pointer"]
   );
@@ -85,7 +85,7 @@ export function projectEnumData(metadata: Metadata, address: NativePointer): voi
 
 export function injectEnumTag(metadata: Metadata, address: NativePointer, tag: number): void {
   const fn = new NativeFunction(
-    signCode(metadata.valueWitnessTable.add(VWT_OFFSETOF_DESTRUCTIVE_INJECT_ENUM_TAG).readPointer()),
+    signCode(metadata.valueWitnessTable.readPointer(VWT_OFFSETOF_DESTRUCTIVE_INJECT_ENUM_TAG)),
     "void",
     ["pointer", "uint", "pointer"]
   );

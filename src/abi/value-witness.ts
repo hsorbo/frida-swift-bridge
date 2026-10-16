@@ -33,19 +33,19 @@ export class ValueWitnessTable {
   constructor(private readonly table: NativePointer, private readonly type: NativePointer) {}
 
   get size(): number {
-    return this.table.add(OFFSETOF_SIZE).readU64().toNumber();
+    return this.table.readU64(OFFSETOF_SIZE).toNumber();
   }
 
   get stride(): number {
-    return this.table.add(OFFSETOF_STRIDE).readU64().toNumber();
+    return this.table.readU64(OFFSETOF_STRIDE).toNumber();
   }
 
   get flags(): number {
-    return this.table.add(OFFSETOF_FLAGS).readU32();
+    return this.table.readU32(OFFSETOF_FLAGS);
   }
 
   get extraInhabitantCount(): number {
-    return this.table.add(OFFSETOF_EXTRA_INHABITANT_COUNT).readU32();
+    return this.table.readU32(OFFSETOF_EXTRA_INHABITANT_COUNT);
   }
 
   get alignmentMask(): number {
@@ -109,7 +109,7 @@ export class ValueWitnessTable {
 
   getEnumTagSinglePayload(enumAddress: NativePointer, emptyCases: number): number {
     const fn = new NativeFunction(
-      signCode(this.table.add(OFFSETOF_GET_ENUM_TAG_SINGLE_PAYLOAD).readPointer()),
+      signCode(this.table.readPointer(OFFSETOF_GET_ENUM_TAG_SINGLE_PAYLOAD)),
       "uint",
       ["pointer", "uint", "pointer"]
     );
@@ -118,7 +118,7 @@ export class ValueWitnessTable {
 
   storeEnumTagSinglePayload(enumAddress: NativePointer, whichCase: number, emptyCases: number): void {
     const fn = new NativeFunction(
-      signCode(this.table.add(OFFSETOF_STORE_ENUM_TAG_SINGLE_PAYLOAD).readPointer()),
+      signCode(this.table.readPointer(OFFSETOF_STORE_ENUM_TAG_SINGLE_PAYLOAD)),
       "void",
       ["pointer", "uint", "uint", "pointer"]
     );
@@ -126,7 +126,7 @@ export class ValueWitnessTable {
   }
 
   destroy(value: NativePointer): void {
-    const fn = new NativeFunction(signCode(this.table.add(OFFSETOF_DESTROY).readPointer()), "void", [
+    const fn = new NativeFunction(signCode(this.table.readPointer(OFFSETOF_DESTROY)), "void", [
       "pointer",
       "pointer",
     ]);
@@ -146,7 +146,7 @@ export class ValueWitnessTable {
   }
 
   private call3(offset: number, dest: NativePointer, src: NativePointer): NativePointer {
-    const fn = new NativeFunction(signCode(this.table.add(offset).readPointer()), "pointer", [
+    const fn = new NativeFunction(signCode(this.table.readPointer(offset)), "pointer", [
       "pointer",
       "pointer",
       "pointer",

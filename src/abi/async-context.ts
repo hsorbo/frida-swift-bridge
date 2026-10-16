@@ -9,12 +9,12 @@ export class AsyncContext {
   constructor(readonly handle: NativePointer) {}
 
   get parent(): AsyncContext | null {
-    const p = this.handle.add(OFFSETOF_PARENT).readPointer().strip();
+    const p = this.handle.readPointer(OFFSETOF_PARENT).strip();
     return p.isNull() ? null : new AsyncContext(p);
   }
 
   get resumeParent(): NativePointer {
-    return this.handle.add(OFFSETOF_RESUME_PARENT).readPointer().strip();
+    return this.handle.readPointer(OFFSETOF_RESUME_PARENT).strip();
   }
 
   setResumeParent(fn: NativePointer): void {

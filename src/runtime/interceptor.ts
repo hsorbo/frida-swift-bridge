@@ -417,7 +417,7 @@ function carriedMetadata(
   for (const index of source.path) {
     const args =
       new Metadata(handle).kind === MetadataKind.Class ? new ClassMetadata(handle).genericArguments : new Metadata(handle).genericArguments;
-    handle = args.add(index * Process.pointerSize).readPointer();
+    handle = args.readPointer(index * Process.pointerSize);
   }
   return new Metadata(handle);
 }
@@ -872,7 +872,7 @@ function materializeArgs(
         return decodeMetatype(s.address);
       }
       if (s.plan.kind === "closure") {
-        return decodeClosure(s.address.readPointer(), s.address.add(Process.pointerSize).readPointer());
+        return decodeClosure(s.address.readPointer(), s.address.readPointer(Process.pointerSize));
       }
       const metadata = planMetadata(s.plan, generics, environment.params);
       if (s.plan.kind === "inout") {
@@ -1435,23 +1435,23 @@ function spillContext(spillPtr: NativePointer, asyncContext: NativePointer): Cpu
   const ctx: Record<string, NativePointer | number> = {};
   if (ARCH === "arm64") {
     SWIFTCC.gpArgs.forEach((reg, i) => {
-      ctx[reg] = spillPtr.add(i * 8).readPointer();
+      ctx[reg] = spillPtr.readPointer(i * 8);
     });
     for (let i = 0; i < FP_ARG_REGISTERS; i++) {
       const at = spillPtr.add(0x40 + i * 8);
       ctx[SWIFTCC.fpArg("double", i)] = at.readDouble();
       ctx[SWIFTCC.fpArg("float", i)] = at.readFloat();
     }
-    ctx[SWIFTCC.self] = spillPtr.add(0x80).readPointer();
+    ctx[SWIFTCC.self] = spillPtr.readPointer(0x80);
     ctx[SWIFTCC.asyncContext] = asyncContext;
     return ctx as unknown as CpuContext;
   }
   // The resume delivers results in the argument registers; remap them onto the sync result-register
   // names so materializeReturn is shared with the sync path.
   SWIFTCC.gpResults.forEach((reg, i) => {
-    ctx[reg] = spillPtr.add(i * 8).readPointer();
+    ctx[reg] = spillPtr.readPointer(i * 8);
   });
-  ctx[SWIFTCC.self] = spillPtr.add(X64_SPILL_ERROR).readPointer(); // error
+  ctx[SWIFTCC.self] = spillPtr.readPointer(X64_SPILL_ERROR); // error
   ctx[SWIFTCC.asyncContext] = asyncContext;
   (ctx as unknown as { xmmSpill: NativePointer }).xmmSpill = spillPtr.add(X64_SPILL_XMM);
   return ctx as unknown as CpuContext;

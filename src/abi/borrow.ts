@@ -4,7 +4,7 @@ const OFFSETOF_REFERENT = Process.pointerSize;
 const MAX_INLINE_BORROW_WORDS = 4;
 
 export function borrowReferentType(metadata: Metadata): Metadata {
-  return new Metadata(metadata.handle.add(OFFSETOF_REFERENT).readPointer());
+  return new Metadata(metadata.handle.readPointer(OFFSETOF_REFERENT));
 }
 
 // Mirrors swift_getBorrowRepresentation: a referent of at most four words that is bitwise

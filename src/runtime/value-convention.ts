@@ -137,7 +137,7 @@ const arm64: ArchProbe = {
       constant = base && { value: base.value.add(addend.value.toString()), loaded: base.loaded };
     } else if (insn.mnemonic === "ldr" && source?.type === "mem" && source.value.base !== undefined) {
       const base = constants.get(source.value.base);
-      constant = base && !base.loaded ? { value: base.value.add(source.value.disp).readPointer().strip(), loaded: true } : undefined;
+      constant = base && !base.loaded ? { value: base.value.readPointer(source.value.disp).strip(), loaded: true } : undefined;
     }
     if (constant !== undefined) {
       constants.set(dest.value, constant);
@@ -203,7 +203,7 @@ const x64: ArchProbe = {
       return { kind, target: ptr(operand.value.toString()) };
     }
     if (operand?.type === "mem" && operand.value.base === "rip" && operand.value.index === undefined) {
-      const target = insn.next.add(operand.value.disp).readPointer();
+      const target = insn.next.readPointer(operand.value.disp);
       if (kind === "jump" && importsMemoryFill(target)) {
         return { kind: "return" };
       }

@@ -105,7 +105,7 @@ function readParameterFlags(raw: number): Omit<FunctionParameter, "type"> {
 
 export function readFunctionType(metadata: Metadata): FunctionType {
   const handle = metadata.handle;
-  const rawFlags = handle.add(OFFSETOF_FLAGS).readU32();
+  const rawFlags = handle.readU32(OFFSETOF_FLAGS);
 
   const numParameters = rawFlags & NUM_PARAMETERS_MASK;
   const hasParameterFlags = (rawFlags & PARAMETER_FLAGS_BIT) !== 0;
@@ -131,22 +131,22 @@ export function readFunctionType(metadata: Metadata): FunctionType {
 
   const parameters: FunctionParameter[] = [];
   for (let i = 0; i < numParameters; i++) {
-    const type = new Metadata(handle.add(parametersOffset + i * ptr).readPointer());
+    const type = new Metadata(handle.readPointer(parametersOffset + i * ptr));
     const rawParameterFlags = hasParameterFlags
-      ? handle.add(parameterFlagsOffset + i * PARAMETER_FLAGS_SIZE).readU32()
+      ? handle.readU32(parameterFlagsOffset + i * PARAMETER_FLAGS_SIZE)
       : 0;
     parameters.push({ type, ...readParameterFlags(rawParameterFlags) });
   }
 
   const differentiabilityKind: FunctionMetadataDifferentiabilityKind = isDifferentiable
-    ? handle.add(differentiabilityKindOffset).readU32()
+    ? handle.readU32(differentiabilityKindOffset)
     : FunctionMetadataDifferentiabilityKind.NonDifferentiable;
 
   const globalActor = hasGlobalActor
-    ? new Metadata(handle.add(globalActorOffset).readPointer())
+    ? new Metadata(handle.readPointer(globalActorOffset))
     : null;
 
-  const rawExtendedFlags = hasExtendedFlags ? handle.add(extendedFlagsOffset).readU32() : 0;
+  const rawExtendedFlags = hasExtendedFlags ? handle.readU32(extendedFlagsOffset) : 0;
   const isolationBits = rawExtendedFlags & ISOLATION_MASK;
   const isolation =
     isolationBits === ISOLATION_ISOLATED_ANY
@@ -165,12 +165,12 @@ export function readFunctionType(metadata: Metadata): FunctionType {
     isSendable: (rawFlags & SENDABLE_BIT) !== 0,
     isDifferentiable,
     differentiabilityKind,
-    resultType: new Metadata(handle.add(OFFSETOF_RESULT_TYPE).readPointer()),
+    resultType: new Metadata(handle.readPointer(OFFSETOF_RESULT_TYPE)),
     parameters,
     globalActor,
     isolation,
     hasSendingResult: (rawExtendedFlags & SENDING_RESULT_BIT) !== 0,
-    thrownError: isTypedThrows ? new Metadata(handle.add(thrownErrorOffset).readPointer()) : null,
+    thrownError: isTypedThrows ? new Metadata(handle.readPointer(thrownErrorOffset)) : null,
     invertedProtocols: rawExtendedFlags >>> 16,
   };
 }

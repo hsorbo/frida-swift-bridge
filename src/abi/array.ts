@@ -27,6 +27,6 @@ function allocatorFor(arrayType: Metadata, element: Metadata): SwiftNativeFuncti
 export function createArray(arrayType: Metadata, count: number, initialize: (first: NativePointer) => void): NativePointer {
   const element = new Metadata(arrayType.genericArguments.readPointer());
   const allocated = allocatorFor(arrayType, element)(Memory.alloc(Process.pointerSize).writeS64(count))!;
-  initialize(allocated.add(Process.pointerSize).readPointer());
+  initialize(allocated.readPointer(Process.pointerSize));
   return allocated;
 }

@@ -19,11 +19,11 @@ export interface TupleElement {
 }
 
 export function tupleNumElements(metadata: Metadata): number {
-  return metadata.handle.add(OFFSETOF_NUM_ELEMENTS).readU32();
+  return metadata.handle.readU32(OFFSETOF_NUM_ELEMENTS);
 }
 
 export function tupleLabels(metadata: Metadata): string | null {
-  const ptr = metadata.handle.add(OFFSETOF_LABELS).readPointer();
+  const ptr = metadata.handle.readPointer(OFFSETOF_LABELS);
   return ptr.isNull() ? null : ptr.readUtf8String();
 }
 
@@ -33,8 +33,8 @@ export function* enumerateTupleElements(metadata: Metadata): Generator<TupleElem
   for (let i = 0; i < numElements; i++) {
     const element = elements.add(i * ELEMENT_SIZE);
     yield {
-      type: new Metadata(element.add(OFFSETOF_ELEMENT_TYPE).readPointer()),
-      offset: element.add(OFFSETOF_ELEMENT_OFFSET).readU32(),
+      type: new Metadata(element.readPointer(OFFSETOF_ELEMENT_TYPE)),
+      offset: element.readU32(OFFSETOF_ELEMENT_OFFSET),
     };
   }
 }

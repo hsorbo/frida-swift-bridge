@@ -46,7 +46,7 @@ export type SwiftValue =
 const U64_MASK = (1n << 64n) - 1n;
 
 function readU128(p: NativePointer): bigint {
-  return (BigInt(p.add(8).readU64().toString()) << 64n) | BigInt(p.readU64().toString());
+  return (BigInt(p.readU64(8).toString()) << 64n) | BigInt(p.readU64().toString());
 }
 
 function writeU128(p: NativePointer, v: bigint): void {
@@ -306,7 +306,7 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
       return typeName(new Metadata(address.readPointer()));
     case MetadataKind.Function:
       return readFunctionType(metadata).convention === FunctionMetadataConvention.Swift
-        ? borrowedClosure(address.readPointer().strip(), address.add(Process.pointerSize).readPointer())
+        ? borrowedClosure(address.readPointer().strip(), address.readPointer(Process.pointerSize))
         : address.readPointer();
     case MetadataKind.Tuple: {
       const elements: SwiftValue[] = [];
@@ -502,9 +502,7 @@ export function* enumerateInstanceFields(
   }
 
   const descriptor = metadata.description;
-  const vectorOffset = descriptor.handle
-    .add(STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET)
-    .readU32();
+  const vectorOffset = descriptor.handle.readU32(STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET);
   if (vectorOffset === 0) {
     return;
   }
@@ -512,7 +510,7 @@ export function* enumerateInstanceFields(
 
   let index = 0;
   for (const field of enumerateFields(descriptor)) {
-    const offset = offsets.add(index * 4).readU32();
+    const offset = offsets.readU32(index * 4);
     yield {
       name: field.name,
       type: fieldTypeIn(metadata, field),

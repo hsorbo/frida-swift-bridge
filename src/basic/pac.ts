@@ -6,7 +6,7 @@ function isArm64eProcess(): boolean {
   if (Process.platform !== "darwin" || Process.arch !== "arm64") {
     return false;
   }
-  const cpusubtype = Process.mainModule.base.add(8).readU32();
+  const cpusubtype = Process.mainModule.base.readU32(8);
   return (cpusubtype & 0xff) === CPU_SUBTYPE_ARM64E;
 }
 

@@ -193,7 +193,7 @@ export class ClassInstance implements RawInstance {
     if (entry === undefined) {
       throw new Error(`vtableMethod: no vtable slot at metadata offset ${metadataOffset}`);
     }
-    const liveImpl = this.metadata.handle.add(metadataOffset * Process.pointerSize).readPointer().strip();
+    const liveImpl = this.metadata.handle.readPointer(metadataOffset * Process.pointerSize).strip();
     const resolved: ResolvedMethod = {
       address: liveImpl,
       argTypes: signature.argTypes,

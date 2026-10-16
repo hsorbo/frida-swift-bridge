@@ -492,7 +492,7 @@ export class ClassType extends NominalType {
         if (entry.kind !== MethodDescriptorKind.Method) {
           continue;
         }
-        const word = metadata.handle.add(entry.metadataOffset * Process.pointerSize).readPointer().strip();
+        const word = metadata.handle.readPointer(entry.metadataOffset * Process.pointerSize).strip();
         slots.push({
           selector: `vtable#${entry.metadataOffset}`,
           isStatic: !entry.isInstance,
@@ -533,7 +533,7 @@ export class ObjCClassWrapperType extends NominalType {
 
 export class ForeignClassType extends SwiftType {
   get superClass(): ForeignClassType | null {
-    const superclass = metadataOf(this).handle.add(2 * Process.pointerSize).readPointer().strip();
+    const superclass = metadataOf(this).handle.readPointer(2 * Process.pointerSize).strip();
     return superclass.isNull() ? null : (typeOf(new Metadata(superclass)) as ForeignClassType);
   }
 }
@@ -675,7 +675,7 @@ function metadataDescriptorOf(type: SwiftType): ContextDescriptor {
     return new ClassMetadata(metadata.handle).description;
   }
   if (type instanceof ForeignClassType || type instanceof ForeignReferenceType) {
-    return new ContextDescriptor(metadata.handle.add(Process.pointerSize).readPointer().strip());
+    return new ContextDescriptor(metadata.handle.readPointer(Process.pointerSize).strip());
   }
   return metadata.description;
 }

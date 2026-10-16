@@ -16,22 +16,22 @@ const NATIVE_BIAS = 32;
 const SHARED_STORAGE_START = 24;
 
 export function readString(address: NativePointer): string | null {
-  const discriminator = address.add(DISCRIMINATOR_OFFSET).readU8();
+  const discriminator = address.readU8(DISCRIMINATOR_OFFSET);
 
   if ((discriminator & IS_SMALL) !== 0) {
     return address.readUtf8String(discriminator & SMALL_COUNT_MASK);
   }
 
-  const largeAddress = address.add(8).readPointer().and(ptr(LARGE_ADDRESS_MASK));
+  const largeAddress = address.readPointer(8).and(ptr(LARGE_ADDRESS_MASK));
   if ((discriminator & IS_COCOA) !== 0) {
     return objcUTF8String(largeAddress);
   }
 
   const count = address.readU32();
-  const tailAllocated = (address.add(TAIL_ALLOCATED_OFFSET).readU8() & IS_TAIL_ALLOCATED) !== 0;
+  const tailAllocated = (address.readU8(TAIL_ALLOCATED_OFFSET) & IS_TAIL_ALLOCATED) !== 0;
   const start = tailAllocated
     ? largeAddress.add(NATIVE_BIAS)
-    : largeAddress.add(SHARED_STORAGE_START).readPointer();
+    : largeAddress.readPointer(SHARED_STORAGE_START);
   return start.readUtf8String(count);
 }
 

@@ -60,7 +60,7 @@ export function decodeBridgedContainer(
 }
 
 function decodeArray(metadata: Metadata, storage: NativePointer): SwiftValue[] {
-  const count = storage.add(ARRAY_COUNT_OFFSET).readS64().toNumber();
+  const count = storage.readS64(ARRAY_COUNT_OFFSET).toNumber();
   if (count === 0) {
     return [];
   }
@@ -75,13 +75,13 @@ function decodeArray(metadata: Metadata, storage: NativePointer): SwiftValue[] {
 }
 
 function decodeSet(metadata: Metadata, storage: NativePointer): SwiftValue[] {
-  const count = storage.add(HASH_STORAGE_COUNT_OFFSET).readS64().toNumber();
+  const count = storage.readS64(HASH_STORAGE_COUNT_OFFSET).toNumber();
   if (count === 0) {
     return [];
   }
   const element = typeArgument(metadata, 0);
   const stride = element.typeLayout.stride;
-  const elements = storage.add(SET_RAW_ELEMENTS_OFFSET).readPointer();
+  const elements = storage.readPointer(SET_RAW_ELEMENTS_OFFSET);
   const bitmap = storage.add(SET_BITMAP_OFFSET);
   const out: SwiftValue[] = [];
   for (const bucket of occupiedBuckets(bitmap, scaleOf(storage), count)) {
@@ -91,7 +91,7 @@ function decodeSet(metadata: Metadata, storage: NativePointer): SwiftValue[] {
 }
 
 function decodeDictionary(metadata: Metadata, storage: NativePointer): ContainerEntry[] {
-  const count = storage.add(HASH_STORAGE_COUNT_OFFSET).readS64().toNumber();
+  const count = storage.readS64(HASH_STORAGE_COUNT_OFFSET).toNumber();
   if (count === 0) {
     return [];
   }
@@ -99,8 +99,8 @@ function decodeDictionary(metadata: Metadata, storage: NativePointer): Container
   const value = typeArgument(metadata, 1);
   const keyStride = key.typeLayout.stride;
   const valueStride = value.typeLayout.stride;
-  const keys = storage.add(DICT_RAW_KEYS_OFFSET).readPointer();
-  const values = storage.add(DICT_RAW_VALUES_OFFSET).readPointer();
+  const keys = storage.readPointer(DICT_RAW_KEYS_OFFSET);
+  const values = storage.readPointer(DICT_RAW_VALUES_OFFSET);
   const bitmap = storage.add(DICT_BITMAP_OFFSET);
   const out: ContainerEntry[] = [];
   for (const bucket of occupiedBuckets(bitmap, scaleOf(storage), count)) {
@@ -119,12 +119,12 @@ function projectElement(metadata: Metadata, address: NativePointer): SwiftValue 
 
 function typeArgument(metadata: Metadata, index: number): Metadata {
   return new Metadata(
-    metadata.genericArguments.add(index * Process.pointerSize).readPointer()
+    metadata.genericArguments.readPointer(index * Process.pointerSize)
   );
 }
 
 function scaleOf(storage: NativePointer): number {
-  return storage.add(HASH_STORAGE_SCALE_OFFSET).readS8();
+  return storage.readS8(HASH_STORAGE_SCALE_OFFSET);
 }
 
 function* occupiedBuckets(

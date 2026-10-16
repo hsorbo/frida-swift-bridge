@@ -37,7 +37,7 @@ export class AccessibleFunctionRecord {
   }
 
   get isDistributed(): boolean {
-    return (this.handle.add(OFFSETOF_FLAGS).readU32() & FLAG_DISTRIBUTED) !== 0;
+    return (this.handle.readU32(OFFSETOF_FLAGS) & FLAG_DISTRIBUTED) !== 0;
   }
 }
 

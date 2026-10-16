@@ -35,7 +35,7 @@ export function unwrapReabstractionThunk(context: NativePointer): NativePointer 
     return null;
   }
   try {
-    const inner = context.add(offsetToFirstCapture(context)).add(Process.pointerSize).readPointer();
+    const inner = context.readPointer(offsetToFirstCapture(context) + Process.pointerSize);
     return captureDescriptorOf(inner) !== null ? inner : null;
   } catch {
     return null;

@@ -33,7 +33,7 @@ export class ContextDescriptor {
   constructor(readonly handle: NativePointer) {}
 
   get flags(): number {
-    return this.handle.add(OFFSETOF_FLAGS).readU32();
+    return this.handle.readU32(OFFSETOF_FLAGS);
   }
 
   get kind(): ContextDescriptorKind {
@@ -145,7 +145,7 @@ export function symbolicallyReferencedDescriptor(mangled: NativePointer): Contex
     return new ContextDescriptor(relative.add(relative.readS32()));
   }
   if (kind === SYMBOLIC_REF_INDIRECT) {
-    const target = relative.add(relative.readS32()).readPointer().strip();
+    const target = relative.readPointer(relative.readS32()).strip();
     return target.isNull() ? null : new ContextDescriptor(target);
   }
   return null;

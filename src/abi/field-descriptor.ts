@@ -37,9 +37,9 @@ function scanSymbolicMangledName(base: NativePointer): { length: number; trailin
       textStart = offset + 1;
     }
     offset += 1;
-    byte = base.add(offset).readU8();
+    byte = base.readU8(offset);
   }
-  return { length: offset, trailingText: base.add(textStart).readUtf8String(offset - textStart) ?? "" };
+  return { length: offset, trailingText: base.readUtf8String(offset - textStart, textStart) ?? "" };
 }
 
 export type ReferenceStorage = "weak" | "unowned" | "unmanaged";
@@ -50,7 +50,7 @@ export class Field {
   constructor(readonly handle: NativePointer) {}
 
   get flags(): number {
-    return this.handle.add(OFFSETOF_FR_FLAGS).readU32();
+    return this.handle.readU32(OFFSETOF_FR_FLAGS);
   }
 
   get isVar(): boolean {
@@ -89,8 +89,8 @@ export function* enumerateFields(descriptor: ContextDescriptor): Generator<Field
     return;
   }
 
-  const recordSize = fieldDescriptor.add(OFFSETOF_FD_FIELD_RECORD_SIZE).readU16();
-  const numFields = fieldDescriptor.add(OFFSETOF_FD_NUM_FIELDS).readU32();
+  const recordSize = fieldDescriptor.readU16(OFFSETOF_FD_FIELD_RECORD_SIZE);
+  const numFields = fieldDescriptor.readU32(OFFSETOF_FD_NUM_FIELDS);
   const records = fieldDescriptor.add(OFFSETOF_FD_RECORDS);
   for (let i = 0; i < numFields; i++) {
     yield new Field(records.add(i * recordSize));

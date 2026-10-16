@@ -173,7 +173,7 @@ function computedArgumentSize(argumentHeader: NativePointer): number {
 
 function decodeComputedArguments(argumentHeader: NativePointer, external: boolean): KeyPathComputedArguments {
   const { argumentSize, padding } = readArgumentSizeWord(argumentHeader);
-  const witnessTable = argumentHeader.add(Process.pointerSize).readPointer().strip();
+  const witnessTable = argumentHeader.readPointer(Process.pointerSize).strip();
   const data = argumentHeader.add(Process.pointerSize * (external ? 3 : 2)).add(padding);
   const destroy = witnessTable.readPointer().strip();
   return {
@@ -181,9 +181,9 @@ function decodeComputedArguments(argumentHeader: NativePointer, external: boolea
     data,
     witnesses: {
       destroy: destroy.isNull() ? null : destroy,
-      copy: witnessTable.add(Process.pointerSize).readPointer().strip(),
-      equals: witnessTable.add(Process.pointerSize * 2).readPointer().strip(),
-      hash: witnessTable.add(Process.pointerSize * 3).readPointer().strip(),
+      copy: witnessTable.readPointer(Process.pointerSize).strip(),
+      equals: witnessTable.readPointer(Process.pointerSize * 2).strip(),
+      hash: witnessTable.readPointer(Process.pointerSize * 3).strip(),
     },
   };
 }
@@ -358,14 +358,14 @@ function fieldNameByOffset(container: Metadata, offset: number): string | null {
   }
 
   const descriptor = container.description;
-  const vectorOffset = descriptor.handle.add(STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET).readU32();
+  const vectorOffset = descriptor.handle.readU32(STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET);
   if (vectorOffset === 0) {
     return null;
   }
   const offsets = container.handle.add(vectorOffset * Process.pointerSize);
   let index = 0;
   for (const field of enumerateFields(descriptor)) {
-    if (offsets.add(index * 4).readU32() === offset) {
+    if (offsets.readU32(index * 4) === offset) {
       return field.name;
     }
     index++;

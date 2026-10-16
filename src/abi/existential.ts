@@ -43,7 +43,7 @@ const SYMBOLIC_REFERENCE_INDIRECT = 0x02;
 export type ExistentialRepresentation = "opaque" | "class" | "error";
 
 export function existentialRepresentation(metadata: Metadata): ExistentialRepresentation {
-  const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
+  const flags = metadata.handle.readU32(FLAGS_OFFSET);
   if ((flags & SPECIAL_PROTOCOL_MASK) === SPECIAL_PROTOCOL_ERROR) {
     return "error";
   }
@@ -51,7 +51,7 @@ export function existentialRepresentation(metadata: Metadata): ExistentialRepres
 }
 
 export function isObjCExistential(metadata: Metadata): boolean {
-  const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
+  const flags = metadata.handle.readU32(FLAGS_OFFSET);
   return (flags & NOT_CLASS_CONSTRAINED) === 0 && (flags & NUM_WITNESS_TABLES_MASK) === 0;
 }
 
@@ -61,7 +61,7 @@ export interface OpaqueExistential {
 }
 
 export function projectOpaqueExistential(container: NativePointer): OpaqueExistential {
-  const type = new Metadata(container.add(TYPE_OFFSET).readPointer());
+  const type = new Metadata(container.readPointer(TYPE_OFFSET));
   return { type, value: type.valueWitnesses.projectBuffer(container) };
 }
 
@@ -78,7 +78,7 @@ export enum ExtendedExistentialSpecialKind {
 }
 
 function extendedExistentialShape(metadata: Metadata): NativePointer {
-  return metadata.handle.add(Process.pointerSize).readPointer().strip();
+  return metadata.handle.readPointer(Process.pointerSize).strip();
 }
 
 export function extendedExistentialSpecialKind(metadata: Metadata): ExtendedExistentialSpecialKind {
@@ -124,7 +124,7 @@ export function extendedExistentialGeneralizationArguments(metadata: Metadata): 
   const args = metadata.handle.add(GENERALIZATION_ARGUMENTS_OFFSET);
   const result: Metadata[] = [];
   for (let i = 0; i < numParams; i++) {
-    result.push(new Metadata(args.add(i * Process.pointerSize).readPointer()));
+    result.push(new Metadata(args.readPointer(i * Process.pointerSize)));
   }
   return result;
 }
@@ -171,7 +171,7 @@ function openedSelfAssociatedType({ address, length }: MangledName): { name: str
   let nameLength = 0;
   let cursor = 0;
   for (; cursor < length; cursor++) {
-    const byte = address.add(cursor).readU8();
+    const byte = address.readU8(cursor);
     if (byte < 0x30 || byte > 0x39) {
       break;
     }
@@ -180,9 +180,9 @@ function openedSelfAssociatedType({ address, length }: MangledName): { name: str
   if (cursor === 0 || nameLength === 0) {
     return null;
   }
-  const name = address.add(cursor).readUtf8String(nameLength)!;
+  const name = address.readUtf8String(nameLength, cursor)!;
   cursor += nameLength;
-  const referenceKind = address.add(cursor).readU8();
+  const referenceKind = address.readU8(cursor);
   let protocol: ContextDescriptor | null = null;
   if (referenceKind === SYMBOLIC_REFERENCE_DIRECT || referenceKind === SYMBOLIC_REFERENCE_INDIRECT) {
     const target = RelativeDirectPointer.resolve(address.add(cursor + 1));
@@ -191,7 +191,7 @@ function openedSelfAssociatedType({ address, length }: MangledName): { name: str
     }
     cursor += 1 + RELATIVE_POINTER_SIZE;
   }
-  const tail = address.add(cursor).readUtf8String(length - cursor);
+  const tail = address.readUtf8String(length - cursor, cursor);
   return tail === ASSOCIATED_TYPE_OF_OPENED_SELF ? { name, protocol } : null;
 }
 
@@ -249,15 +249,15 @@ export function existentialProtocols(metadata: Metadata): ContextDescriptor[] {
   if (metadata.kind === MetadataKind.ExistentialMetatype) {
     return existentialProtocols(metatypeInstanceType(metadata));
   }
-  const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
-  const numProtocols = metadata.handle.add(NUM_PROTOCOLS_OFFSET).readU32();
+  const flags = metadata.handle.readU32(FLAGS_OFFSET);
+  const numProtocols = metadata.handle.readU32(NUM_PROTOCOLS_OFFSET);
   let cursor = metadata.handle.add(NUM_PROTOCOLS_OFFSET + 4);
   if ((flags & HAS_SUPERCLASS_CONSTRAINT) !== 0) {
     cursor = cursor.add(Process.pointerSize);
   }
   const protocols: ContextDescriptor[] = [];
   for (let i = 0; i < numProtocols; i++) {
-    const ref = cursor.add(i * Process.pointerSize).readPointer();
+    const ref = cursor.readPointer(i * Process.pointerSize);
     if (!ref.and(PROTOCOL_DESCRIPTOR_REF_IS_OBJC).isNull()) {
       continue;
     }
@@ -267,11 +267,11 @@ export function existentialProtocols(metadata: Metadata): ContextDescriptor[] {
 }
 
 export function existentialSuperclassConstraint(metadata: Metadata): Metadata | null {
-  const flags = metadata.handle.add(FLAGS_OFFSET).readU32();
+  const flags = metadata.handle.readU32(FLAGS_OFFSET);
   if ((flags & HAS_SUPERCLASS_CONSTRAINT) === 0) {
     return null;
   }
-  return new Metadata(metadata.handle.add(NUM_PROTOCOLS_OFFSET + 4).readPointer());
+  return new Metadata(metadata.handle.readPointer(NUM_PROTOCOLS_OFFSET + 4));
 }
 
 export function projectErrorExistential(container: NativePointer): OpaqueExistential {
@@ -281,7 +281,7 @@ export function projectErrorExistential(container: NativePointer): OpaqueExisten
   getSwiftCoreApi().swift_getErrorValue(errorBox, bridgedNSErrorScratch, result);
   return {
     value: result.readPointer(),
-    type: new Metadata(result.add(Process.pointerSize).readPointer()),
+    type: new Metadata(result.readPointer(Process.pointerSize)),
   };
 }
 

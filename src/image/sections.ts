@@ -26,7 +26,7 @@ function metadataSectionsFor(module: Module): NativePointer | null {
   let found: NativePointer | null = null;
   const body = new NativeCallback(
     (sections: NativePointer, _context: NativePointer): number => {
-      if (sections.add(BASE_ADDRESS_OFFSET).readPointer().equals(module.base)) {
+      if (sections.readPointer(BASE_ADDRESS_OFFSET).equals(module.base)) {
         found = sections;
         return 0;
       }
@@ -49,7 +49,7 @@ function getRegisteredSwiftSection(module: Module, name: string): SwiftSection |
     return null;
   }
   const range = sections.add(offset);
-  const size = range.add(Process.pointerSize).readU64().toNumber();
+  const size = range.readU64(Process.pointerSize).toNumber();
   return size === 0 ? null : { address: range.readPointer(), size };
 }
 

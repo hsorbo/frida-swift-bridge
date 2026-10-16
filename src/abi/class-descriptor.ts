@@ -109,16 +109,16 @@ export function resilientSuperclassReferenceKind(descriptor: ContextDescriptor):
 }
 
 export function numImmediateMembers(descriptor: ContextDescriptor): number {
-  return descriptor.handle.add(OFFSETOF_NUM_IMMEDIATE_MEMBERS).readU32();
+  return descriptor.handle.readU32(OFFSETOF_NUM_IMMEDIATE_MEMBERS);
 }
 
 // Valid only when !hasResilientSuperclass(descriptor); that union slot otherwise holds a cache pointer.
 export function metadataNegativeSizeInWords(descriptor: ContextDescriptor): number {
-  return descriptor.handle.add(OFFSETOF_METADATA_NEGATIVE_SIZE_IN_WORDS).readU32();
+  return descriptor.handle.readU32(OFFSETOF_METADATA_NEGATIVE_SIZE_IN_WORDS);
 }
 
 export function metadataPositiveSizeInWords(descriptor: ContextDescriptor): number {
-  return descriptor.handle.add(OFFSETOF_METADATA_POSITIVE_SIZE_IN_WORDS).readU32();
+  return descriptor.handle.readU32(OFFSETOF_METADATA_POSITIVE_SIZE_IN_WORDS);
 }
 
 // Null means the class has no formal superclass reference at all.
@@ -158,11 +158,11 @@ export function readVTable(descriptor: ContextDescriptor): VTableEntry[] {
 
   const base = descriptor.handle;
   const header = classTrailingObjectsStart(descriptor);
-  let vtableOffset = base.add(header).readU32();
+  let vtableOffset = base.readU32(header);
   if (hasResilientSuperclass(descriptor)) {
     vtableOffset += getClassMetadataBounds(descriptor).immediateMembersOffset / Process.pointerSize;
   }
-  const size = base.add(header + OFFSETOF_VTABLE_SIZE).readU32();
+  const size = base.readU32(header + OFFSETOF_VTABLE_SIZE);
   const entries: VTableEntry[] = [];
   for (let i = 0; i < size; i++) {
     const md = base.add(header + OFFSETOF_METHOD_DESCRIPTORS + i * METHOD_DESCRIPTOR_SIZE);
@@ -208,16 +208,16 @@ export function canonicalPrespecializedMetadata(descriptor: ContextDescriptor): 
   }
   if (isClass) {
     if ((kindFlags(descriptor) & CLASS_HAS_VTABLE) !== 0) {
-      offset += VTABLE_DESCRIPTOR_HEADER_SIZE + base.add(offset + OFFSETOF_VTABLE_SIZE).readU32() * METHOD_DESCRIPTOR_SIZE;
+      offset += VTABLE_DESCRIPTOR_HEADER_SIZE + base.readU32(offset + OFFSETOF_VTABLE_SIZE) * METHOD_DESCRIPTOR_SIZE;
     }
     if ((kindFlags(descriptor) & CLASS_HAS_OVERRIDE_TABLE) !== 0) {
-      offset += OVERRIDE_TABLE_HEADER_SIZE + base.add(offset).readU32() * METHOD_OVERRIDE_DESCRIPTOR_SIZE;
+      offset += OVERRIDE_TABLE_HEADER_SIZE + base.readU32(offset) * METHOD_OVERRIDE_DESCRIPTOR_SIZE;
     }
-    if (hasResilientSuperclass(descriptor) && (base.add(OFFSETOF_EXTRA_CLASS_FLAGS).readU32() & EXTRA_CLASS_HAS_OBJC_RESILIENT_CLASS_STUB) !== 0) {
+    if (hasResilientSuperclass(descriptor) && (base.readU32(OFFSETOF_EXTRA_CLASS_FLAGS) & EXTRA_CLASS_HAS_OBJC_RESILIENT_CLASS_STUB) !== 0) {
       offset += OBJC_RESILIENT_CLASS_STUB_INFO_SIZE;
     }
   }
-  const count = base.add(offset).readU32();
+  const count = base.readU32(offset);
   const entries = base.add(offset + METADATA_LIST_COUNT_SIZE);
   return Array.from({ length: count }, (_, i) => RelativeDirectPointer.resolve(entries.add(i * METADATA_LIST_ENTRY_SIZE))!);
 }

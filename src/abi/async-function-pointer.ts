@@ -16,7 +16,7 @@ export class AsyncFunctionPointer {
   }
 
   get expectedContextSize(): number {
-    return this.handle.add(OFFSETOF_EXPECTED_CONTEXT_SIZE).readU32();
+    return this.handle.readU32(OFFSETOF_EXPECTED_CONTEXT_SIZE);
   }
 }
 

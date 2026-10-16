@@ -35,7 +35,7 @@ export class Job {
   constructor(readonly handle: NativePointer) {}
 
   get rawFlags(): number {
-    return this.handle.add(OFFSETOF_FLAGS).readU32();
+    return this.handle.readU32(OFFSETOF_FLAGS);
   }
 
   get kind(): JobKind {
@@ -52,17 +52,17 @@ export class Job {
 
   // Non-zero low 32 bits of the task id (Task.cpp setTaskId loops off zero).
   get id(): number {
-    return this.handle.add(OFFSETOF_ID).readU32();
+    return this.handle.readU32(OFFSETOF_ID);
   }
 
   get resumeFunction(): NativePointer {
-    return this.handle.add(OFFSETOF_RESUME_FUNCTION).readPointer().strip();
+    return this.handle.readPointer(OFFSETOF_RESUME_FUNCTION).strip();
   }
 }
 
 export class AsyncTask extends Job {
   get resumeContext(): AsyncContext | null {
-    const p = this.handle.add(OFFSETOF_RESUME_CONTEXT).readPointer().strip();
+    const p = this.handle.readPointer(OFFSETOF_RESUME_CONTEXT).strip();
     return p.isNull() ? null : new AsyncContext(p);
   }
 

@@ -41,7 +41,7 @@ const IS_INSTANCE = 0x10;
 const IS_ASYNC = 0x20;
 
 export function numProtocolRequirements(descriptor: ContextDescriptor): number {
-  return descriptor.handle.add(OFFSETOF_NUM_REQUIREMENTS).readU32();
+  return descriptor.handle.readU32(OFFSETOF_NUM_REQUIREMENTS);
 }
 
 export function readProtocolRequirements(descriptor: ContextDescriptor): ProtocolRequirement[] {
@@ -50,7 +50,7 @@ export function readProtocolRequirements(descriptor: ContextDescriptor): Protoco
   }
 
   const base = descriptor.handle;
-  const numRequirementsInSignature = base.add(OFFSETOF_NUM_REQUIREMENTS_IN_SIGNATURE).readU32();
+  const numRequirementsInSignature = base.readU32(OFFSETOF_NUM_REQUIREMENTS_IN_SIGNATURE);
   const numRequirements = numProtocolRequirements(descriptor);
   const requirementsBase = base.add(
     OFFSETOF_REQUIREMENT_SIGNATURE + numRequirementsInSignature * GENERIC_REQUIREMENT_DESCRIPTOR_SIZE
@@ -86,7 +86,7 @@ export function readRequirementSignature(descriptor: ContextDescriptor): Generic
   }
 
   const base = descriptor.handle;
-  const numRequirementsInSignature = base.add(OFFSETOF_NUM_REQUIREMENTS_IN_SIGNATURE).readU32();
+  const numRequirementsInSignature = base.readU32(OFFSETOF_NUM_REQUIREMENTS_IN_SIGNATURE);
   return readGenericRequirementDescriptors(
     base.add(OFFSETOF_REQUIREMENT_SIGNATURE),
     numRequirementsInSignature

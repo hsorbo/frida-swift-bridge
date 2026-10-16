@@ -43,7 +43,7 @@ export class ProtocolConformance {
   }
 
   get flags(): number {
-    return this.handle.add(OFFSETOF_CONF_FLAGS).readU32();
+    return this.handle.readU32(OFFSETOF_CONF_FLAGS);
   }
 
   // Null for ObjC class references: those name a class, not a Swift nominal descriptor.

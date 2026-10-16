@@ -31,34 +31,34 @@ export class ClassMetadata {
     if (Process.platform !== "darwin") {
       return true; // no ObjC/foreign classes: any Class-kind metadata is Swift-native
     }
-    return (this.handle.add(OFFSETOF_DATA).readU8() & SWIFT_CLASS_IS_SWIFT_MASK) !== 0;
+    return (this.handle.readU8(OFFSETOF_DATA) & SWIFT_CLASS_IS_SWIFT_MASK) !== 0;
   }
 
   get usesSwiftRefcounting(): boolean {
     if (Process.platform !== "darwin") {
       return true;
     }
-    return this.isTypeMetadata && (this.handle.add(OFFSETOF_FLAGS).readU32() & CLASS_FLAGS_USES_SWIFT_REFCOUNTING) !== 0;
+    return this.isTypeMetadata && (this.handle.readU32(OFFSETOF_FLAGS) & CLASS_FLAGS_USES_SWIFT_REFCOUNTING) !== 0;
   }
 
   get superclass(): ClassMetadata | null {
-    const superclass = this.handle.add(OFFSETOF_SUPERCLASS).readPointer().strip();
+    const superclass = this.handle.readPointer(OFFSETOF_SUPERCLASS).strip();
     return superclass.isNull() ? null : new ClassMetadata(superclass);
   }
 
   get instanceSize(): number {
     this.requireTypeMetadata();
-    return this.handle.add(OFFSETOF_INSTANCE_SIZE).readU32();
+    return this.handle.readU32(OFFSETOF_INSTANCE_SIZE);
   }
 
   get instanceAlignment(): number {
     this.requireTypeMetadata();
-    return this.handle.add(OFFSETOF_INSTANCE_ALIGN_MASK).readU16() + 1;
+    return this.handle.readU16(OFFSETOF_INSTANCE_ALIGN_MASK) + 1;
   }
 
   get description(): ContextDescriptor {
     this.requireTypeMetadata();
-    return new ContextDescriptor(this.handle.add(OFFSETOF_DESCRIPTION).readPointer().strip());
+    return new ContextDescriptor(this.handle.readPointer(OFFSETOF_DESCRIPTION).strip());
   }
 
   get genericArguments(): NativePointer {
@@ -67,11 +67,11 @@ export class ClassMetadata {
 
   fieldOffset(index: number): number {
     const descriptor = this.description;
-    let vectorOffset = descriptor.handle.add(DESC_OFFSETOF_FIELD_OFFSET_VECTOR_OFFSET).readU32();
+    let vectorOffset = descriptor.handle.readU32(DESC_OFFSETOF_FIELD_OFFSET_VECTOR_OFFSET);
     if (hasResilientSuperclass(descriptor)) {
       vectorOffset += getClassMetadataBounds(descriptor).immediateMembersOffset / Process.pointerSize;
     }
-    return this.handle.add((vectorOffset + index) * Process.pointerSize).readU64().toNumber();
+    return this.handle.readU64((vectorOffset + index) * Process.pointerSize).toNumber();
   }
 
   private requireTypeMetadata(): void {
@@ -90,7 +90,7 @@ export function getClassMetadata(descriptor: ContextDescriptor): ClassMetadata {
 }
 
 export function objcClassOf(wrapper: Metadata): NativePointer {
-  return wrapper.handle.add(Process.pointerSize).readPointer().strip();
+  return wrapper.handle.readPointer(Process.pointerSize).strip();
 }
 
 export function classMetadataOf(object: NativePointer): ClassMetadata {

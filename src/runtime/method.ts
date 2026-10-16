@@ -1819,7 +1819,7 @@ export class BoundMethod {
 // dispose or collection. The facade is a function, so the weak callback must not reach it.
 function adoptReturnedClosure(words: NativePointer, template: CallPlan): SwiftClosureValue {
   const fn = words.readPointer().strip();
-  const context = words.add(Process.pointerSize).readPointer();
+  const context = words.readPointer(Process.pointerSize);
   const bound = new BoundMethod({ ...template, address: fn }, { self: context });
   const state = { disposed: false };
   const releaseContext = (): void => {
@@ -1916,13 +1916,13 @@ class AsyncArgs {
     for (const { offset, bytes } of this.stackBytes) {
       image.add(offset).writeByteArray(bytes);
     }
-    return Array.from({ length: words }, (_, i) => image.add(i * 8).readPointer());
+    return Array.from({ length: words }, (_, i) => image.readPointer(i * 8));
   }
 
   private place(scalar: LoweredScalar, value: NativePointer): void {
     const location = this.allocator.scalar(scalar);
     if ("stackOffset" in location) {
-      this.stackBytes.push({ offset: location.stackOffset, bytes: value.add(scalar.offset).readByteArray(scalar.size)! });
+      this.stackBytes.push({ offset: location.stackOffset, bytes: value.readByteArray(scalar.size, scalar.offset)! });
       return;
     }
     const bytes = value.add(scalar.offset);
@@ -2276,7 +2276,7 @@ function decodeString(raw: NativeCallbackArgumentValue): string {
 // createString's +1 rides the words to Swift, which owns the closure result.
 function encodeString(value: unknown): NativePointer[] {
   const s = createString(value as string);
-  return [s.readPointer(), s.add(Process.pointerSize).readPointer()];
+  return [s.readPointer(), s.readPointer(Process.pointerSize)];
 }
 
 // $s manglings feeding the discriminator (verified against the fixture's blraa); Frida type marshals.
@@ -4144,7 +4144,7 @@ export function actorSerialExecutor(actorType: Metadata, self: NativePointer): S
   if (ref === null) {
     return null;
   }
-  return { identity: ref.readPointer(), implementation: ref.add(Process.pointerSize).readPointer() };
+  return { identity: ref.readPointer(), implementation: ref.readPointer(Process.pointerSize) };
 }
 
 const DIRECT_BRANCH_MNEMONICS: Partial<Record<Architecture, ReadonlySet<string>>> = {
@@ -4256,7 +4256,7 @@ function resolveVTableTarget(table: WitnessTable, metadataOffset: number): Nativ
   try {
     const classMetadata = new ClassMetadata(table.conformingType.handle);
     const hasVTableSlot = readVTableChain(classMetadata).some((e) => e.metadataOffset === metadataOffset);
-    return hasVTableSlot ? classMetadata.handle.add(metadataOffset * Process.pointerSize).readPointer().strip() : null;
+    return hasVTableSlot ? classMetadata.handle.readPointer(metadataOffset * Process.pointerSize).strip() : null;
   } catch {
     return null;
   }

@@ -88,13 +88,13 @@ export function genericCacheEntries(descriptor: ContextDescriptor): NativePointe
   if (cache === null) {
     return null;
   }
-  const count = cache.add(OFFSETOF_CACHE_ELEMENT_COUNT).readU32();
-  const elements = cache.add(OFFSETOF_CACHE_ELEMENTS).readPointer();
+  const count = cache.readU32(OFFSETOF_CACHE_ELEMENT_COUNT);
+  const elements = cache.readPointer(OFFSETOF_CACHE_ELEMENTS);
   if (count === 0 || elements.isNull()) {
     return [];
   }
   const entries = elements.add(Process.pointerSize);
-  return Array.from({ length: count }, (_, i) => entries.add(i * Process.pointerSize).readPointer());
+  return Array.from({ length: count }, (_, i) => entries.readPointer(i * Process.pointerSize));
 }
 
 // Trailing order past the requirements array: GenericPackShapeHeader/Descriptors (parameter
@@ -111,7 +111,7 @@ export function genericContextEnd(descriptor: ContextDescriptor): number {
   }
 
   if ((flags & FLAG_HAS_VALUES) !== 0) {
-    const numValues = handle.add(offset).readU32();
+    const numValues = handle.readU32(offset);
     offset += SIZEOF_VALUE_HEADER + numValues * SIZEOF_VALUE_DESCRIPTOR;
   }
 
@@ -125,7 +125,7 @@ function packShapesEnd(descriptor: ContextDescriptor): number {
   const paramsOffset = base + GENERIC_CONTEXT_HEADER_SIZE;
   let offset = genericRequirementsOffset(paramsOffset, numParams) + numRequirements * GENERIC_REQUIREMENT_DESCRIPTOR_SIZE;
   if ((flags & FLAG_HAS_TYPE_PACKS) !== 0) {
-    const numPacks = handle.add(offset).readU16();
+    const numPacks = handle.readU16(offset);
     offset += SIZEOF_PACK_SHAPE_HEADER + numPacks * SIZEOF_PACK_SHAPE_DESCRIPTOR;
   }
   return offset;
@@ -147,11 +147,11 @@ function conditionalInvertedProtocolsSection(descriptor: ContextDescriptor): Con
     return null;
   }
   let offset = packShapesEnd(descriptor);
-  const protocolBits = handle.add(offset).readU16();
+  const protocolBits = handle.readU16(offset);
   offset += SIZEOF_CONDITIONAL_INVERTIBLE_PROTOCOL_SET;
   const cumulativeRequirementCounts: number[] = [];
   for (let i = 0; i < popcount16(protocolBits); i++) {
-    cumulativeRequirementCounts.push(handle.add(offset + i * SIZEOF_CONDITIONAL_REQUIREMENT_COUNT).readU16());
+    cumulativeRequirementCounts.push(handle.readU16(offset + i * SIZEOF_CONDITIONAL_REQUIREMENT_COUNT));
   }
   offset += cumulativeRequirementCounts.length * SIZEOF_CONDITIONAL_REQUIREMENT_COUNT;
   const requirementsOffset = (offset + 3) & ~3;
@@ -202,10 +202,10 @@ function invertedProtocols(descriptor: ContextDescriptor): number {
       break;
   }
   if (descriptor.isGeneric && ((descriptor.flags >>> KIND_FLAGS_SHIFT) & KIND_FLAG_HAS_CANONICAL_METADATA_PRESPECIALIZATIONS) !== 0) {
-    const count = handle.add(offset).readU32();
+    const count = handle.readU32(offset);
     offset += SIZEOF_METADATA_LIST_COUNT + count * SIZEOF_METADATA_LIST_ENTRY + SIZEOF_METADATA_CACHING_ONCE_TOKEN;
   }
-  return handle.add(offset).readU16();
+  return handle.readU16(offset);
 }
 
 function requireNoneMissing(suppressed: number, ignored: number): void {
@@ -319,7 +319,7 @@ export function genericParamsAreKey(descriptor: ContextDescriptor): boolean[] {
   const { numParams } = readGenericContextHeader(descriptor.handle.add(base));
   return Array.from(
     { length: numParams },
-    (_, i) => (descriptor.handle.add(base + GENERIC_CONTEXT_HEADER_SIZE + i).readU8() & FLAG_HAS_KEY_ARGUMENT) !== 0
+    (_, i) => (descriptor.handle.readU8(base + GENERIC_CONTEXT_HEADER_SIZE + i) & FLAG_HAS_KEY_ARGUMENT) !== 0
   );
 }
 
@@ -329,7 +329,7 @@ export function keyGenericArguments(metadata: Metadata): { typeArguments: Metada
   const numKeyParams = genericParamsAreKey(descriptor).filter((isKey) => isKey).length;
   const keyArguments: NativePointer[] = [];
   for (let i = 0; i < numKeyArguments; i++) {
-    keyArguments.push(metadata.genericArguments.add(i * Process.pointerSize).readPointer());
+    keyArguments.push(metadata.genericArguments.readPointer(i * Process.pointerSize));
   }
   return {
     typeArguments: keyArguments.slice(0, numKeyParams).map((h) => new Metadata(h)),
@@ -351,7 +351,7 @@ export function buildGenericMetadata(
   const paramsOffset = base + GENERIC_CONTEXT_HEADER_SIZE;
   const paramHandles: NativePointer[] = [];
   for (let i = 0; i < numParams; i++) {
-    const param = handle.add(paramsOffset + i).readU8();
+    const param = handle.readU8(paramsOffset + i);
     if ((param & GENERIC_PARAM_KIND_MASK) !== GENERIC_PARAM_KIND_TYPE) {
       throw new Error("non-type generic parameters are not supported");
     }

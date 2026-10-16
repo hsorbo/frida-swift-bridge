@@ -101,13 +101,13 @@ export function readGenericRequirementDescriptors(
     ) {
       sameTypeName = readMangledName(address.add(OFFSETOF_UNION));
     } else if (kind === GenericRequirementKind.Layout) {
-      layoutKind = address.add(OFFSETOF_UNION).readU32();
+      layoutKind = address.readU32(OFFSETOF_UNION);
     } else if (kind === GenericRequirementKind.SameConformance) {
       const p = RelativeIndirectablePointer.resolve(address.add(OFFSETOF_UNION));
       conformance = p === null ? null : new ProtocolConformance(p);
     } else if (kind === GenericRequirementKind.InvertedProtocols) {
       const at = address.add(OFFSETOF_UNION);
-      invertedProtocols = { genericParamIndex: at.readU16(), protocolBits: at.add(2).readU16() };
+      invertedProtocols = { genericParamIndex: at.readU16(), protocolBits: at.readU16(2) };
     }
 
     entries.push({

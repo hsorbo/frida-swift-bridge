@@ -57,15 +57,15 @@ export class CaptureDescriptor {
   constructor(readonly handle: NativePointer) {}
 
   get numCaptureTypes(): number {
-    return this.handle.add(OFFSETOF_CD_NUM_CAPTURE_TYPES).readU32();
+    return this.handle.readU32(OFFSETOF_CD_NUM_CAPTURE_TYPES);
   }
 
   get numMetadataSources(): number {
-    return this.handle.add(OFFSETOF_CD_NUM_METADATA_SOURCES).readU32();
+    return this.handle.readU32(OFFSETOF_CD_NUM_METADATA_SOURCES);
   }
 
   get numBindings(): number {
-    return this.handle.add(OFFSETOF_CD_NUM_BINDINGS).readU32();
+    return this.handle.readU32(OFFSETOF_CD_NUM_BINDINGS);
   }
 
   get captureTypes(): CaptureTypeRecord[] {
@@ -94,14 +94,14 @@ export function captureDescriptorOf(context: NativePointer): CaptureDescriptor |
   if (kind !== MetadataKind.HeapLocalVariable) {
     return null;
   }
-  const description = metadata.add(OFFSETOF_HEAP_CAPTURE_DESCRIPTION).readPointer();
+  const description = metadata.readPointer(OFFSETOF_HEAP_CAPTURE_DESCRIPTION);
   return description.isNull() ? null : new CaptureDescriptor(description);
 }
 
 // bindings, if any, start at this offset and the captures follow them.
 export function offsetToFirstCapture(context: NativePointer): number {
   const metadata = context.readPointer().strip();
-  return metadata.add(OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE).readU32();
+  return metadata.readU32(OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE);
 }
 
 export function resolveCaptureType(record: CaptureTypeRecord): Metadata | null {
@@ -288,7 +288,7 @@ function readMetadataSource(
 ): NativePointer | null {
   switch (source.kind) {
     case "binding":
-      return context.add((2 + source.slot) * Process.pointerSize).readPointer();
+      return context.readPointer((2 + source.slot) * Process.pointerSize);
     case "referenceCapture":
       return source.capture < captureAddresses.length
         ? classMetadataOf(captureAddresses[source.capture].readPointer()).handle
@@ -300,7 +300,7 @@ function readMetadataSource(
       if (base === null) {
         return null;
       }
-      return genericArgumentsOf(base).add(source.index * Process.pointerSize).readPointer();
+      return genericArgumentsOf(base).readPointer(source.index * Process.pointerSize);
     }
   }
 }

@@ -10,11 +10,11 @@ export interface FixedArrayElement {
 
 // A negative count is laid out empty, like the runtime's getRealizedCount.
 export function fixedArrayCount(metadata: Metadata): number {
-  return Math.max(0, metadata.handle.add(OFFSETOF_COUNT).readS64().toNumber());
+  return Math.max(0, metadata.handle.readS64(OFFSETOF_COUNT).toNumber());
 }
 
 export function fixedArrayElementType(metadata: Metadata): Metadata {
-  return new Metadata(metadata.handle.add(OFFSETOF_ELEMENT).readPointer());
+  return new Metadata(metadata.handle.readPointer(OFFSETOF_ELEMENT));
 }
 
 export function* enumerateFixedArrayElements(metadata: Metadata): Generator<FixedArrayElement> {

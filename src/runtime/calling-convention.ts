@@ -273,7 +273,7 @@ function aggregateMembers(metadata: Metadata): AggregateMember[] | null {
 
 function structMembers(metadata: Metadata): AggregateMember[] | null {
   const descriptor = metadata.description;
-  const vectorOffset = descriptor.handle.add(STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET).readU32();
+  const vectorOffset = descriptor.handle.readU32(STRUCT_DESC_FIELD_OFFSET_VECTOR_OFFSET);
   if (vectorOffset === 0) {
     return null;
   }
@@ -284,7 +284,7 @@ function structMembers(metadata: Metadata): AggregateMember[] | null {
     if (type === null) {
       return null;
     }
-    members.push({ type, offset: offsets.add(members.length * 4).readU32() });
+    members.push({ type, offset: offsets.readU32(members.length * 4) });
   }
   return members;
 }

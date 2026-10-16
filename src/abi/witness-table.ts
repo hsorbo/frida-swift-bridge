@@ -21,7 +21,7 @@ export class WitnessTable {
   }
 
   requirement(witnessIndex: number): NativePointer {
-    return this.handle.add(witnessIndex * Process.pointerSize).readPointer().strip();
+    return this.handle.readPointer(witnessIndex * Process.pointerSize).strip();
   }
 
   method(self: NativePointer, name: string): BoundMethod {

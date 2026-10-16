@@ -47,9 +47,9 @@ export interface GenericContextHeader {
 export function readGenericContextHeader(header: NativePointer): GenericContextHeader {
   return {
     numParams: header.readU16(),
-    numRequirements: header.add(OFFSETOF_GENERIC_HEADER_NUM_REQUIREMENTS).readU16(),
-    numKeyArguments: header.add(OFFSETOF_GENERIC_HEADER_NUM_KEY_ARGUMENTS).readU16(),
-    flags: header.add(OFFSETOF_GENERIC_HEADER_FLAGS).readU16(),
+    numRequirements: header.readU16(OFFSETOF_GENERIC_HEADER_NUM_REQUIREMENTS),
+    numKeyArguments: header.readU16(OFFSETOF_GENERIC_HEADER_NUM_KEY_ARGUMENTS),
+    flags: header.readU16(OFFSETOF_GENERIC_HEADER_FLAGS),
   };
 }
 
@@ -63,7 +63,7 @@ export class Metadata {
   constructor(readonly handle: NativePointer) {}
 
   get kind(): MetadataKind {
-    const raw = this.handle.add(OFFSETOF_KIND).readU32();
+    const raw = this.handle.readU32(OFFSETOF_KIND);
     return raw > LAST_ENUMERATED ? MetadataKind.Class : raw;
   }
 
@@ -87,7 +87,7 @@ export class Metadata {
       );
     }
     return new ContextDescriptor(
-      this.handle.add(Process.pointerSize).readPointer().strip()
+      this.handle.readPointer(Process.pointerSize).strip()
     );
   }
 

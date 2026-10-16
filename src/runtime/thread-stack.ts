@@ -23,7 +23,7 @@ function bindCurrentThreadStack(): () => StackBounds {
         const out = Memory.alloc(Process.pointerSize * 2);
         limits(out, out.add(Process.pointerSize));
         const base = out.readPointer();
-        return { base, size: out.add(Process.pointerSize).readPointer().sub(base).toUInt32() };
+        return { base, size: out.readPointer(Process.pointerSize).sub(base).toUInt32() };
       };
     }
     default: {
@@ -40,7 +40,7 @@ function bindCurrentThreadStack(): () => StackBounds {
         }
         getStack(attr, out, out.add(Process.pointerSize));
         destroyAttr(attr);
-        return { base: out.readPointer(), size: Number(out.add(Process.pointerSize).readPointer()) };
+        return { base: out.readPointer(), size: Number(out.readPointer(Process.pointerSize)) };
       };
     }
   }
