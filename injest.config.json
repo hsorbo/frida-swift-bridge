@@ -5,6 +5,7 @@
     "local": { "device": "local", "session": "system" },
     "local-v8": { "device": "local", "session": "system", "runtime": "v8" },
     "macos-arm64e": { "device": "local", "session": { "spawn": "./tests/fixtures/host" } },
+    "macos-arm64e-v8": { "device": "local", "session": { "spawn": "./tests/fixtures/host" }, "runtime": "v8" },
     "ios": { "device": "usb", "session": "system" }
   }
 }

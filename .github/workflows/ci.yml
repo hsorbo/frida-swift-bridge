@@ -26,8 +26,12 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Test (QuickJS)
         run: npm test
+
+      - name: Test (V8)
+        if: ${{ !cancelled() }}
+        run: npm run test:v8
 
   macos-arm64e:
     runs-on: xcode-27
@@ -44,11 +48,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Test (QuickJS)
         run: SDKROOT=$(xcrun --show-sdk-path) npm run test:macos-arm64e
 
-  # QuickJS on arm64 Windows evaluates Infinity as NaN (Frida 17.22.1), which breaks the runner's
-  # deep equality on zeros, so this job tests on V8.
+      - name: Test (V8)
+        if: ${{ !cancelled() }}
+        run: SDKROOT=$(xcrun --show-sdk-path) npm run test:macos-arm64e-v8
+
   windows-arm64:
     runs-on: windows-11-arm
     steps:
@@ -70,7 +76,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Test (QuickJS)
+        run: npm test
+
+      - name: Test (V8)
+        if: ${{ !cancelled() }}
         run: npm run test:v8
 
   windows-x64:
@@ -93,8 +103,12 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Test (QuickJS)
         run: npm test
+
+      - name: Test (V8)
+        if: ${{ !cancelled() }}
+        run: npm run test:v8
 
   linux:
     strategy:
@@ -118,5 +132,9 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Test
+      - name: Test (QuickJS)
         run: npm test
+
+      - name: Test (V8)
+        if: ${{ !cancelled() }}
+        run: npm run test:v8

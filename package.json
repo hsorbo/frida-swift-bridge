@@ -29,6 +29,8 @@
     "test:v8": "injest --target local-v8",
     "pretest:macos-arm64e": "ARCH=arm64e sh tests/fixtures/build.sh",
     "test:macos-arm64e": "injest --target macos-arm64e",
+    "pretest:macos-arm64e-v8": "ARCH=arm64e sh tests/fixtures/build.sh",
+    "test:macos-arm64e-v8": "injest --target macos-arm64e-v8",
     "pretest:ios": "PLATFORM=ios EMBED_FIXTURES=1 sh tests/fixtures/build.sh",
     "test:ios": "injest --target ios",
     "prebench": "sh tests/fixtures/build.sh",
