@@ -1,17 +1,13 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { readValue, writeValue, metadataFor } from "../src/abi.js";
-
 import { Swift } from "../src/index.js";
+
 describe("64-bit integer semantics", () => {
   beforeEach(() => { loadFixture(); });
 
   function roundtrip(typeName: string, value: number | Int64 | UInt64) {
-    const metadata = metadataFor(typeName)!;
-    const buffer = Memory.alloc(metadata.typeLayout.stride);
-    writeValue(metadata, buffer, value);
-    return readValue(metadata, buffer);
+    return Swift.struct(typeName)!.$new(value).$fields;
   }
 
   test("Swift.Int decodes as an Int64, exact above 2^53", () => {
@@ -28,7 +24,7 @@ describe("64-bit integer semantics", () => {
     expect((out as UInt64).toString()).toBe("18446744073709551615");
   });
 
-  test("writeValue accepts a plain number for a 64-bit field", () => {
+  test("$new accepts a plain number for a 64-bit field", () => {
     const out = roundtrip("Swift.Int64", -42);
     expect((out as Int64).toNumber()).toBe(-42);
   });

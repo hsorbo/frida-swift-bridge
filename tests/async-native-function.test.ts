@@ -1,8 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift, SwiftError, ClassType } from "../src/index.js";
-import { metadataFor, typeOf, ValueInstance } from "../src/abi.js";
+import { Swift, SwiftError } from "../src/index.js";
 
 const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
 const DIVIDE_ASYNC = "$s7fixture11divideAsyncyS2i_SitYaKF";
@@ -59,26 +58,26 @@ describe("Swift.function on async symbols", () => {
   });
 
   test("passes an Int128 in a register pair, skipping the padding word", async (ctx) => {
-    const Padded = metadataFor("fixture.PaddedInt128");
+    const Padded = Swift.struct("fixture.PaddedInt128");
     if (Padded === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
-    const padded = Memory.alloc(Padded!.typeLayout.stride);
+    const padded = Memory.alloc(Padded!.$type.layout.stride);
     padded.writeU64(1);
     padded.add(16).writeU64(3);
     padded.add(24).writeU64(2);
     const sumPaddedInt128Async = Swift.function(module, SUM_PADDED_INT128_ASYNC);
-    expect(await sumPaddedInt128Async.call(ValueInstance.borrow(Padded!, padded), 4)).toEqual(int64(4231));
+    expect(await sumPaddedInt128Async.call(Padded!.$borrow(padded), 4)).toEqual(int64(4231));
   });
 
   test("returns an Int128 framed by integers in four registers", async (ctx) => {
-    const Framed = metadataFor("fixture.FramedInt128");
+    const Framed = Swift.struct("fixture.FramedInt128");
     if (Framed === null) ctx.skip("fixture compiled without Int128 (Swift < 6.0)");
-    const framed = Memory.alloc(Framed!.typeLayout.stride);
+    const framed = Memory.alloc(Framed!.$type.layout.stride);
     framed.writeU64(1);
     framed.add(16).writeU64(3);
     framed.add(24).writeU64(2);
     framed.add(32).writeU64(4);
     const flipFramedInt128Async = Swift.function(module, FLIP_FRAMED_INT128_ASYNC);
-    expect(await flipFramedInt128Async.call(ValueInstance.borrow(Framed!, framed))).toEqual({
+    expect(await flipFramedInt128Async.call(Framed!.$borrow(framed))).toEqual({
       head: int64(4),
       wide: (2n << 64n) | 4n,
       tail: int64(1),
@@ -98,7 +97,7 @@ describe("Swift.function on async symbols", () => {
   });
 
   test("binds a class receiver for an instance method: calc(100).addAsync(5) ⇒ 105", async () => {
-    const calc = (typeOf(metadataFor("fixture.AsyncCalc")!) as ClassType).facade.init(100);
+    const calc = Swift.class("fixture.AsyncCalc")!.init(100);
     const addAsync = Swift.function(module, ADD_ASYNC).bind(calc);
     expect(await addAsync(5)).toEqual(int64(105));
   });
