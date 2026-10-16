@@ -373,7 +373,7 @@ describe("Swift.Interceptor.attach", () => {
     });
     makeSwiftNativeFunction(driver, Int, [])();
     listener.detach();
-    expect(seenArgs).toEqual(["Swift.Int", int64(5)]);
+    expect(seenArgs).toEqual([Swift.reflect("Swift.Int"), int64(5)]);
     expect(seenRet).toEqual(int64(5));
   });
 

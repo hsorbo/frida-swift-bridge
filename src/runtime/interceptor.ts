@@ -42,7 +42,7 @@ import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { borrowedClosure } from "./closure-view.js";
 import { CallArg, CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod, SwiftFunction } from "./method.js";
-import type { SwiftMember } from "./swift-type.js";
+import { typeOf, type SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
 import type { SwiftFunctionMatch } from "./function-listing.js";
 import type { FacadeCallable } from "./facade-members.js";
@@ -636,9 +636,9 @@ function decodeSelf({ metadata }: Receiver, address: NativePointer, selfMetadata
   return metadata.kind === MetadataKind.ObjCClassWrapper ? address : decodeBorrowedValue(metadata, address);
 }
 
-// A metatype value is the type-metadata pointer itself, surfaced as its qualified name.
+// A metatype value is the type-metadata pointer itself, surfaced as its reflection.
 function decodeMetatype(metadataPointer: NativePointer): SwiftValue {
-  return typeName(new Metadata(metadataPointer));
+  return typeOf(new Metadata(metadataPointer));
 }
 
 function decodeClosure(fn: NativePointer, context: NativePointer): SwiftValue {

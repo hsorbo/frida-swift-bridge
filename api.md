@@ -72,7 +72,8 @@ The default export is the whole facade. Its members:
   [Finding types](#finding-types).
 - `Swift.reflect(spelling)`: look a type up by any spelling a listing prints,
   tuples, existentials and sugar included; returns [reflection](#reflection)
-  or `null`. See [Finding types](#finding-types).
+  or `null`. `Swift.reflect(metadata)` reflects a type-metadata pointer
+  instead, the value a metatype is. See [Finding types](#finding-types).
 - `Swift.modules`: a lazy namespace per Swift module, so
   `Swift.modules.MyApp.Robot` reaches a type or protocol without a
   module-qualified string. See [Finding types](#finding-types).
@@ -174,6 +175,21 @@ Swift.reflect("Swift.Int?");                        // EnumType: Swift.Optional<
 Swift.reflect("[Swift.Int]");                       // StructType: Swift.Array<Swift.Int>
 Swift.reflect("MyApp.Robot") === Swift.type("MyApp.Robot").$type;   // true
 Swift.reflect("(Swift.Int) -> Swift.Int");          // null
+```
+
+A metatype value is its type's metadata pointer: the type argument a raw
+`Interceptor.attach` hook on a generic function sees in a register, a `T.Type`
+parameter, a `type(of:)` result, an `Any.Type` field. `Swift.reflect(metadata)`
+takes that pointer and returns the reflection its spelling would, the object
+`Swift.type` hands out for a nominal type included. Metadata is immortal, so
+there is no ownership word as `borrowObject` and `adoptObject` have, and nothing
+is validated: a pointer that is not metadata is a wrong handle like any other.
+
+```js
+// func scale<T: Scalable>(_ x: T, by factor: Int) -> Int: x, factor, then T's metadata
+Interceptor.attach(addr, {
+    onEnter(args) { console.log(Swift.reflect(args[2]).name); }   // "Swift.Int"
+});
 ```
 
 When you know the kind, the singular forms return it precisely typed:
@@ -1178,8 +1194,9 @@ holds the context, and `$captures()` lays the context out by its capture
 descriptor into field views (`SwiftField`: `handle`, `type`, `read()`,
 `write()`), one per capture in declaration order, each valid as long as the
 closure is. A captured object reads as its reference, a captured metatype as
-its type name, and a captured closure as another view. A closure made in a
-generic function types its captures by the arguments it was made with:
+its type's [reflection](#reflection), and a captured closure as another view. A
+closure made in a generic function types its captures by the arguments it was
+made with:
 
 ```js
 const add2 = Swift.function(module, "$s5MyApp9makeAdderyS2icSiF").call(2);
@@ -1402,7 +1419,8 @@ A struct decodes to an object keyed by field name; a bridged `Array`, `Set`, or
 whose `_storage` field reads and writes as an array of its elements; a
 `Builtin.Borrow` reads as the value it refers to. A closure-typed value decodes
 to a borrowed closure view (see [Closures](#closures)), and a metatype to its
-type name. A container returned from a call arrives as a value facade;
+type's [reflection](#reflection), the object `Swift.reflect` returns. A
+container returned from a call arrives as a value facade;
 `$container()` projects it:
 
 ```js
@@ -1488,6 +1506,8 @@ The acquisition names encode the reference contract:
 - `Swift.adoptObject(handle)` — takes over an existing +1 reference.
 - `Swift.borrowClosure(closure)` — a view of a closure's two words; does not
   retain its context.
+- `Swift.reflect(metadata)` — the reflection of a type-metadata pointer;
+  metadata is immortal, so there is nothing to retain or adopt.
 - For value types: `$new(value)` initializes owned storage, `$borrow(address)`
   is a non-owning view, `$copy(address)` makes an independent owned copy, and
   `$adopt(address)` takes responsibility for already-initialized storage.

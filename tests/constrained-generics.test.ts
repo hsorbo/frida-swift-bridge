@@ -1,6 +1,6 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { requireSwift, requireDarwin } from "./swift.js";
-import { loadFixture, existentialMetadata } from "./fixtures/load.js";
+import { loadFixture, compiledType } from "./fixtures/load.js";
 
 import { findType } from "../src/reflection/registry.js";
 import { MetadataKind, instantiateGenericMetadata } from "../src/abi/metadata.js";
@@ -9,7 +9,7 @@ import { findProtocol, conformsToProtocol } from "../src/abi/protocol-conformanc
 import { getExistentialTypeMetadata } from "../src/abi/existential.js";
 import { getUnlabelledTupleTypeMetadata } from "../src/abi/tuple.js";
 
-import { metadataFor } from "../src/abi.js";
+import { metadataFor, metadataOf } from "../src/abi.js";
 import { typeName } from "../src/runtime/type-name.js";
 describe("constrained generic auto-assembly", () => {
   test("Dictionary<String,Int> instantiates without supplying a witness table", () => {
@@ -76,7 +76,7 @@ describe("constrained generic auto-assembly", () => {
 
   test("a superclass requirement accepts an existential whose superclass constraint is the class", () => {
     loadFixture();
-    const baseGreeter = existentialMetadata("fixture.baseGreeterType");
+    const baseGreeter = metadataOf(compiledType("fixture.baseGreeterType"));
     expect(typeName(metadataFor("fixture.BaseBox", [baseGreeter])!)).toBe("fixture.BaseBox<fixture.Base & fixture.Greeter>");
     const greeter = getExistentialTypeMetadata([findProtocol("fixture.Greeter")!]);
     expect(() => metadataFor("fixture.BaseBox", [greeter])).toThrow(/superclass/);

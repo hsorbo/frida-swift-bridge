@@ -1,9 +1,8 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture, fixtureExport } from "./fixtures/load.js";
+import { loadFixture, fixtureExport, compiledType } from "./fixtures/load.js";
 
-import { Swift, TupleType, EnumType, StructType, SwiftType } from "../src/index.js";
+import { Swift, TupleType, EnumType, StructType, MetatypeType, SwiftType } from "../src/index.js";
 
-import { metadataOf } from "../src/abi.js";
 const GENERIC_IDENTITY = "$s7fixture15genericIdentityyxxlF";
 
 describe("Swift.reflect", () => {
@@ -47,10 +46,8 @@ describe("Swift.reflect", () => {
   });
 
   test("builds the metadata the compiler's (any Greeter).self and Any.self are", () => {
-    const RawPointer = Swift.type("Swift.UnsafeRawPointer")!;
-    const compiled = (accessor: string) => Swift.NativeFunction(fixtureExport(accessor), RawPointer, [])() as NativePointer;
-    expect(metadataOf(Swift.reflect("any fixture.Greeter")!).handle.equals(compiled("fixture.greeterType"))).toBe(true);
-    expect(metadataOf(Swift.reflect("Any")!).handle.equals(compiled("fixture.anyType"))).toBe(true);
+    expect(Swift.reflect("any fixture.Greeter")).toBe(compiledType("fixture.greeterType"));
+    expect(Swift.reflect("Any")).toBe(compiledType("fixture.anyType"));
   });
 
   test("an unknown, function or metatype spelling is null", () => {
@@ -77,5 +74,39 @@ describe("Swift.reflect", () => {
     const ada = Swift.struct("fixture.PoliteGreeter")!.$new({ name: "Ada" });
     expect(Swift.function(module, GENERIC_IDENTITY, { typeArguments: [greeter] }).call(ada)).toEqual({ name: "Ada" });
     expect(Swift.function(module, GENERIC_IDENTITY, { typeArguments: [Swift.reflect("Swift.Int?")!] }).call(null)).toBeNull();
+  });
+});
+
+describe("Swift.reflect(metadata)", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("a raw hook's T.Type argument and type-argument register are the type Swift.type returns", () => {
+    const seen: NativePointer[] = [];
+    const listener = Interceptor.attach(fixtureExport("fixture.storeMetatypeCapturing"), {
+      onEnter(args) {
+        seen.push(args[0], args[1]);
+      },
+    });
+    new NativeFunction(fixtureExport("fixture.triggerMetatypeCapturing"), "void", [])();
+    listener.detach();
+    const [metatypeArgument, typeArgument] = seen;
+    const Bool = Swift.type("Swift.Bool")!.$type;
+    expect(Swift.reflect(typeArgument)).toBe(Bool);
+    expect(Swift.reflect(metatypeArgument)).toBe(Bool);
+  });
+
+  test("a metatype a fixture accessor returns is the structural reflection of its kind", () => {
+    expect(compiledType("fixture.holderIntType").kind).toBe("existential");
+    const greeterMetatype = compiledType("fixture.greeterMetatypeType");
+    expect(greeterMetatype instanceof MetatypeType).toBe(true);
+    expect((greeterMetatype as MetatypeType).instanceType).toBe(Swift.reflect("any fixture.Greeter"));
+  });
+
+  test("a metatype-typed field reads as reflection", () => {
+    const tagged = Swift.class("fixture.TypeTagged")!.init();
+    const Robot = Swift.type("fixture.Robot")!.$type;
+    expect(tagged.$fields).toEqual({ tag: int64(1), any: Swift.reflect("Swift.String"), robot: Robot });
+    expect(tagged.$field("robot").read()).toBe(Robot);
+    expect(tagged.$field("any").read()).toBe(Swift.type("Swift.String")!.$type);
   });
 });

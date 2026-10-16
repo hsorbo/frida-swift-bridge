@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { requireSwift, requireSymbolTable } from "./swift.js";
-import { fixtureExport, loadFixture, loadFixtureSyms, existentialMetadata } from "./fixtures/load.js";
+import { fixtureExport, loadFixture, loadFixtureSyms, compiledType } from "./fixtures/load.js";
 import {
   readKeyPathBuffer,
   resolveKeyPathNames,
@@ -210,7 +210,7 @@ describe("resolveKeyPathNames › protocol requirements", () => {
     const mod = loadFixtureSyms();
     const tag = readKeyPathBuffer(keyPath("fixturesyms.keyPathHolderTag", mod));
     expect((tag.components[0] as ComputedKeyPathComponent).idKind).toBe("vtableOffset");
-    const root = existentialMetadata("fixturesyms.holderIntType", mod);
+    const root = metadataOf(compiledType("fixturesyms.holderIntType", mod));
     expect(root.kind).toBe(MetadataKind.ExtendedExistential);
     expect(resolveKeyPathNames(tag.components, root)).toEqual(["tag"]);
   });

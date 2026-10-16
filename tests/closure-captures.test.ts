@@ -138,12 +138,12 @@ describe("closure captures", () => {
     expect((object.read() as NativePointer).equals(before)).toBe(true);
   });
 
-  test("a captured metatype reads as its type name", () => {
+  test("a captured metatype reads as its type", () => {
     new NativeFunction(fixtureExport("triggerMetatypeCapturing"), "void", [])();
     const context = fixtureContext("genericCapturingContext");
     const [type]: SwiftField[] = Swift.borrowClosure(context).$captures();
     expect(type.type.name).toBe("Swift.Bool.Type");
-    expect(type.read()).toBe("Swift.Bool");
+    expect(type.read()).toBe(Swift.reflect("Swift.Bool"));
   });
 
   test("a closure without captures has none; a context without a capture descriptor is refused", () => {

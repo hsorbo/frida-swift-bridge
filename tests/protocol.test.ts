@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms, fixtureExport, compiledType } from "./fixtures/load.js";
 import { requireSymbolTable } from "./swift.js";
 
 import { MetadataKind, ClassType, NominalType, Protocol, ProtocolComposition, ProtocolRequirementKind, WitnessTable, readString, readValue, makeSwiftNativeFunction, metadataFor, typeOf } from "../src/abi.js";
@@ -154,24 +154,20 @@ describe("ProtocolComposition", () => {
     expect(greeter.numProtocols).toBe(1);
     expect(greeter.isClassOnly).toBe(false);
     expect(greeter.metadata.kind).toBe(MetadataKind.Existential);
-    expect(greeter.metadata.handle.equals(existentialMetadata("fixture.greeterType"))).toBe(
-      true
-    );
+    expect(compiledType("fixture.greeterType")).toBe(typeOf(greeter.metadata));
   });
 
   test("multi-protocol composition matches `any Greeter & Aged`", () => {
     const ga = ProtocolComposition.fromSignature("fixture.Greeter & fixture.Aged");
     expect(ga.numProtocols).toBe(2);
     expect(ga.isClassOnly).toBe(false);
-    expect(ga.metadata.handle.equals(existentialMetadata("fixture.greeterAgedType"))).toBe(
-      true
-    );
+    expect(compiledType("fixture.greeterAgedType")).toBe(typeOf(ga.metadata));
   });
 
   test("a class-only member makes the whole composition class-only", () => {
     const named = ProtocolComposition.fromSignature("fixture.Named");
     expect(named.isClassOnly).toBe(true);
-    expect(named.metadata.handle.equals(existentialMetadata("fixture.namedType"))).toBe(true);
+    expect(compiledType("fixture.namedType")).toBe(typeOf(named.metadata));
   });
 
   test("rejects an unknown protocol in the signature", () => {

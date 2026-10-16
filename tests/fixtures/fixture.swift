@@ -1427,6 +1427,14 @@ public func makeConcreteSub(_ tag: Int, _ extra: Int) -> ConcreteSub {
 public func metatypeIdentity<T>(_ t: T.Type, _ x: T) -> T { x }
 public func makeMetatypeInt() -> Int { metatypeIdentity(Int.self, 5) }
 
+// Stored metatypes: an existential metatype and a class metatype are both one thick metadata pointer.
+public final class TypeTagged {
+    public var tag = 1
+    public var any: Any.Type = String.self
+    public var robot: Robot.Type = Robot.self
+    public init() {}
+}
+
 public func anyType() -> UnsafeRawPointer { unsafeBitCast(Any.self as Any.Type, to: UnsafeRawPointer.self) }
 public func greeterType() -> UnsafeRawPointer { unsafeBitCast((any Greeter).self as Any.Type, to: UnsafeRawPointer.self) }
 public func greeterAgedType() -> UnsafeRawPointer { unsafeBitCast((any Greeter & Aged).self as Any.Type, to: UnsafeRawPointer.self) }

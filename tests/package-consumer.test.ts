@@ -166,7 +166,9 @@ function typesAreAcceptedAsReflectionOrFacadeAtCompileTime(cls: SwiftClass, info
   o.$method("m", { typeArguments: [cls, info] });
   const metadata: Metadata = metadataOf(cls);
   const descriptor: ContextDescriptor = descriptorOf(info);
-  void [metadata, descriptor];
+  const spelled: SwiftType | null = Swift.reflect("");
+  const reflected: SwiftType = Swift.reflect(NULL);
+  void [metadata, descriptor, spelled, reflected];
 }
 
 function rawMetadataStaysUnderAbi(type: SwiftType) {

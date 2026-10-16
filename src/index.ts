@@ -21,8 +21,10 @@ import {
   typeFromDescriptor,
   nominalTypeNamed,
   typeNamed,
+  typeOf,
   swiftFunction,
 } from "./runtime/swift-type.js";
+import { Metadata } from "./abi/metadata.js";
 import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum } from "./runtime/type-facade.js";
 import { asSwiftObject, SwiftClassObject } from "./runtime/object-facade.js";
 import { ClassInstance } from "./abi/heap-object.js";
@@ -162,6 +164,14 @@ export {
   SwiftValueBoundMethod,
 } from "./runtime/object-facade.js";
 
+// A metatype value is its type's metadata pointer: the type argument a raw hook sees in a register,
+// a T.Type parameter, a type(of:) result. Metadata is immortal, so there is no ownership to take.
+function reflect(spelling: string): SwiftType | null;
+function reflect(metadata: NativePointer): SwiftType;
+function reflect(spellingOrMetadata: string | NativePointer): SwiftType | null {
+  return typeof spellingOrMetadata === "string" ? typeNamed(spellingOrMetadata) : typeOf(new Metadata(spellingOrMetadata));
+}
+
 export const Swift = {
   get available(): boolean {
     return SWIFT_HOST_SUPPORTED && Process.findModuleByName(LIBSWIFT_CORE_NAME) !== null;
@@ -184,9 +194,7 @@ export const Swift = {
     return nominalTypeNamed(name)?.facade ?? null;
   },
 
-  reflect(spelling: string): SwiftType | null {
-    return typeNamed(spelling);
-  },
+  reflect,
 
   enumerateTypes(filter?: NameFilter): Generator<SwiftTypeFacade> {
     return facadesOf<NominalType>(swiftTypes(filter));

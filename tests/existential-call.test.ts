@@ -1,5 +1,5 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { fixtureExport, compiledType } from "./fixtures/load.js";
 
 import { readValue, readString, metadataFor, metadataOf } from "../src/abi.js";
 import { shouldPassIndirectly } from "../src/runtime/calling-convention.js";
@@ -34,7 +34,7 @@ describe("existential by-value calling convention", () => {
   });
 
   test("returns a parameterized-protocol existential by value (extended, opaque → indirect)", () => {
-    const Holder = existentialMetadata("fixture.holderIntType");
+    const Holder = metadataOf(compiledType("fixture.holderIntType"));
     expect(shouldPassIndirectly(Holder)).toBe(true);
     const make = makeSwiftNativeFunction(fixtureExport("fixture.makeHolderInt"), Holder, []);
     expect(readValue(Holder, make()!)).toEqual({ item: int64(42) });

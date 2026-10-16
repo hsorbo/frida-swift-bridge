@@ -15,6 +15,7 @@ import {
 } from "./existential.js";
 import { ClassMetadata, classMetadataOf, enumerateClassFields } from "./class-metadata.js";
 import { typeName } from "../runtime/type-name.js";
+import { typeOf, SwiftType } from "../runtime/swift-type.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import { borrowedClosure } from "../runtime/closure-view.js";
 import type { SwiftClosureValue } from "../runtime/method.js";
@@ -41,6 +42,7 @@ export type SwiftValue =
   | { [field: string]: SwiftValue }
   | SwiftValue[]
   | SwiftClosureValue
+  | SwiftType
   | null;
 
 const U64_MASK = (1n << 64n) - 1n;
@@ -303,7 +305,7 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
       return readExtendedExistential(metadata, address);
     case MetadataKind.Metatype:
     case MetadataKind.ExistentialMetatype:
-      return typeName(new Metadata(address.readPointer()));
+      return typeOf(new Metadata(address.readPointer()));
     case MetadataKind.Function:
       return readFunctionType(metadata).convention === FunctionMetadataConvention.Swift
         ? borrowedClosure(address.readPointer().strip(), address.readPointer(Process.pointerSize))
@@ -356,6 +358,9 @@ export function swiftValueEquals(a: SwiftValue, b: SwiftValue): boolean {
   }
   if (a instanceof UInt64 || b instanceof UInt64) {
     return a instanceof UInt64 && b instanceof UInt64 && a.equals(b);
+  }
+  if (a instanceof SwiftType || b instanceof SwiftType) {
+    return a === b;
   }
   if (Array.isArray(a) || Array.isArray(b)) {
     return (
@@ -444,7 +449,7 @@ function readExtendedExistential(metadata: Metadata, address: NativePointer): Sw
       return readValue(type, value);
     }
     case ExtendedExistentialSpecialKind.Metatype:
-      return typeName(new Metadata(address.readPointer())); // inline word is the stored Metadata*
+      return typeOf(new Metadata(address.readPointer())); // inline word is the stored Metadata*
     default:
       throw new Error("ExtendedExistential: only opaque, class, and metatype special kinds are supported");
   }
