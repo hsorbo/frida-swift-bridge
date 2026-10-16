@@ -305,6 +305,7 @@ test("published entry points resolve as runtime values", () => {
   expect(typeof Swift.adoptObject).toBe("function");
   expect(typeof Swift.borrowClosure).toBe("function");
   expect(typeof Swift.NativeFunction).toBe("function");
+  expect(typeof Swift.reflect).toBe("function");
   expect(typeof Swift.closure).toBe("function");
   expect(typeof Swift.demangle).toBe("function");
   expect(typeof Swift.Interceptor.attach).toBe("function");

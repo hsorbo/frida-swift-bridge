@@ -14,11 +14,13 @@ import { symbolicate } from "./runtime/symbolication.js";
 import { SwiftInterceptor } from "./runtime/interceptor.js";
 import {
   NominalType,
+  type SwiftType,
   ClassType,
   StructType,
   EnumType,
   typeFromDescriptor,
   nominalTypeNamed,
+  typeNamed,
   swiftFunction,
 } from "./runtime/swift-type.js";
 import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum } from "./runtime/type-facade.js";
@@ -180,6 +182,10 @@ export const Swift = {
 
   type(name: string): SwiftTypeFacade | null {
     return nominalTypeNamed(name)?.facade ?? null;
+  },
+
+  reflect(spelling: string): SwiftType | null {
+    return typeNamed(spelling);
   },
 
   enumerateTypes(filter?: NameFilter): Generator<SwiftTypeFacade> {

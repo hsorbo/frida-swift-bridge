@@ -1,8 +1,8 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms, fixtureExport } from "./fixtures/load.js";
 import { requireSwift, requireSymbolTable } from "./swift.js";
 
-import { Metadata, Protocol, projectExistentialValue, BoundMethod, metadataFor } from "../src/abi.js";
+import { Metadata, Protocol, projectExistentialValue, BoundMethod, metadataFor, metadataOf } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
@@ -24,7 +24,7 @@ describe("async witness-table method invocation", () => {
     requireSymbolTable(ctx);
     requireSwift();
     const mod = loadFixtureSyms();
-    const AsyncScaler = existentialMetadata("fixturesyms.asyncScalerType", mod);
+    const AsyncScaler = metadataOf(Swift.reflect("any fixturesyms.AsyncScaler")!);
     const container = store(mod, "fixturesyms.storeAsyncScaler", AsyncScaler);
     const { type, value } = projectExistentialValue(AsyncScaler, container);
 
@@ -39,7 +39,7 @@ describe("async witness-table method invocation", () => {
     requireSymbolTable(ctx);
     requireSwift();
     const mod = loadFixtureSyms();
-    const AsyncScaler = existentialMetadata("fixturesyms.asyncScalerType", mod);
+    const AsyncScaler = metadataOf(Swift.reflect("any fixturesyms.AsyncScaler")!);
     const container = store(mod, "fixturesyms.storeAsyncScaler", AsyncScaler);
     const { type, value } = projectExistentialValue(AsyncScaler, container);
 
@@ -50,7 +50,7 @@ describe("async witness-table method invocation", () => {
 
   test("an async default on a stripped conformance is refused rather than guessed (TripleScaler : AsyncScaler)", () => {
     const mod = loadFixture();
-    const AsyncScaler = existentialMetadata("fixture.asyncScalerType", mod);
+    const AsyncScaler = metadataOf(Swift.reflect("any fixture.AsyncScaler")!);
     const container = store(mod, "fixture.storeAsyncScaler", AsyncScaler);
     const { type, value } = projectExistentialValue(AsyncScaler, container);
 

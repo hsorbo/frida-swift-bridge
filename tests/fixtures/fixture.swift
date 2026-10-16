@@ -824,6 +824,7 @@ public func boxAnyInt(_ n: Int) -> Any { n }
 public func unboxAnyInt(_ x: Any) -> Int { x as! Int }
 public func makeGreeterExistential() -> any Greeter { PoliteGreeter(name: "Ada") }
 public func greetExistential(_ g: any Greeter) -> String { g.greet() }
+public func greetCounted(_ g: any Greeter) -> (String, Int) { let s = g.greet(); return (s, s.count) }
 
 public protocol Aged { var age: Int { get } }
 public struct Person: Greeter, Aged {

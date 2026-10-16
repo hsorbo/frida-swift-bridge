@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { fixtureExport } from "./fixtures/load.js";
 
-import { Metadata, readValue, readObject, existentialRepresentation, metadataFor } from "../src/abi.js";
+import { Metadata, readValue, readObject, existentialRepresentation, metadataFor, metadataOf } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
@@ -20,13 +20,13 @@ function store(fn: string, metadata: Metadata): NativePointer {
 
 describe("readValue existential", () => {
   test("decodes an inline value type from an Any container", () => {
-    const Any_ = existentialMetadata("fixture.anyType");
+    const Any_ = metadataOf(Swift.reflect("Any")!);
     expect(existentialRepresentation(Any_)).toBe("opaque");
     expect(readValue(Any_, store("fixture.storeAnyInt", Any_))).toEqual(int64(42));
   });
 
   test("decodes an out-of-line (boxed) value type from an Any container", () => {
-    const Any_ = existentialMetadata("fixture.anyType");
+    const Any_ = metadataOf(Swift.reflect("Any")!);
     expect(readValue(Any_, store("fixture.storeAnyBig", Any_))).toEqual({
       a: int64(1),
       b: int64(2),
@@ -37,7 +37,7 @@ describe("readValue existential", () => {
   });
 
   test("decodes a value type behind a protocol existential", () => {
-    const Greeter = existentialMetadata("fixture.greeterType");
+    const Greeter = metadataOf(Swift.reflect("any fixture.Greeter")!);
     expect(existentialRepresentation(Greeter)).toBe("opaque");
     expect(readValue(Greeter, store("fixture.storeGreeter", Greeter))).toEqual({
       name: "Ada",
@@ -45,7 +45,7 @@ describe("readValue existential", () => {
   });
 
   test("decodes a class reference from a class-constrained existential", () => {
-    const Named = existentialMetadata("fixture.namedType");
+    const Named = metadataOf(Swift.reflect("any fixture.Named")!);
     expect(existentialRepresentation(Named)).toBe("class");
     const ref = readValue(Named, store("fixture.storeNamed", Named)) as NativePointer;
     expect(ref.isNull()).toBe(false);
@@ -53,7 +53,7 @@ describe("readValue existential", () => {
   });
 
   test("decodes the boxed value behind an Error existential", () => {
-    const Error_ = existentialMetadata("fixture.errorType");
+    const Error_ = metadataOf(Swift.reflect("any Swift.Error")!);
     expect(existentialRepresentation(Error_)).toBe("error");
     expect(readValue(Error_, store("fixture.storeError", Error_))).toEqual({ code: int64(7) });
   });

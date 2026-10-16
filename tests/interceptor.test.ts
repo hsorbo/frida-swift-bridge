@@ -1,11 +1,11 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { fixtureExport, existentialMetadata, loadFixture, loadFixtureSyms } from "./fixtures/load.js";
+import { fixtureExport, loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
 import { Swift, isSwiftObject, type SwiftValue, type SwiftObject, type CallResult, type SwiftInvocationContext } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { requireSymbolTable } from "./swift.js";
 
-import { metadataFor, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
+import { metadataFor, metadataOf, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
 
 const MAKE_LINK = "$s7fixture8makeLinkyAA0C0VSSF";
 const LINK_ADDRESS = "$s7fixture11linkAddressySSAA4LinkVF";
@@ -582,7 +582,7 @@ describe("Swift.Interceptor.attach", () => {
 
   test("decodes a named-protocol existential argument, projecting the dynamic value", () => {
     const String_ = metadataFor("Swift.String")!;
-    const Greeter = existentialMetadata("fixture.greeterType");
+    const Greeter = metadataOf(Swift.reflect("any fixture.Greeter")!);
     const g = makeSwiftNativeFunction(fixtureExport("fixture.makeGreeterExistential"), Greeter, [])()!;
     const addr = fixtureExport("fixture.greetExistential");
     let seenArgs: SwiftValue[] | null = null;
@@ -603,7 +603,7 @@ describe("Swift.Interceptor.attach", () => {
 
   test("decodes a protocol-composition existential argument, projecting the dynamic value", () => {
     const String_ = metadataFor("Swift.String")!;
-    const GreeterAged = existentialMetadata("fixture.greeterAgedType");
+    const GreeterAged = metadataOf(Swift.reflect("any fixture.Greeter & fixture.Aged")!);
     const v = makeSwiftNativeFunction(fixtureExport("fixture.makeGreeterAged"), GreeterAged, [])()!;
     const addr = fixtureExport("fixture.describeGreeterAged");
     let seenArgs: SwiftValue[] | null = null;

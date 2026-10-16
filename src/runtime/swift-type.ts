@@ -7,7 +7,7 @@ import { conformancesOf, witnessTableOf } from "../abi/protocol-conformance.js";
 import { ProtocolRequirement, ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { WitnessTable } from "../abi/witness-table.js";
-import type { SwiftFunctionSignature } from "./type-expr.js";
+import { parseTypeExpr, type SwiftFunctionSignature } from "./type-expr.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
@@ -820,6 +820,20 @@ export function nominalTypeNamed(name: string): NominalType | null {
   const metadata = resolveType(owner.fullName);
   const type = metadata === null ? null : typeOf(metadata);
   return type instanceof NominalType ? type : null;
+}
+
+// A nominal name meets Swift.type's reflection, a protocol name its existential; a structural
+// spelling is wrapped from its metadata, which a function or metatype spelling has none of.
+export function typeNamed(spelling: string): SwiftType | null {
+  const parsed = parseTypeExpr(spelling);
+  if (parsed === null || (parsed.kind === "nominal" && parsed.args.length === 0)) {
+    return nominalTypeNamed(spelling) ?? reflected(resolveType(spelling));
+  }
+  return reflected(resolveParsedType(parsed, () => null));
+}
+
+function reflected(metadata: Metadata | null): SwiftType | null {
+  return metadata === null ? null : typeOf(metadata);
 }
 
 // A non-generic nominal type has one wrapper, shared by its descriptor and its metadata; every

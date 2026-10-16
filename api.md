@@ -70,6 +70,9 @@ The default export is the whole facade. Its members:
 - `Swift.class(name)`, `Swift.struct(name)`, `Swift.enum(name)`: like
   `Swift.type`, but checked to the named kind. See
   [Finding types](#finding-types).
+- `Swift.reflect(spelling)`: look a type up by any spelling a listing prints,
+  tuples, existentials and sugar included; returns [reflection](#reflection)
+  or `null`. See [Finding types](#finding-types).
 - `Swift.modules`: a lazy namespace per Swift module, so
   `Swift.modules.MyApp.Robot` reaches a type or protocol without a
   module-qualified string. See [Finding types](#finding-types).
@@ -151,6 +154,26 @@ const KeyedInt = Swift.type("MyApp.Keyed<Swift.Int>"); // a specialization
 KeyedInt.echo(21);                                     // 21
 Keyed.echo(21);                                        // throws: needs MyApp.Keyed's type arguments
 Keyed.$type.specializations().map(t => t.$type.name);  // ["MyApp.Keyed<Swift.Int>", ...]
+```
+
+A tuple, an existential or a sugared type has no facade, only reflection.
+`Swift.reflect(spelling)` resolves any spelling a listing prints, the forms a
+member's `argTypeNames` and `returnTypeName` use, to its
+[reflection](#reflection), or `null`. A nominal name yields the object
+`Swift.type(name).$type` is, so the two never disagree; a protocol name or
+`any P & Q` yields the existential, `Any` included; `T?` an `EnumType`, `[T]`
+a `StructType` and `(A, B)` a `TupleType`. The result goes wherever the bridge
+takes a type: `Swift.NativeFunction` and `{ typeArguments }`. A function or
+metatype spelling has no metadata the bridge can build and is `null`, as is a
+spelling naming a type that isn't loaded.
+
+```js
+Swift.reflect("(Swift.Int, Swift.String)");        // TupleType
+Swift.reflect("any MyApp.Greeter & MyApp.Aged");    // existential
+Swift.reflect("Swift.Int?");                        // EnumType: Swift.Optional<Swift.Int>
+Swift.reflect("[Swift.Int]");                       // StructType: Swift.Array<Swift.Int>
+Swift.reflect("MyApp.Robot") === Swift.type("MyApp.Robot").$type;   // true
+Swift.reflect("(Swift.Int) -> Swift.Int");          // null
 ```
 
 When you know the kind, the singular forms return it precisely typed:
@@ -424,10 +447,11 @@ Other reflection you may encounter: `TupleType` (`elements`, each
 (`referentType`: a `Builtin.Borrow` view of its referent), and the foreign/ObjC
 bridging wrappers `ObjCClassWrapperType` (`objcClass`), `ForeignClassType`,
 `ForeignReferenceType`. These describe types with no Swift members of their
-own, so they have no facade.
+own, so they have no facade; `Swift.reflect` names one from its spelling (see
+[Finding types](#finding-types)).
 
-One type is one reflection object and one facade: `Swift.type`, `Swift.modules`,
-an instance's `$type` and `typeOf` under `/abi` all meet at the same objects,
+One type is one reflection object and one facade: `Swift.type`, `Swift.reflect`,
+`Swift.modules`, an instance's `$type` and `typeOf` under `/abi` all meet at the same objects,
 and each specialization of a generic type is its own. Wherever the bridge takes
 a type as input (`Swift.NativeFunction`, `typeArguments`, `metadataOf` and
 `descriptorOf` under `/abi`), a facade and its reflection are interchangeable.
@@ -947,8 +971,11 @@ ga.protocols;       // [Protocol, Protocol]
 ga.isClassOnly;     // false
 ```
 
-Requirements, witness tables, and the existential metadata of a composition are
-not part of the stable root; they live under [`/abi`](#going-lower-the-abi-entry-point).
+Requirements and witness tables are not part of the stable root; they live
+under [`/abi`](#going-lower-the-abi-entry-point). The existential type a
+composition describes is reflection, named from the root:
+`Swift.reflect("any MyApp.Greeter & MyApp.Aged")` (see
+[Finding types](#finding-types)).
 
 Calling a protocol requirement on a concrete instance is just a normal method
 call — the facade dispatches through the value's witness. When a function takes
@@ -985,11 +1012,18 @@ const rename = Swift.NativeFunction(renameAddr, null, [Robot, String]);
 rename(robot, "new");     // null
 ```
 
-An existential type (`any P`, `any P & Q`) is reached through
-`ProtocolComposition` under `/abi`: `typeOf(composition.metadata)`. Such a
-result is projected to its dynamic value, as a method's is, and such an
-argument takes a value or object facade of a conforming type, boxed for the
-call and released after it.
+A type with no facade, a tuple, an existential (`any P`, `any P & Q`), `T?`
+or `[T]`, is named with `Swift.reflect` (see [Finding types](#finding-types)).
+An existential result is projected to its dynamic value, as a method's is, and
+an existential argument takes a value or object facade of a conforming type,
+boxed for the call and released after it; a tuple result decodes to an array:
+
+```js
+const Greeter = Swift.reflect("any MyApp.Greeter");
+const pair = Swift.reflect("(Swift.String, Swift.Int)");
+const greetCounted = Swift.NativeFunction(countedAddr, pair, [Greeter]);
+greetCounted(Swift.type("MyApp.PoliteGreeter").$new({ name: "Ada" }));   // ["Hello, Ada", 10]
+```
 
 The only option the stable wrapper accepts is `{ throws: true }` for a Swift
 `throws` function (see [Errors](#errors)). Consuming (`__owned`) and `inout`

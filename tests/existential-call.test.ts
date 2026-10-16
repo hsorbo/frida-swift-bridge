@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { fixtureExport, existentialMetadata } from "./fixtures/load.js";
 
-import { readValue, readString, metadataFor } from "../src/abi.js";
+import { readValue, readString, metadataFor, metadataOf } from "../src/abi.js";
 import { shouldPassIndirectly } from "../src/runtime/calling-convention.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
@@ -15,7 +15,7 @@ function intArg(n: number): NativePointer {
 describe("existential by-value calling convention", () => {
   test("returns then accepts Any by value (opaque, address-only → indirect)", () => {
     const Int = metadataFor("Swift.Int")!;
-    const Any_ = existentialMetadata("fixture.anyType");
+    const Any_ = metadataOf(Swift.reflect("Any")!);
     const box = makeSwiftNativeFunction(fixtureExport("fixture.boxAnyInt"), Any_, [Int]);
     const any = box(intArg(42))!;
     expect(readValue(Any_, any)).toEqual(int64(42));
@@ -25,7 +25,7 @@ describe("existential by-value calling convention", () => {
 
   test("returns then accepts a protocol existential by value (indirect, witness-table container)", () => {
     const String_ = metadataFor("Swift.String")!;
-    const Greeter = existentialMetadata("fixture.greeterType");
+    const Greeter = metadataOf(Swift.reflect("any fixture.Greeter")!);
     const make = makeSwiftNativeFunction(fixtureExport("fixture.makeGreeterExistential"), Greeter, []);
     const g = make()!;
     expect(readValue(Greeter, g)).toEqual({ name: "Ada" });

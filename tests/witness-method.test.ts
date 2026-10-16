@@ -1,8 +1,8 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { loadFixture, loadFixtureSyms, fixtureExport, existentialMetadata } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms, fixtureExport } from "./fixtures/load.js";
 import { requireSymbolTable } from "./swift.js";
 
-import { Metadata, Protocol, projectExistentialValue, readProtocolRequirements, bindWitnessMethodAt, metadataFor, ValueInstance } from "../src/abi.js";
+import { Metadata, Protocol, projectExistentialValue, readProtocolRequirements, bindWitnessMethodAt, metadataFor, metadataOf, ValueInstance } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
@@ -23,7 +23,7 @@ describe("witness-table method invocation", () => {
   test("calls a value-existential requirement by name (opaque, PoliteGreeter : Greeter)", (ctx) => {
     requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
-    const Greeter = existentialMetadata("fixturesyms.greeterType", mod);
+    const Greeter = metadataOf(Swift.reflect("any fixturesyms.Greeter")!);
     const container = store(mod, "fixturesyms.storeGreeter", Greeter);
     const { type, value } = projectExistentialValue(Greeter, container);
 
@@ -35,7 +35,7 @@ describe("witness-table method invocation", () => {
   test("reads a class-existential requirement by name (Widget : Named)", (ctx) => {
     requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
-    const Named = existentialMetadata("fixturesyms.namedType", mod);
+    const Named = metadataOf(Swift.reflect("any fixturesyms.Named")!);
     const container = store(mod, "fixturesyms.storeNamed", Named);
     const { type, value } = projectExistentialValue(Named, container);
 
@@ -47,7 +47,7 @@ describe("witness-table method invocation", () => {
   test("dispatches one concrete value through two unrelated protocols (Person : Greeter, Aged)", (ctx) => {
     requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
-    const GreeterAged = existentialMetadata("fixturesyms.greeterAgedType", mod);
+    const GreeterAged = metadataOf(Swift.reflect("any fixturesyms.Greeter & fixturesyms.Aged")!);
     const make = makeSwiftNativeFunction(fixtureExport("fixturesyms.makeGreeterAged", mod), GreeterAged, []);
     const container = make()!;
     const { type, value } = projectExistentialValue(GreeterAged, container);
@@ -108,7 +108,7 @@ describe("witness-table method invocation", () => {
 
   test("unknown requirement name throws", () => {
     const mod = loadFixtureSyms();
-    const Greeter = existentialMetadata("fixturesyms.greeterType", mod);
+    const Greeter = metadataOf(Swift.reflect("any fixturesyms.Greeter")!);
     const container = store(mod, "fixturesyms.storeGreeter", Greeter);
     const { type, value } = projectExistentialValue(Greeter, container);
 
@@ -120,7 +120,7 @@ describe("witness-table method invocation", () => {
   // No name recovery needed, so this works against fixture's stripped conformance.
   test("bindWitnessMethodAt invokes a requirement slot with a manually-supplied signature", () => {
     const mod = loadFixture();
-    const Greeter = existentialMetadata("fixture.greeterType", mod);
+    const Greeter = metadataOf(Swift.reflect("any fixture.Greeter")!);
     const container = store(mod, "fixture.storeGreeter", Greeter);
     const { type, value } = projectExistentialValue(Greeter, container);
 
@@ -134,7 +134,7 @@ describe("witness-table method invocation", () => {
 
   test("a stripped conformance's witness thunk is unrecoverable, so name-based dispatch throws", () => {
     const mod = loadFixture();
-    const Greeter = existentialMetadata("fixture.greeterType", mod);
+    const Greeter = metadataOf(Swift.reflect("any fixture.Greeter")!);
     const container = store(mod, "fixture.storeGreeter", Greeter);
     const { type, value } = projectExistentialValue(Greeter, container);
 

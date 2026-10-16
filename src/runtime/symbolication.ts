@@ -174,6 +174,9 @@ function resolveProtocolExistential(name: string): Metadata | null {
 }
 
 function existentialOf(members: TypeExpr[]): Metadata | null {
+  if (members.length === 1 && members[0].text === "Any") {
+    return getExistentialTypeMetadata([]);
+  }
   const protocols: ContextDescriptor[] = [];
   for (const member of members) {
     const protocol = member.kind === "nominal" && member.args.length === 0 ? findProtocol(member.name) : null;

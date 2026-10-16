@@ -11,7 +11,7 @@ import type { StoredKeyPathComponent, ComputedKeyPathComponent } from "../src/ab
 import { typeName } from "../src/runtime/type-name.js";
 import { Swift } from "../src/index.js";
 
-import { metadataFor } from "../src/abi.js";
+import { metadataFor, metadataOf } from "../src/abi.js";
 import { MetadataKind } from "../src/abi/metadata.js";
 function keyPath(accessor: string, mod: Module = loadFixture()): NativePointer {
   return new NativeFunction(fixtureExport(accessor, mod), "pointer", [])() as NativePointer;
@@ -185,7 +185,7 @@ describe("resolveKeyPathNames › protocol requirements", () => {
     const mod = loadFixtureSyms();
     const speed = readKeyPathBuffer(keyPath("fixturesyms.keyPathVehicleSpeed", mod));
     expect((speed.components[0] as ComputedKeyPathComponent).idKind).toBe("vtableOffset");
-    const root = existentialMetadata("fixturesyms.vehicleType", mod);
+    const root = metadataOf(Swift.reflect("any fixturesyms.Vehicle")!);
     expect(resolveKeyPathNames(speed.components, root)).toEqual(["speed"]);
   });
 
@@ -193,7 +193,7 @@ describe("resolveKeyPathNames › protocol requirements", () => {
     requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const wheels = readKeyPathBuffer(keyPath("fixturesyms.keyPathVehicleWheels", mod));
-    const root = existentialMetadata("fixturesyms.vehicleType", mod);
+    const root = metadataOf(Swift.reflect("any fixturesyms.Vehicle")!);
     expect(resolveKeyPathNames(wheels.components, root)).toEqual(["wheels"]);
   });
 
@@ -201,7 +201,7 @@ describe("resolveKeyPathNames › protocol requirements", () => {
     requireSymbolTable(ctx);
     const mod = loadFixtureSyms();
     const label = readKeyPathBuffer(keyPath("fixturesyms.keyPathNamedLabel", mod));
-    const root = existentialMetadata("fixturesyms.namedType", mod);
+    const root = metadataOf(Swift.reflect("any fixturesyms.Named")!);
     expect(resolveKeyPathNames(label.components, root)).toEqual(["label"]);
   });
 
@@ -218,13 +218,13 @@ describe("resolveKeyPathNames › protocol requirements", () => {
   test("leaves the requirement unnamed when the root is a multi-protocol composition", () => {
     const mod = loadFixtureSyms();
     const speed = readKeyPathBuffer(keyPath("fixturesyms.keyPathVehicleSpeed", mod));
-    const composition = existentialMetadata("fixturesyms.greeterAgedType", mod);
+    const composition = metadataOf(Swift.reflect("any fixturesyms.Greeter & fixturesyms.Aged")!);
     expect(resolveKeyPathNames(speed.components, composition)).toEqual([null]);
   });
 
   test("leaves the requirement unnamed when the conformance witness thunks are stripped", () => {
     const speed = readKeyPathBuffer(keyPath("fixture.keyPathVehicleSpeed"));
-    const root = existentialMetadata("fixture.vehicleType");
+    const root = metadataOf(Swift.reflect("any fixture.Vehicle")!);
     expect(resolveKeyPathNames(speed.components, root)).toEqual([null]);
   });
 });
