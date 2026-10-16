@@ -1,4 +1,5 @@
 import { Metadata, MetadataKind, getMetadata } from "../abi/metadata.js";
+import type { TypeLayout } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
 import { isActor, isDefaultActor, MethodDescriptorKind, readVTable } from "../abi/class-descriptor.js";
@@ -206,6 +207,10 @@ export class SwiftType {
 
   get moduleName(): string | null {
     return descriptorOf(this).moduleName;
+  }
+
+  get layout(): TypeLayout {
+    return metadataOf(this).typeLayout;
   }
 
   toJSON(): { kind: string; name: string; module: string | null } {

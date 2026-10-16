@@ -172,7 +172,8 @@ function typesAreAcceptedAsReflectionOrFacadeAtCompileTime(cls: SwiftClass, info
 function rawMetadataStaysUnderAbi(type: SwiftType) {
   const metadata: Metadata = metadataOf(type);
   const descriptor: ContextDescriptor = descriptorOf(type);
-  void [metadata, descriptor];
+  const layout: TypeLayout = type.layout;
+  void [metadata, descriptor, layout];
   // @ts-expect-error raw metadata stays under /abi metadataOf()
   const rawMetadata: Metadata = type.metadata;
   // @ts-expect-error raw descriptor stays under /abi descriptorOf()

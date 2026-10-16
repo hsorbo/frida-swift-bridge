@@ -305,6 +305,10 @@ Every reflection object extends `SwiftType`:
   `"foreign-reference"`, `"fixed-array"` or `"borrow"`.
 - `info.moduleName`: the logical Swift module name.
 - `info.superClass`: the parent's reflection, or `null`.
+- `info.layout`: `{ size, stride, alignment }` as `MemoryLayout<T>` reports
+  them, read from the type's value witness table. Reading it realizes the
+  type's metadata; a generic type named without its arguments has no layout
+  and throws.
 - `info.toJSON()`: cheap identity `{ kind, name, module }`.
 
 A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
@@ -408,6 +412,7 @@ Robot.$type.superClass;           // null, or a SwiftType
 Robot.$type.facade === Robot;     // true
 
 Swift.type("MyApp.Rect").$type.fields.map(f => f.name);   // ["width", "height"]
+Swift.type("MyApp.Rect").$type.layout;                    // { size: 16, stride: 16, alignment: 8 }
 Swift.type("MyApp.Suit").$type.cases.map(c => c.name);    // ["hearts", "spades", ...]
 Swift.type("MyApp.Session").$type.isActor;                // true for `actor Session`
 ```

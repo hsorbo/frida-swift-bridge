@@ -56,7 +56,7 @@ describe("fixed array metadata", () => {
     const found = fixedArrayMetadata(3, metadataFor("Swift.Int")!);
     if (found === null) ctx.skip("runtime without Builtin.FixedArray (Swift < 6.2)");
     const metadata = found!;
-    expect(metadata.typeLayout.size).toBe(24);
+    expect(typeOf(metadata).layout.size).toBe(24);
     const storage = Memory.alloc(metadata.typeLayout.stride);
     writeValue(metadata, storage, [1, 2, 3]);
     expect(storage.add(8).readS64().toNumber()).toBe(2);

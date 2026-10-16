@@ -3,7 +3,7 @@ import { requireDarwin, requireSwift } from "./swift.js";
 import { arenaAlloc, arenaString, writeRelativeDirectPointer } from "./arena.js";
 
 import { readObject } from "../src/abi/instance.js";
-import { metadataFor } from "../src/abi.js";
+import { metadataFor, typeOf } from "../src/abi.js";
 import { layoutCaptures, readCaptures, unwrapReabstractionThunk } from "../src/abi/closure-capture.js";
 import { captureDescriptorOf, offsetToFirstCapture } from "../src/abi/capture-descriptor.js";
 import { resolveTypeByMangledName } from "../src/abi/field-descriptor.js";
@@ -111,8 +111,8 @@ describe("closure capture layout (synthetic)", () => {
       ctx.skip("fixture compiled without ~Copyable (Swift < 5.9)");
     }
     const alignedEmpty = new Metadata(new NativeFunction(accessor!, "pointer", ["size_t"])(0) as NativePointer);
-    expect(alignedEmpty.typeLayout.size).toBe(0);
-    expect(alignedEmpty.typeLayout.alignment).toBe(16);
+    expect(typeOf(alignedEmpty).layout.size).toBe(0);
+    expect(typeOf(alignedEmpty).layout.alignment).toBe(16);
 
     // A noncopyable type is not found by its textual name, so name it by a symbolic reference.
     const typeDescriptor = alignedEmpty.description.handle;

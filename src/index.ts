@@ -108,6 +108,7 @@ export {
   SwiftClassBoundInitializer,
 } from "./runtime/type-facade.js";
 export { SwiftValue } from "./abi/instance.js";
+export type { TypeLayout } from "./abi/metadata.js";
 export { SwiftError } from "./runtime/thrown-error.js";
 export {
   ClosureSpec,

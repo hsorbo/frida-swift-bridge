@@ -66,12 +66,12 @@ describe("borrow metadata", () => {
     const int = metadataFor("Swift.Int")!;
     const inline = borrowMetadata(int);
     if (inline === null) ctx.skip("runtime without Builtin.Borrow (Swift < 6.4)");
-    expect(inline!.typeLayout.size).toBe(8);
+    expect(typeOf(inline!).layout.size).toBe(8);
     expect(readValue(inline!, borrowOf(int, Memory.alloc(8).writeS64(42)))).toEqual(int64(42));
 
     const tuple = fiveInts();
     const pointer = borrowMetadata(tuple)!;
-    expect(pointer.typeLayout.size).toBe(Process.pointerSize);
+    expect(typeOf(pointer).layout.size).toBe(Process.pointerSize);
     const value = Memory.alloc(5 * 8);
     [1, 2, 3, 4, 5].forEach((n, i) => value.add(i * 8).writeS64(n));
     expect(readValue(pointer, borrowOf(tuple, value))).toEqual([int64(1), int64(2), int64(3), int64(4), int64(5)]);

@@ -5,14 +5,14 @@ import { Swift } from "../src/index.js";
 import { findType } from "../src/reflection/registry.js";
 import { getGenericMetadata, MetadataKind } from "../src/abi/metadata.js";
 
-import { metadataFor } from "../src/abi.js";
+import { metadataFor, typeOf } from "../src/abi.js";
 describe("generic metadata", () => {
   test("instantiates Array<Int> through the generic accessor", () => {
     requireSwift();
     const int = metadataFor("Swift.Int")!;
     const arrayInt = metadataFor("Swift.Array", [int])!;
     expect(arrayInt.kind).toBe(MetadataKind.Struct);
-    expect(arrayInt.typeLayout.size).toBe(Process.pointerSize);
+    expect(typeOf(arrayInt).layout.size).toBe(Process.pointerSize);
   });
 
   test("instantiates Optional<Int> as a value type", () => {

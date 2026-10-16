@@ -195,6 +195,12 @@ describe("type reflection and facades", () => {
     expect(c.facade.init(9).$fields).toEqual({ count: int64(9) });
   });
 
+  test("layout reports size, stride and alignment as MemoryLayout does", () => {
+    expect(Swift.type("Swift.Int")!.$type.layout).toEqual({ size: 8, stride: 8, alignment: 8 });
+    expect(Swift.struct("fixture.TaggedInt")!.$type.layout).toEqual({ size: 17, stride: 24, alignment: 8 });
+    expect(() => Swift.struct("fixture.Keyed")!.$type.layout).toThrow();
+  });
+
   test("a nested type is named and resolved under its full path", () => {
     const desc = findType("fixture.Outer.Inner");
     expect(desc).not.toBeNull();
