@@ -2119,9 +2119,10 @@ public struct CodableCard: Codable {
     private struct Hidden {
         let n: Int
         init(n: Int) { self.n = n }
+        var doubled: Int { n * 2 }
     }
 
-    public var hiddenDoubled: Int { Hidden(n: 21).n * 2 }
+    public var hiddenDoubled: Int { Hidden(n: 21).doubled }
 }
 
 // Accessors with bodies big enough to hook; a stored property's are one or two instructions.

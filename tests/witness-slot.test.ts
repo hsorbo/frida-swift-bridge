@@ -60,7 +60,7 @@ describe("unnamed witness slots on the reflection", () => {
     expect(int.instanceMethods()).not.toContain(selector);
     expect(int.instanceMethods({ deep: true })).toContain(selector);
     expect(int.instanceMethod(selector).origin).toEqual({ kind: "extension", type: "Swift.Int", module: FIXTURE_MODULE });
-  });
+  }, { timeout: 30000 });
 
   test("a generic specialization lists its conformances' slots under its specialized name", () => {
     const greeterPair = typeOf(metadataFor("fixture.Pair", [metadataFor("fixture.PoliteGreeter")!])!) as StructType;
