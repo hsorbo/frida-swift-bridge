@@ -73,7 +73,7 @@ function signClosureFunction(code: NativePointer, discriminator: number): Native
 function closureWordsBuffer(fnPointer: NativePointer, context: NativePointer): NativePointer {
   const buffer = Memory.alloc(Process.pointerSize * 2);
   buffer.writePointer(fnPointer);
-  buffer.add(Process.pointerSize).writePointer(context);
+  buffer.writePointer(context, Process.pointerSize);
   return buffer;
 }
 

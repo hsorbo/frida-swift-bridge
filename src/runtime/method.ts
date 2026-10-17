@@ -1942,10 +1942,10 @@ class AsyncArgs {
     const image = Memory.alloc(Math.max(this.stackSize, 1));
     const words = Math.ceil(this.stackSize / 8);
     for (let i = 0; i < words; i++) {
-      image.add(i * 8).writeU64(0);
+      image.writeU64(0, i * 8);
     }
     for (const { offset, bytes } of this.stackBytes) {
-      image.add(offset).writeByteArray(bytes);
+      image.writeByteArray(bytes, offset);
     }
     return Array.from({ length: words }, (_, i) => image.readPointer(i * 8));
   }
@@ -2300,7 +2300,7 @@ function decodeString(raw: NativeCallbackArgumentValue): string {
   const words = raw as NativePointer[];
   const buffer = Memory.alloc(Process.pointerSize * 2);
   buffer.writePointer(words[0]);
-  buffer.add(Process.pointerSize).writePointer(words[1]);
+  buffer.writePointer(words[1], Process.pointerSize);
   return readString(buffer) ?? "";
 }
 

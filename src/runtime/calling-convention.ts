@@ -884,7 +884,7 @@ export function makeSwiftNativeFunction(
         if (copy !== null) {
           argMetadata[i]!.valueWitnesses.initializeWithCopy(copy, value);
         }
-        frame.add(frameOffset(argLocations[i][0])).writePointer(copy ?? value);
+        frame.writePointer(copy ?? value, frameOffset(argLocations[i][0]));
       } else {
         lowered.pieces.forEach((piece, k) => {
           const location = argLocations[i][k];
@@ -900,13 +900,13 @@ export function makeSwiftNativeFunction(
         });
       }
     }
-    implicitArgs.forEach((arg, k) => frame.add(frameOffset(implicitLocations[k])).writePointer(arg));
+    implicitArgs.forEach((arg, k) => frame.writePointer(arg, frameOffset(implicitLocations[k])));
     if (typedError?.direct !== null && typedError !== null) {
       fillTypedErrorSentinel(typedError.slot, typedError.metadata);
     }
-    result?.leading.forEach((buffer, k) => frame.add(frameOffset(leadingResultLocations[k])).writePointer(buffer));
+    result?.leading.forEach((buffer, k) => frame.writePointer(buffer, frameOffset(leadingResultLocations[k])));
     if (indirectResultLocation !== null) {
-      frame.add(frameOffset(indirectResultLocation)).writePointer(result!.sret!);
+      frame.writePointer(result!.sret!, frameOffset(indirectResultLocation));
     }
 
     const physical = fridaArgTypes.map((type, i) => {

@@ -214,7 +214,7 @@ function invokeAccessor(bareFn: NativePointer, args: NativePointer[]): NativePoi
       ) as NativePointer;
     default: {
       const buffer = Memory.alloc(args.length * Process.pointerSize);
-      args.forEach((a, i) => buffer.add(i * Process.pointerSize).writePointer(a));
+      args.forEach((a, i) => buffer.writePointer(a, i * Process.pointerSize));
       return new NativeFunction(fn, "pointer", ["size_t", "pointer"])(
         request, buffer
       ) as NativePointer;

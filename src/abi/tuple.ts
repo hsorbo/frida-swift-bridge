@@ -44,7 +44,7 @@ export function getUnlabelledTupleTypeMetadata(elements: Metadata[]): Metadata {
     throw new Error(`tuple has too many elements: ${elements.length}`);
   }
   const buffer = Memory.alloc(Math.max(elements.length, 1) * Process.pointerSize);
-  elements.forEach((m, i) => buffer.add(i * Process.pointerSize).writePointer(m.handle));
+  elements.forEach((m, i) => buffer.writePointer(m.handle, i * Process.pointerSize));
   const metadata = getSwiftCoreApi().swift_getTupleTypeMetadata(
     METADATA_REQUEST_COMPLETE,
     elements.length,

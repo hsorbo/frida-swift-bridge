@@ -362,12 +362,12 @@ export function buildGenericMetadata(
 
   const keyArguments = [...paramHandles];
   const keyArgumentVector = Memory.alloc((paramHandles.length + numRequirements) * Process.pointerSize);
-  paramHandles.forEach((h, i) => keyArgumentVector.add(i * Process.pointerSize).writePointer(h));
+  paramHandles.forEach((h, i) => keyArgumentVector.writePointer(h, i * Process.pointerSize));
   const isKey = genericParamsAreKey(descriptor);
   const keyTypeArguments = typeArguments.filter((_, i) => isKey[i]);
 
   checkRequirements(descriptor, genericRequirements(descriptor), keyArgumentVector, keyTypeArguments, (witnessTable) => {
-    keyArgumentVector.add(keyArguments.length * Process.pointerSize).writePointer(witnessTable);
+    keyArgumentVector.writePointer(witnessTable, keyArguments.length * Process.pointerSize);
     keyArguments.push(witnessTable);
   });
 

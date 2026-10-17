@@ -141,9 +141,9 @@ const TASK_OPTION_INITIAL_SERIAL_EXECUTOR = 0;
 function buildActorTaskOption(executor: SerialExecutorRef): NativePointer {
   const record = Memory.alloc(4 * Process.pointerSize);
   record.writePointer(ptr(TASK_OPTION_INITIAL_SERIAL_EXECUTOR));
-  record.add(1 * Process.pointerSize).writePointer(NULL);
-  record.add(2 * Process.pointerSize).writePointer(executor.identity);
-  record.add(3 * Process.pointerSize).writePointer(executor.implementation);
+  record.writePointer(NULL, 1 * Process.pointerSize);
+  record.writePointer(executor.identity, 2 * Process.pointerSize);
+  record.writePointer(executor.implementation, 3 * Process.pointerSize);
   return record;
 }
 

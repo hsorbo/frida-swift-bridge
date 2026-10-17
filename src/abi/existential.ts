@@ -312,10 +312,10 @@ export function initializeExistentialWithCopy(
       witnesses.initializeWithCopy(getSwiftCoreApi().swift_projectBox(box), src);
       container.writePointer(box);
     }
-    container.add(TYPE_OFFSET).writePointer(type.handle);
+    container.writePointer(type.handle, TYPE_OFFSET);
     tables = container.add(TYPE_OFFSET + Process.pointerSize);
   }
-  witnessTables.forEach((table, i) => tables.add(i * Process.pointerSize).writePointer(table));
+  witnessTables.forEach((table, i) => tables.writePointer(table, i * Process.pointerSize));
 }
 
 // ProtocolClassConstraint ABI value: Class = 0 (class-only), Any = 1.
@@ -329,7 +329,7 @@ export function getExistentialTypeMetadata(protocols: ContextDescriptor[]): Meta
   // that won't pointer-match compiler-emitted existentials.
   const sorted = [...protocols].sort(compareProtocolDescriptors);
   const refs = Memory.alloc(Process.pointerSize * Math.max(sorted.length, 1));
-  sorted.forEach((p, i) => refs.add(i * Process.pointerSize).writePointer(p.handle));
+  sorted.forEach((p, i) => refs.writePointer(p.handle, i * Process.pointerSize));
   const classConstraint =
     sorted.length === 0 ? 1 : Math.min(...sorted.map(protocolClassConstraint));
   const handle = getSwiftCoreApi().swift_getExistentialTypeMetadata(

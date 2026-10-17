@@ -53,7 +53,7 @@ function readU128(p: NativePointer): bigint {
 
 function writeU128(p: NativePointer, v: bigint): void {
   p.writeU64(uint64((v & U64_MASK).toString()));
-  p.add(8).writeU64(uint64((v >> 64n).toString()));
+  p.writeU64(uint64((v >> 64n).toString()), 8);
 }
 
 const PRIMITIVE_READERS: { [typeName: string]: (p: NativePointer) => SwiftValue } = {

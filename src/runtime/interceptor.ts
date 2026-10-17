@@ -813,7 +813,7 @@ function materializeArgs(
     if (plan.kind === "closure") {
       const words = Memory.alloc(2 * Process.pointerSize);
       words.writePointer(cursor.gp());
-      words.add(Process.pointerSize).writePointer(cursor.gp());
+      words.writePointer(cursor.gp(), Process.pointerSize);
       slots.push({ plan, address: words });
       continue;
     }

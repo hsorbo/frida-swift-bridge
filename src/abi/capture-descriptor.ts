@@ -261,15 +261,15 @@ function makeGenericEnvironment(params: GenericParam[]): {
 
   const environment = Memory.alloc(4 + 2 * levels + total);
   environment.writeU32(levels);
-  cumulative.forEach((count, level) => environment.add(4 + 2 * level).writeU16(count));
+  cumulative.forEach((count, level) => environment.writeU16(count, 4 + 2 * level));
   const descriptors = environment.add(4 + 2 * levels);
   for (let i = 0; i < total; i++) {
-    descriptors.add(i).writeU8(GENERIC_PARAM_DESCRIPTOR_KEY_TYPE);
+    descriptors.writeU8(GENERIC_PARAM_DESCRIPTOR_KEY_TYPE, i);
   }
 
   const genericArguments = Memory.alloc(total * Process.pointerSize);
   for (let i = 0; i < total; i++) {
-    genericArguments.add(i * Process.pointerSize).writePointer(NULL);
+    genericArguments.writePointer(NULL, i * Process.pointerSize);
   }
   const flatIndexOf = ({ depth, index }: GenericParam) => (depth === 0 ? 0 : cumulative[depth - 1]) + index;
   return { environment, genericArguments, flatIndexOf };
@@ -349,7 +349,7 @@ export class CaptureGenericArguments {
       if (metadata === null) {
         return true;
       }
-      this.genericArguments.add(this.flatIndexOf(param) * Process.pointerSize).writePointer(metadata);
+      this.genericArguments.writePointer(metadata, this.flatIndexOf(param) * Process.pointerSize);
       return false;
     });
   }
