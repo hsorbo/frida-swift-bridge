@@ -284,6 +284,7 @@ export interface ResolvedMethod {
   asyncFunctionPointer?: AsyncFunctionPointer;
   witnessSelf?: WitnessTable;
   witnessTables?: NativePointer[];
+  calledThroughWitness?: boolean;
   abstractArgs?: Abstraction[];
   abstractReturn?: Abstraction;
   returnClosure?: ArgPlan; // a function-typed result, planned in place of returnType
@@ -1508,7 +1509,7 @@ function planOf(resolved: ResolvedMethod): CallPlan {
     argConventions: resolved.argConventions ?? resolved.argTypes.map(() => "borrowed"),
     origin: resolved.origin,
     signature: resolved.signature,
-    witnessDispatched: resolved.witnessSelf !== undefined,
+    witnessDispatched: resolved.calledThroughWitness ?? resolved.witnessSelf !== undefined,
   };
 }
 
@@ -3898,6 +3899,7 @@ function resolveExtensionMethod(
     asyncFunctionPointer,
     witnessSelf: table,
     witnessTables,
+    calledThroughWitness: requirement !== null,
     classBound,
     origin: { kind: "protocolExtension", protocol: protocolName, module: imageName(matches[0].address) },
   };
@@ -4131,7 +4133,46 @@ function protocolLevelOpaque(table: WitnessTable, signatureClassBound: Set<strin
 }
 
 function protocolLevelParamLayout(table: WitnessTable, signatureClassBound: Set<string>): (name: string) => ParamLayout | null {
-  const classBound = classBoundSubjects(protocolOf(table));
+  return protocolSubjectLayout(protocolOf(table), signatureClassBound);
+}
+
+// A hook has no conforming type to test the where clause against, so its class bounds are read off
+// how the bounds are spelled.
+export function protocolExtensionLayout(protocol: ContextDescriptor, constraints: string[]): (name: string) => ParamLayout | null {
+  const classBound = new Set(
+    constraints.flatMap((constraint) => {
+      const requirement = parseRequirement(constraint);
+      return requirement?.relation === ":" && boundIsClass(requirement.bound) ? [requirement.subject] : [];
+    })
+  );
+  if (protocolClassConstraint(protocol) === 0) {
+    classBound.add("A");
+  }
+  return protocolSubjectLayout(protocol, classBound);
+}
+
+function boundIsClass(bound: string): boolean {
+  if (bound === "AnyObject") {
+    return true;
+  }
+  const protocol = whereClauseProtocol(bound);
+  if (protocol !== null) {
+    return protocolClassConstraint(protocol) === 0;
+  }
+  if (bound.startsWith(OBJC_MODULE_PREFIX)) {
+    const name = bound.slice(OBJC_MODULE_PREFIX.length);
+    return lookUpObjCClass(name) !== null || lookUpObjCProtocol(name) !== null;
+  }
+  return findType(withoutTypeArguments(bound))?.kind === ContextDescriptorKind.Class;
+}
+
+export function resolveProtocolSelfType(protocol: ContextDescriptor, self: Metadata, name: string, constraints: string[]): Metadata | null {
+  const table = conformsToProtocol(self, protocol);
+  return table === null ? null : resolveWitnessSelfOrAssociatedType(new WitnessTable(table, self), name, constraints);
+}
+
+function protocolSubjectLayout(protocol: ContextDescriptor, signatureClassBound: Set<string>): (name: string) => ParamLayout | null {
+  const classBound = classBoundSubjects(protocol);
   for (const subject of signatureClassBound) {
     classBound.add(subject);
   }

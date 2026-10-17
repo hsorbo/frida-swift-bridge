@@ -43,16 +43,27 @@ import {
   TypeExpr,
 } from "./symbolication.js";
 import { findType } from "../reflection/registry.js";
+import { findProtocol } from "../abi/protocol-conformance.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { borrowedClosure } from "./closure-view.js";
-import { CallArg, CallResult, SelfOwnership, witnessTableCount, hookTargetOf, SwiftBoundMethod, SwiftFunction } from "./method.js";
+import {
+  CallArg,
+  CallResult,
+  SelfOwnership,
+  witnessTableCount,
+  hookTargetOf,
+  protocolExtensionLayout,
+  resolveProtocolSelfType,
+  SwiftBoundMethod,
+  SwiftFunction,
+} from "./method.js";
 import { typeOf, type SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
 import type { SwiftFunctionMatch } from "./function-listing.js";
 import type { FacadeCallable } from "./facade-members.js";
-import type { ParsedSwiftSignature } from "./symbolication.js";
+import type { ParamLayout, ParsedSwiftSignature, SwiftAccessorSignature } from "./symbolication.js";
 import { SWIFTCC, FP_ARG_REGISTERS, GP_RESULT_REGISTERS, putSseScalarMove } from "./swiftcc.js";
 
 export type SwiftInvocationContext = InvocationContext & { self?: CallResult; typeArguments?: string[] };
@@ -201,6 +212,9 @@ function thrownLowering(shape: CallShape, onResume: boolean, target: NativePoint
   if (ret?.kind === "tuple") {
     throw new Error("a typed throw beside a destructured tuple result is unsupported");
   }
+  if (shape.generics.protocol !== null) {
+    throw new Error("a typed throw in a protocol extension is unsupported");
+  }
   if (thrown.kind === "metatype" || thrown.kind === "closure" || thrown.kind === "inout") {
     throw new Error(`unsupported thrown type: ${thrown.kind}`);
   }
@@ -253,8 +267,11 @@ function needsGenerics(plan: TypePlan | null): boolean {
   return plan !== null && (plan.kind === "param" || plan.kind === "use" || plan.kind === "tuple");
 }
 
-function planType(type: TypeExpr, genericParams: string[]): TypePlan {
-  const paramIndex = type.kind === "param" ? genericParams.indexOf(type.name) : -1;
+function planType(type: TypeExpr, generics: GenericEnvironment): TypePlan {
+  if ((type.kind === "param" || type.kind === "member") && generics.layout(type.text) === "reference") {
+    return { kind: "use", expr: type, indirect: false };
+  }
+  const paramIndex = type.kind === "param" ? generics.params.indexOf(type.name) : -1;
   if (paramIndex !== -1) {
     return { kind: "param", paramIndex };
   }
@@ -269,10 +286,10 @@ function planType(type: TypeExpr, genericParams: string[]): TypePlan {
     return { kind: "closure" };
   }
   if (type.kind === "tuple") {
-    return { kind: "tuple", expr: type, elements: type.elements.map((e) => planType(e.type, genericParams)) };
+    return { kind: "tuple", expr: type, elements: type.elements.map((e) => planType(e.type, generics)) };
   }
-  if (mentionsParam(type, genericParams)) {
-    const indirect = hasOpaqueLayout(type, (n) => (genericParams.includes(n) ? "opaque" : null));
+  if (mentionsParam(type, generics.params)) {
+    const indirect = hasOpaqueLayout(type, generics.layout);
     if (!indirect && !isSingleReference(type)) {
       throw new Error(`unsupported direct generic use: ${type.text}`);
     }
@@ -281,10 +298,10 @@ function planType(type: TypeExpr, genericParams: string[]): TypePlan {
   throw new Error(`could not resolve type: ${type.text}`);
 }
 
-function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, generics: Metadata[], genericParams: string[]): Metadata {
+function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, generics: Metadata[], environment: GenericEnvironment): Metadata {
   switch (plan.kind) {
     case "inout":
-      return planMetadata(plan.target, generics, genericParams);
+      return planMetadata(plan.target, generics, environment);
     case "concrete":
       return plan.metadata;
     case "param":
@@ -292,8 +309,12 @@ function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, ge
     case "use":
     case "tuple": {
       const metadata = resolveParsedType(plan.expr, (name) => {
-        const i = genericParams.indexOf(name);
-        return i >= 0 ? generics[i] : null;
+        const i = environment.params.indexOf(name);
+        if (i >= 0) {
+          return generics[i];
+        }
+        const { protocol } = environment;
+        return protocol !== null && name.startsWith("A.") ? resolveProtocolSelfType(protocol.descriptor, generics[0], name, protocol.constraints) : null;
       });
       if (metadata === null) {
         throw new Error(`could not resolve generic use: ${plan.expr.text}`);
@@ -320,6 +341,8 @@ interface GenericEnvironment {
   sources: ParamSource[];
   passesSelfMetadata: boolean;
   undecodable: string | null;
+  layout: (name: string) => ParamLayout | null;
+  protocol: { descriptor: ContextDescriptor; constraints: string[] } | null;
 }
 
 function genericParamName(depth: number, index: number): string {
@@ -369,15 +392,21 @@ function paramPaths(type: TypeExpr, params: string[], path: number[]): { param: 
   return nominalArguments(type).flatMap((arg, i) => paramPaths(arg, params, [...path, i]));
 }
 
-function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOwnership | undefined, trailingSelfLowered = false): GenericEnvironment {
+type EnvironmentSignature = Pick<SwiftFunctionSignature, "context" | "name" | "selector" | "genericParams" | "params" | "contextConstraints">;
+
+function genericEnvironment(signature: EnvironmentSignature, ownership: SelfOwnership | undefined, trailingSelfLowered = false): GenericEnvironment {
   const isStatic = /^(static|class) /.test(signature.context);
   const type = findType(signature.context.replace(/^(static|class) /, ""));
-  const outer = type?.isGeneric ? typeParams(type) : { names: [], depth: 0 };
+  const protocol = type === null ? protocolContext(signature.context) : null;
+  const outer = protocol !== null ? { names: ["A"], depth: 1 } : type?.isGeneric ? typeParams(type) : { names: [], depth: 0 };
   const params = [...outer.names, ...signature.genericParams.map((_, i) => genericParamName(outer.depth, i))];
   const carried = new Map<string, ParamSource>();
   let passesSelfMetadata = false;
   let undecodable: string | null = null;
-  if (outer.names.length > 0) {
+  if (protocol !== null) {
+    carried.set("A", { kind: "carried", from: "selfMetadata", type: null, path: [] });
+    passesSelfMetadata = true;
+  } else if (outer.names.length > 0) {
     let from: "selfMetadata" | "selfObject" | "selfMetatype" | null = null;
     if (type!.kind === ContextDescriptorKind.Class) {
       from = isStatic || signature.name === "__allocating_init" ? "selfMetatype" : "selfObject";
@@ -409,7 +438,15 @@ function genericEnvironment(signature: SwiftFunctionSignature, ownership: SelfOw
       }
     }
   });
-  return { params, sources: params.map((p) => carried.get(p) ?? { kind: "passed" }), passesSelfMetadata, undecodable };
+  const protocolLayout = protocol === null ? null : protocolExtensionLayout(protocol, signature.contextConstraints);
+  return {
+    params,
+    sources: params.map((p) => carried.get(p) ?? { kind: "passed" }),
+    passesSelfMetadata,
+    undecodable,
+    layout: (name) => protocolLayout?.(name) ?? (params.includes(name) ? "opaque" : null),
+    protocol: protocol === null ? null : { descriptor: protocol, constraints: signature.contextConstraints },
+  };
 }
 
 function classIn(metadata: ClassMetadata, type: ContextDescriptor): ClassMetadata {
@@ -493,9 +530,8 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
       accessor === undefined ? undefined : accessor === "getter" || accessor === "read" ? "borrowing" : "mutating";
     ownership ??= accessorOwnership;
     let generics = genericEnvironment(parsed, ownership);
-    const gp = generics.params;
-    const indices = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, gp), p.text) : planType(p.type, gp)));
-    const element = parsed.result === null ? null : planType(parsed.result, gp);
+    const indices = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, generics), p.text) : planType(p.type, generics)));
+    const element = parsed.result === null ? null : planType(parsed.result, generics);
     const args = accessor === "setter" ? [element!, ...indices] : indices;
     const indexLabels = parsed.params.map((p) => p.label);
     const labels = accessor === "setter" ? [null, ...indexLabels] : indexLabels;
@@ -509,7 +545,10 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
             trailingSelf: ownWords + typeKeyArguments,
             selfInRegister: ownWords + (typeKeyArguments > 0 ? 1 : 0),
           }, syncArgumentSlotBase(ret)));
-    const receiver = receiverOf(parsed.context, probe, parsed.name === "init", ownership);
+    const receiver =
+      generics.protocol !== null
+        ? parsed.name === "init" ? null : protocolReceiver(parsed.context, generics)
+        : receiverOf(parsed.context, probe, parsed.name === "init", ownership);
     if (receiver !== null && isFixedLayoutReceiver(receiver.metadata) && receiver.trailing !== null) {
       generics = genericEnvironment(parsed, receiver.trailing ? "borrowing" : "mutating", true);
     }
@@ -517,7 +556,7 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
       args,
       labels,
       ret,
-      thrown: parsed.thrownType === null ? null : planType(parsed.thrownType, gp),
+      thrown: parsed.thrownType === null ? null : planType(parsed.thrownType, generics),
       witnessWords: witnessTableCount(parsed),
       generics,
       throws: parsed.throws,
@@ -532,12 +571,15 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     return { ...shape, coroutine: accessor };
   }
 
+  if (findType(parsed.context.replace(/^static /, "")) === null && protocolContext(parsed.context) !== null) {
+    return protocolAccessorShape(parsed);
+  }
   const memberType = resolveParsedType(parsed.type, () => null);
   if (memberType === null) {
     throw new Error(`could not resolve accessor type: ${parsed.typeName}`);
   }
   const member: TypePlan = { kind: "concrete", metadata: memberType };
-  const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null };
+  const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null, layout: () => null, protocol: null };
   switch (parsed.kind) {
     case "getter":
       return { args: [], labels: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "borrowing") };
@@ -548,6 +590,32 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     default:
       return { args: [], labels: [], ret: member, thrown: null, witnessWords: 0, generics, throws: false, receiver: receiverOf(parsed.context, () => "mutating"), coroutine: "modify" };
   }
+}
+
+function protocolContext(context: string): ContextDescriptor | null {
+  const name = context.replace(/^(static|class) /, "");
+  return name.includes(".") ? findProtocol(name) : null;
+}
+
+function protocolAccessorShape(parsed: SwiftAccessorSignature): CallShape {
+  if (parsed.kind === "read" || parsed.kind === "modify") {
+    throw new Error(`unsupported protocol-extension ${parsed.kind} accessor: ${parsed.context}.${parsed.member}`);
+  }
+  const generics = genericEnvironment(
+    { context: parsed.context, name: parsed.member, selector: parsed.member, genericParams: [], params: [], contextConstraints: parsed.contextConstraints },
+    undefined
+  );
+  const member = planType(parsed.type, generics);
+  const shape = { thrown: null, witnessWords: 0, generics, throws: false, receiver: protocolReceiver(parsed.context, generics) };
+  return parsed.kind === "getter" ? { ...shape, args: [], labels: [], ret: member } : { ...shape, args: [member], labels: [null], ret: null };
+}
+
+// Self is in swiftself: the value's address, or the object itself when Self is class-bound.
+function protocolReceiver(context: string, generics: GenericEnvironment): Receiver | null {
+  if (/^(static|class) /.test(context)) {
+    return null;
+  }
+  return { metadata: generics.layout("A") === "reference" ? "isa" : "selfMetadata", trailing: false };
 }
 
 // A class's initializing init takes the instance as self; a value type's init has none, its @thin
@@ -949,7 +1017,7 @@ function materializeArgs(
     if (plan.kind === "closure") {
       return decodeClosure(address.readPointer(), address.readPointer(Process.pointerSize));
     }
-    const metadata = planMetadata(plan, generics, environment.params);
+    const metadata = planMetadata(plan, generics, environment);
     if (plan.kind === "inout") {
       return decodeInoutArgument(metadata, address);
     }
@@ -975,10 +1043,10 @@ function materializeThrown(
   lowering: ThrownLowering,
   slot: NativePointer | null,
   generics: Metadata[],
-  genericParams: string[],
+  environment: GenericEnvironment,
   onResume = false
 ): CallResult {
-  const metadata = planMetadata(lowering.plan, generics, genericParams);
+  const metadata = planMetadata(lowering.plan, generics, environment);
   if (lowering.placed === null) {
     if (slot === null) {
       throw new Error("typed error buffer was not captured on enter");
@@ -1040,14 +1108,14 @@ function materializeReturn(
   indirectReturn: NativePointer | null,
   resultBuffers: NativePointer[],
   generics: Metadata[],
-  genericParams: string[],
+  environment: GenericEnvironment,
   onResume = false
 ): CallResult {
   if (ret === null) {
     return null;
   }
   if (ret.kind === "tuple") {
-    const tuple = planMetadata(ret, generics, genericParams);
+    const tuple = planMetadata(ret, generics, environment);
     const { directType, assemble } = lowerDestructuredElements({ tuple, byAddress: ret.elements.map(isIndirectPlan) }, resultBuffers);
     const value = Memory.alloc(Math.max(tuple.valueWitnesses.stride, 1));
     assemble(value, directType === null ? null : indirectReturn ?? directResult(context, directType, onResume));
@@ -1063,10 +1131,10 @@ function materializeReturn(
     if (indirectReturn === null) {
       throw new Error("indirect return address was not captured on enter");
     }
-    return decodeBorrowedValue(planMetadata(ret, generics, genericParams), indirectReturn);
+    return decodeBorrowedValue(planMetadata(ret, generics, environment), indirectReturn);
   }
   if (ret.kind !== "concrete") {
-    const metadata = planMetadata(ret, generics, genericParams);
+    const metadata = planMetadata(ret, generics, environment);
     if (metadata.kind === MetadataKind.Class) {
       return asSwiftObject(new ClassInstance(gpResult(context, 0)));
     }
@@ -1191,7 +1259,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
             const error =
               thrown === null
                 ? decodeThrownError(swiftErrorRegister)
-                : materializeThrown(context, thrown, state.thrownSlot ?? null, state.generics ?? [], genericParams);
+                : materializeThrown(context, thrown, state.thrownSlot ?? null, state.generics ?? [], environment);
             callbacks.onLeave!.call(this, null, error);
             return;
           }
@@ -1203,7 +1271,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
               state.indirectReturn ?? null,
               state.resultBuffers ?? [],
               state.generics ?? [],
-              genericParams
+              environment
             )
           );
         }
@@ -1391,7 +1459,6 @@ function attachModify(target: NativePointer, shape: CallShape, callbacks: SwiftI
 function attachRead(target: NativePointer, shape: CallShape, callbacks: SwiftInvocationCallbacks): InvocationListener {
   const receiver = knownReceiver(shape, true);
   const ret = shape.ret!;
-  const genericParams = shape.generics.params;
 
   const onEnter = function (this: SwiftInvocationContext) {
     const context = this.context;
@@ -1421,21 +1488,21 @@ function attachRead(target: NativePointer, shape: CallShape, callbacks: SwiftInv
           if (receiver !== null) {
             exposeSelf(this, receiver, state.selfAddress!, state.selfMetadata ?? null);
           }
-          callbacks.onLeave!.call(this, materializeYield(context, ret, generics, genericParams));
+          callbacks.onLeave!.call(this, materializeYield(context, ret, generics, shape.generics));
         }
       : undefined;
 
   return Interceptor.attach(rampTarget(target), { onEnter, onLeave });
 }
 
-function materializeYield(context: CpuContext, ret: TypePlan, generics: Metadata[], genericParams: string[]): CallResult {
+function materializeYield(context: CpuContext, ret: TypePlan, generics: Metadata[], environment: GenericEnvironment): CallResult {
   if (ret.kind === "metatype") {
     return decodeMetatype(gpResult(context, 1));
   }
   if (ret.kind === "closure") {
     return decodeClosure(gpResult(context, 1), gpResult(context, 2));
   }
-  const metadata = planMetadata(ret, generics, genericParams);
+  const metadata = planMetadata(ret, generics, environment);
   if (metadata.kind === MetadataKind.Class) {
     return asSwiftObject(new ClassInstance(gpResult(context, 1)));
   }
@@ -1501,7 +1568,7 @@ interface CompletionEntry {
   thrown: ThrownLowering | null;
   thrownSlot: NativePointer | null;
   generics: Metadata[];
-  genericParams: string[];
+  environment: GenericEnvironment;
   typeArguments: Metadata[] | string;
   outBuffer: NativePointer | null;
   resultBuffers: NativePointer[];
@@ -1565,13 +1632,13 @@ function fireCompletion(entry: CompletionEntry, context: CpuContext, self: Invoc
     const thrown =
       entry.thrown === null
         ? decodeThrownError(error)
-        : materializeThrown(context, entry.thrown, entry.thrownSlot, entry.generics, entry.genericParams, true);
+        : materializeThrown(context, entry.thrown, entry.thrownSlot, entry.generics, entry.environment, true);
     entry.callbacks.onComplete!.call(self, null, thrown);
     return;
   }
   entry.callbacks.onComplete!.call(
     self,
-    materializeReturn(context, entry.ret, entry.outBuffer, entry.resultBuffers, entry.generics, entry.genericParams, true)
+    materializeReturn(context, entry.ret, entry.outBuffer, entry.resultBuffers, entry.generics, entry.environment, true)
   );
 }
 
@@ -1715,7 +1782,7 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
       thrown,
       thrownSlot,
       generics: generics ?? [],
-      genericParams,
+      environment,
       typeArguments: generics ?? unlocatable ?? [],
       outBuffer: indirectReturn ? gpArg(context, 0) : null,
       resultBuffers: destructured === null ? [] : elementBuffers(context, destructured, true),

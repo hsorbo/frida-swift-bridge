@@ -120,7 +120,7 @@ describe("hooking a member", () => {
 
   test("a protocol-dispatched member and a plain object are refused", () => {
     const describer = (Swift.type("fixture.DefaultDescriber") as SwiftStruct).$new({ displayName: "Ada" });
-    expect(() => Swift.Interceptor.attach(describer.$method("shout"), { onEnter() {} })).toThrow(/protocol witness/);
+    expect(() => Swift.Interceptor.attach(describer.$method("describe"), { onEnter() {} })).toThrow(/protocol witness/);
     expect(() => Swift.Interceptor.attach({ address: ptr(1) } as never, { onEnter() {} })).toThrow(/hook target/);
   });
 });

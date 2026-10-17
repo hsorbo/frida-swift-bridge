@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { fixtureExport, loadFixture, loadFixtureSyms } from "./fixtures/load.js";
 
-import { Swift, isSwiftObject, type SwiftValue, type SwiftObject, type CallResult, type SwiftInvocationContext } from "../src/index.js";
+import { Swift, SwiftClass, SwiftStruct, isSwiftObject, type CallArg, type SwiftValue, type SwiftObject, type CallResult, type SwiftInvocationContext } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { requireSymbolTable } from "./swift.js";
 
@@ -843,27 +843,32 @@ describe("Swift.Interceptor.attach on members of generic types", () => {
   });
 });
 
-describe("Swift.Interceptor.attach on tuples the signature spells", () => {
-  function hookDuring(target: Parameters<typeof Swift.Interceptor.attach>[0], call: () => unknown): { args: SwiftValue[]; ret: CallResult; called: unknown } {
-    let args: SwiftValue[] = [];
-    let ret: CallResult = null;
-    const listener = Swift.Interceptor.attach(target, {
-      onEnter(a) {
-        args = [...a];
-      },
-      onLeave(r) {
-        ret = r;
-      },
-    });
-    let called: unknown;
-    try {
-      called = call();
-    } finally {
-      listener.detach();
-    }
-    return { args, ret, called };
+function hookDuring(
+  target: Parameters<typeof Swift.Interceptor.attach>[0],
+  call: () => unknown,
+  context?: (invocation: SwiftInvocationContext) => void
+): { args: SwiftValue[]; ret: CallResult; called: unknown } {
+  let args: SwiftValue[] = [];
+  let ret: CallResult = null;
+  const listener = Swift.Interceptor.attach(target, {
+    onEnter(a) {
+      args = [...a];
+      context?.(this);
+    },
+    onLeave(r) {
+      ret = r;
+    },
+  });
+  let called: unknown;
+  try {
+    called = call();
+  } finally {
+    listener.detach();
   }
+  return { args, ret, called };
+}
 
+describe("Swift.Interceptor.attach on tuples the signature spells", () => {
   test("reads a concrete tuple argument element by element, nested and wide ones too", () => {
     const module = loadFixture();
     const packedSum = Swift.function(module, "$s7fixture9packedSumySis4Int8V_ADt_tF");
@@ -941,5 +946,122 @@ describe("Swift.Interceptor.attach on tuples the signature spells", () => {
       { args: [[3, 4]], ret: int64(34) },
       { args: [["hi", int64(4)]], ret: [int64(4), "hi"] },
     ]);
+  });
+});
+
+describe("Swift.Interceptor.attach on protocol-extension members", () => {
+  function intSource(): SwiftObject {
+    loadFixture();
+    return (Swift.type("fixture.IntSource") as SwiftStruct).$new({ value: 5 }) as SwiftObject;
+  }
+
+  test("reads Self from swiftself and its associated types through its conformance", () => {
+    const source = intSource();
+    let seen: { self: CallResult; typeArguments: string[] } | null = null;
+    const record = (invocation: SwiftInvocationContext): void => {
+      seen = { self: invocation.self!, typeArguments: invocation.typeArguments! };
+    };
+    expect(hookDuring(fixtureExport("fixture.ItemSource.echo"), () => source.echo(3), record)).toEqual({ args: [int64(3)], ret: int64(3), called: int64(3) });
+    expect(seen).toEqual({ self: { value: int64(5) }, typeArguments: ["fixture.IntSource"] });
+    const me = hookDuring(fixtureExport("fixture.ItemSource.me"), () => source.me());
+    expect([me.args, me.ret]).toEqual([[], { value: int64(5) }]);
+  });
+
+  test("a facade's extension method hooks the implementation, tuples with an associated-type element per element", () => {
+    const source = intSource();
+    const cases: [string, CallArg[], SwiftValue[], unknown][] = [
+      ["flipped", [[9, 4]], [[int64(9), int64(4)]], [int64(4), int64(9)]],
+      ["unbracketed", [[1, 6, 2]], [[1, int64(6), 2]], [int64(6), int64(12)]],
+      ["twice", [3], [int64(3)], [int64(3), int64(3)]],
+      ["bracketed", [6], [int64(6)], [1, int64(6), 2]],
+      ["paired", [8], [int64(8)], [int64(8), int64(7)]],
+    ];
+    for (const [name, callArgs, args, ret] of cases) {
+      const method = source.$method(name);
+      expect({ name, ...hookDuring(method, () => method.call(...callArgs)) }).toEqual({ name, args, ret, called: ret });
+    }
+  });
+
+  test("an inout tuple with an associated-type element is the caller's storage", () => {
+    const source = intSource();
+    const pair = asSwiftObject(ValueInstance.fromJS(metadataOf(Swift.reflect("(Swift.Int, Swift.Int)")!), [1, 2]));
+    const refill = source.$method("refill");
+    let entered: unknown = null;
+    const listener = Swift.Interceptor.attach(refill, {
+      onEnter(args) {
+        entered = [(args[0] as SwiftObject).$fields, args[1]];
+      },
+    });
+    try {
+      refill.call(pair, 9);
+    } finally {
+      listener.detach();
+    }
+    expect(entered).toEqual([[int64(1), int64(2)], int64(9)]);
+    expect(pair.$fields).toEqual([int64(9), int64(3)]);
+  });
+
+  test("an associated type the where clause bounds to a class is passed and returned as a reference", () => {
+    loadFixture();
+    const nightjar = (Swift.type("fixture.Nightjar") as SwiftClass).init() as SwiftObject;
+    const nightjarNest = (Swift.type("fixture.NightjarNest") as SwiftStruct).init(nightjar)! as SwiftObject;
+    const rook = (Swift.type("fixture.Rook") as SwiftClass).init() as SwiftObject;
+    const rookNest = (Swift.type("fixture.RookNest") as SwiftStruct).init(rook)! as SwiftObject;
+    for (const [nest, name, egg] of [[nightjarNest, "objectEcho", nightjar], [nightjarNest, "nocturnalEcho", nightjar], [rookNest, "rookeryEcho", rook]] as const) {
+      const method = nest.$method(name);
+      const { args, ret } = hookDuring(method, () => method.call(egg));
+      expect([name, (args[0] as NativePointer).equals(egg.$handle), (ret as SwiftObject).$handle.equals(egg.$handle)]).toEqual([name, true, true]);
+    }
+  });
+
+  test("a class conforming to a protocol that is not class-bound passes self by address; a class-bound one passes the object", () => {
+    loadFixture();
+    for (const [type, symbol, method] of [
+      ["fixture.SubSpeaker", "fixture.Vocal.speakTwice", "speakTwice"],
+      ["fixture.SubSquawker", "fixture.Squawker.squawkTwice", "squawkTwice"],
+    ]) {
+      const object = (Swift.type(type) as SwiftClass).init() as SwiftObject;
+      let self: CallResult = null;
+      const { ret } = hookDuring(fixtureExport(symbol), () => object[method](), (invocation) => {
+        self = invocation.self!;
+      });
+      expect([method, ret, (self as unknown as SwiftObject).$handle.equals(object.$handle)]).toEqual([method, "subsub", true]);
+    }
+  });
+
+  test("a getter typed by an associated type a base protocol declares", () => {
+    loadFixture();
+    const clutch = (Swift.type("fixture.IntClutch") as SwiftStruct).$new({ egg: 5 }) as SwiftObject;
+    let self: CallResult = null;
+    const { ret } = hookDuring(fixtureExport("fixture.Clutch.firstEgg.getter"), () => clutch.firstEgg, (invocation) => {
+      self = invocation.self!;
+    });
+    expect([ret, self]).toEqual([int64(5), { egg: int64(5) }]);
+  });
+
+  test("an async extension method's tuple result with an associated-type element", async (ctx) => {
+    requireSymbolTable(ctx);
+    loadFixtureSyms();
+    const source = (Swift.type("fixturesyms.IntSource") as SwiftStruct).$new({ value: 5 }) as SwiftObject;
+    const pairedLater = source.$method("pairedLater");
+    let seen: { args?: SwiftValue[]; ret?: CallResult } = {};
+    let completed!: () => void;
+    const done = new Promise<void>((resolve) => (completed = resolve));
+    const listener = Swift.Interceptor.attachAsync(pairedLater, {
+      onEnter(args) {
+        seen.args = [...args];
+      },
+      onComplete(ret) {
+        seen.ret = ret;
+        completed();
+      },
+    });
+    try {
+      expect(await pairedLater.call(9)).toEqual([int64(9), int64(7)]);
+      await done;
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual({ args: [int64(9)], ret: [int64(9), int64(7)] });
   });
 });
