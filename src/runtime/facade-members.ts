@@ -44,6 +44,12 @@ export function splitSubscriptArgs(args: unknown[]): { indices: CallArg[]; selec
     : { indices: args as CallArg[], selector: "subscript", options: {} };
 }
 
+// The canonical form of a JavaScript array index; never a Swift member, whose names cannot start with a digit.
+function indexOfKey(key: string): number | null {
+  const index = Number(key);
+  return Number.isSafeInteger(index) && index >= 0 && String(index) === key ? index : null;
+}
+
 export function invokeOptions(args: CallArg[]): ValueMethodResolveOptions {
   const options: ValueMethodResolveOptions = { arity: args.length };
   if (args.some((a) => a instanceof ClosureSpec || isSwiftClosureValue(a))) {
@@ -128,6 +134,8 @@ export interface MemberProxyParts<T extends object> {
   members: FacadeMembers;
   reserved: Set<string>;
   has(key: string): boolean;
+  hasElement(index: number): boolean;
+  element(index: number): unknown;
   bridgeMember(target: T, key: string | symbol): unknown;
   read(key: string): CallResult;
   write(key: string, value: CallArg): void;
@@ -139,16 +147,24 @@ export interface MemberProxyParts<T extends object> {
 }
 
 // Swift members answer to their bare names and resolve when read; the bridge's own are $-prefixed
-// or reserved; POISON names are never members.
+// or reserved; POISON names are never members; an array-index key is an element, read-only.
 export function memberProxyHandler<T extends object>(partsOf: (target: T) => MemberProxyParts<T>): ProxyHandler<T> {
   return {
     has(t, key) {
-      return typeof key === "string" ? partsOf(t).has(key) : Reflect.has(t, key);
+      if (typeof key !== "string") {
+        return Reflect.has(t, key);
+      }
+      const index = indexOfKey(key);
+      return index !== null ? partsOf(t).hasElement(index) : partsOf(t).has(key);
     },
     get(t, key) {
       const parts = partsOf(t);
       if (typeof key === "symbol" || isBridgeMember(key, parts.reserved)) {
         return parts.bridgeMember(t, key);
+      }
+      const index = indexOfKey(key);
+      if (index !== null) {
+        return parts.hasElement(index) ? parts.element(index) : undefined;
       }
       if (POISON.has(key)) {
         return undefined;
@@ -167,6 +183,9 @@ export function memberProxyHandler<T extends object>(partsOf: (target: T) => Mem
         return false;
       }
       const parts = partsOf(t);
+      if (indexOfKey(key) !== null) {
+        throw new Error(`elements of ${parts.owner()} are read-only`);
+      }
       const m = isBridgeMember(key, parts.reserved) || POISON.has(key) ? null : parts.members.including(key);
       if (m === null || !m.properties.has(key)) {
         throw new Error(`no ${parts.propertyNoun} ${key} on ${parts.owner()}`);

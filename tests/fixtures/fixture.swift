@@ -436,6 +436,11 @@ public struct Bag {
     public static func intSet() -> Set<Int> { [3, 1, 2] }
     public static func intMap() -> [Int: Int] { [1: 100, 2: 200] }
     public static func optionals() -> [Int?] { [1, nil, 3] }
+    public static func points() -> [GridPoint] { [GridPoint(x: 1, y: 2), GridPoint(x: 3, y: 4)] }
+    public static func contiguous() -> ContiguousArray<Int> { [7, 8] }
+    public static func slice() -> ArraySlice<Int> { [10, 20, 30, 40][2...] }
+    public static func range() -> Range<Int> { 5..<8 }
+    public static func intKeyed() -> [Int: String] { [0: "zero"] }
 }
 
 // A Sequence that is its own iterator: makeIterator() is the protocol's default, returning a copy.
@@ -453,6 +458,15 @@ public class Playlist: Sequence {
     let names: [String]
     public init(names: [String]) { self.names = names }
     public func makeIterator() -> IndexingIterator<[String]> { names.makeIterator() }
+}
+
+public final class Shelf: Collection {
+    let items: [String]
+    public init(items: [String]) { self.items = items }
+    public var startIndex: Int { 0 }
+    public var endIndex: Int { items.count }
+    public func index(after i: Int) -> Int { i + 1 }
+    public subscript(i: Int) -> String { items[i] }
 }
 
 // Generic methods on a value receiver: small explodes self as a trailing arg, the 5-Int receiver

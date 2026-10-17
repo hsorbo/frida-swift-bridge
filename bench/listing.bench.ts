@@ -1,5 +1,5 @@
 import { bench, describe } from "@frida/injest/agent";
-import { Swift, SwiftClass } from "../src/index.js";
+import { Swift, SwiftClass, SwiftValueObject } from "../src/index.js";
 import { FIXTURE_MODULE } from "../tests/fixtures/load.js";
 import "./counters.js";
 
@@ -21,6 +21,11 @@ describe("lookup", () => {
   bench("object method call", ({ measure }) => {
     const robot = Swift.class("fixture.Robot")!.init("R2");
     measure(() => robot.greet("Alice"));
+  });
+
+  bench("Array facade element by index", ({ measure }) => {
+    const ints = Swift.struct("fixture.Bag")!.$call("ints") as SwiftValueObject;
+    measure(() => ints[1]);
   });
 
   bench("Swift.Interceptor attach and detach on a facade method", ({ measure }) => {
