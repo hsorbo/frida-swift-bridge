@@ -146,10 +146,19 @@ describe("closure captures", () => {
     expect(type.read()).toBe(Swift.reflect("Swift.Bool"));
   });
 
-  test("a closure without captures has none; a context without a capture descriptor is refused", () => {
+  test("a closure without captures has none", () => {
     const seven = Swift.function(module, MAKE_CONSTANT_SEVEN).call() as SwiftClosureValue;
     expect(seven.$captures()).toEqual([]);
+  });
+
+  test("a closure capturing only an object has the object as its context and as its sole capture", () => {
     const stepper = Swift.class("fixture.Stepper")!.init()!;
-    expect(() => Swift.borrowClosure(stepper.$handle).$captures()).toThrow(/capture descriptor/);
+    using next = stepper.incrementer() as SwiftClosureValue;
+    expect(next.context.equals(stepper.$handle)).toBe(true);
+    const [self, ...rest]: SwiftField[] = next.$captures();
+    expect(rest).toEqual([]);
+    expect(self.type.name).toBe("fixture.Stepper");
+    expect((self.read() as NativePointer).equals(stepper.$handle)).toBe(true);
+    expect(() => self.write(ptr(0))).toThrow();
   });
 });

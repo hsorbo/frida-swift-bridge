@@ -25,7 +25,7 @@ export function layoutCaptures(context: NativePointer): CaptureSlot[] | null {
   if (inner !== null) {
     return layoutCapturesAt(inner);
   }
-  return layoutSoleClassCapture(context);
+  return layoutSoleClassCapture(context) ?? layoutObjectAsContext(context);
 }
 
 // escaping closures wrap in a reabstraction thunk with an unresolvable mangled name; detection is structural.
@@ -55,6 +55,15 @@ function layoutSoleClassCapture(context: NativePointer): CaptureSlot[] | null {
   } catch {
     return null;
   }
+}
+
+// a sole Swift-refcounted capture is passed as the context itself, with no box around it.
+function layoutObjectAsContext(context: NativePointer): CaptureSlot[] | null {
+  const type = new Metadata(context.readPointer().strip());
+  if (type.kind !== MetadataKind.Class) {
+    return null;
+  }
+  return [{ type, address: Memory.alloc(Process.pointerSize).writePointer(context) }];
 }
 
 // A class reference or metatype capture is placed before its type resolves, since the generic

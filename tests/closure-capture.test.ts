@@ -193,6 +193,10 @@ describe("closure capture layout (synthetic)", () => {
     expect(layoutCaptures(context)).toBeNull();
   });
 
+  test("returns null for a heap context with no capture descriptor", () => {
+    expect(layoutCaptures(makeHeapContext(NULL, 0x10))).toBeNull();
+  });
+
   test("returns an empty array for a closure with no captures", () => {
     const context = makeHeapContext(makeCaptureDescriptor([]), 0x10);
     expect(layoutCaptures(context)).toEqual([]);
