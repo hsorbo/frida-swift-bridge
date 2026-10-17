@@ -251,18 +251,20 @@ Frida's resolver, so only the hits are realized:
 ```
 
 `Swift.enumerateFunctions(filter?)` takes the same `Module` or glob, matched
-against the demangled name of every function and accessor the module exports.
-A function the module keeps internal is not listed even when its symbol
-survives, and a binary that exports nothing, such as an app's own executable,
-lists nothing here; the vtable and witness slots of its types still appear on
-each type's member listing (see [Reflection](#reflection)). Each match has an
+against the demangled name of every function and accessor the module has a
+Swift symbol for: its exports, and its internal functions when the symbol
+table survives. A stripped binary that exports nothing, such as an app's own
+executable, lists nothing here; the vtable and witness slots of its types
+still appear on each type's member listing (see [Reflection](#reflection)).
+A private declaration is spelled by its plain name, without the file
+discriminator its symbol carries. Each match has an
 `address`, its `module`, the demangled `name`, a
 `kind` (`function`, `getter`, `setter`, `modify` or `read`) and the `signature`
 a member carries; a getter, modify or read yields the property's type and a
 setter takes it, as the hook's callbacks see them. A match goes straight into
 `Swift.Interceptor.attach`. Methods and free functions alike are listed;
 metadata accessors, deinitializers and thunks are not. With no module in the
-filter the query walks every loaded module's exports, so scope it when you can:
+filter the query walks every loaded module, so scope it when you can:
 
 ```js
 for (const fn of Swift.enumerateFunctions("MyApp.*open*"))

@@ -1,8 +1,8 @@
 import { swiftMatches, nameQuery, NameFilter } from "./swift-resolver.js";
 import { parseSwiftSignature, SwiftAccessorSignature } from "./type-expr.js";
-import { SwiftMemberSignature, memberSignature, withHookTarget } from "./method.js";
+import { SwiftMemberSignature, memberSignature, withHookTarget, PRIVATE_DECL_NAME } from "./method.js";
 
-// A function with a Swift symbol, as the resolver spells it. Hookable as it is.
+// A function with a Swift symbol, private declarations spelled by their plain name. Hookable as it is.
 export interface SwiftFunctionMatch {
   readonly address: NativePointer;
   readonly module: string;
@@ -28,7 +28,7 @@ function accessorSignature(accessor: SwiftAccessorSignature): SwiftMemberSignatu
 export function* swiftFunctions(filter?: NameFilter): Generator<SwiftFunctionMatch> {
   for (const match of swiftMatches(nameQuery("functions", filter))) {
     const split = match.name.indexOf("!");
-    const name = match.name.substring(split + 1);
+    const name = match.name.substring(split + 1).replace(PRIVATE_DECL_NAME, "$1");
     const parsed = parseSwiftSignature(name);
     if (parsed === null) {
       continue;

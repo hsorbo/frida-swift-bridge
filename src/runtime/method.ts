@@ -788,7 +788,7 @@ function metatypeSelf(type: Metadata): NativePointer {
 // swift_getTypeName spells a private type's anonymous parent as "(unknown context at $<address>)";
 // its symbols spell the type itself as "(Name in _<discriminator>)". Both collapse to the plain name.
 const RUNTIME_ANONYMOUS_CONTEXT = /\(unknown context at \$[0-9a-f]+\)\./g;
-const PRIVATE_DECL_NAME = /\(([^()\s]+) in _[0-9A-F]+\)/g;
+export const PRIVATE_DECL_NAME = /\(([^()\s]+) in _[0-9A-F]+\)/g;
 
 function resolveMemberOwner(typeName: string): MemberOwner {
   const owner = memberOwnerNamed(withoutTypeArguments(typeName).replace(RUNTIME_ANONYMOUS_CONTEXT, ""));

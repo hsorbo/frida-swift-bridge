@@ -1,5 +1,5 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
-import { loadFixture, FIXTURE_MODULE } from "./fixtures/load.js";
+import { loadFixture, loadFixtureSyms, FIXTURE_MODULE } from "./fixtures/load.js";
 
 import { Swift, SwiftFunctionMatch } from "../src/index.js";
 
@@ -49,5 +49,13 @@ describe("Swift.enumerateFunctions", () => {
     } finally {
       listener.detach();
     }
+  });
+
+  test("an unstripped module lists its internal functions once and private declarations by their plain name", () => {
+    const matches = [...Swift.enumerateFunctions(loadFixtureSyms())];
+    expect(matches.filter((m) => m.name === "fixturesyms.Dispatcher.hidden(Swift.Int) -> Swift.Int")).toHaveLength(1);
+    const init = matches.find((m) => m.name === "fixturesyms.CodableCard.Hidden.init(n: Swift.Int) -> fixturesyms.CodableCard.Hidden")!;
+    expect(init.signature.returnTypeName).toBe("fixturesyms.CodableCard.Hidden");
+    expect(matches.some((m) => m.name === "fixturesyms.CodableCard.Hidden.n.getter : Swift.Int")).toBe(true);
   });
 });
