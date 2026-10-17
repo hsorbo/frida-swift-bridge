@@ -474,8 +474,8 @@ export interface ClosureRef {
 
 const CLOSURE_WORDS = 2;
 
-// A tuple returned by a function whose signature spells it with an opaque element (a witness or
-// protocol extension): each element is its own result, those by address through a buffer.
+// A tuple a signature spells with an opaque element (a witness, protocol extension or generic
+// function): each element is its own parameter or result, the opaque ones by address.
 export interface DestructuredTuple {
   tuple: Metadata;
   byAddress: boolean[];
@@ -503,14 +503,26 @@ function wordPieces(count: number): LoweredScalar[] {
   return Array.from({ length: count }, (_, i) => ({ offset: i * 8, size: 8, cls: "int" }));
 }
 
+interface LoweredPiece extends LoweredScalar {
+  byAddress?: boolean;
+}
+
 interface LoweredArg {
   indirect: boolean;
-  pieces: LoweredScalar[];
+  pieces: LoweredPiece[];
+}
+
+function destructuredPieces({ tuple, byAddress }: DestructuredTuple): LoweredPiece[] {
+  return [...enumerateTupleElements(tuple)].flatMap((element, i) =>
+    byAddress[i] || shouldPassIndirectly(element.type)
+      ? [{ offset: element.offset, size: Process.pointerSize, cls: "int" as const, byAddress: true }]
+      : loweredScalars(element.type).map((scalar) => ({ ...scalar, offset: element.offset + scalar.offset }))
+  );
 }
 
 function lowerArg(arg: SwiftArgType): LoweredArg {
   if (isDestructuredTuple(arg)) {
-    throw new Error("a tuple parameter with an opaque element is unsupported");
+    return { indirect: false, pieces: destructuredPieces(arg) };
   }
   if (isClosureRef(arg)) {
     return { indirect: false, pieces: wordPieces(CLOSURE_WORDS) };
@@ -634,16 +646,19 @@ function lowerClosureResult(): ResultLowering {
   return { size, stride: size, sret: null, leading: [], direct, assemble: (out, dump) => copyDirect(direct, dump, out) };
 }
 
-// The elements by address each fill a buffer; the rest form one direct value. sret serves a lone
-// indirect result, but beside a direct value or a second indirect result the buffers are passed
-// as the first arguments instead (IRGen's SignatureExpansion drops sret in both cases).
-function lowerDestructuredResult({ tuple, byAddress }: DestructuredTuple): ResultLowering {
-  const { size, stride } = tuple.valueWitnesses;
-  const elements = [...enumerateTupleElements(tuple)]
-    .map((e, i) => ({ ...e, size: e.type.valueWitnesses.size, byAddress: byAddress[i] || shouldPassIndirectly(e.type) }))
-    .filter((e) => e.size > 0);
-  const indirect = elements.filter((e) => e.byAddress).map((element) => ({ element, buffer: Memory.alloc(element.type.valueWitnesses.stride) }));
-  const directElements = elements.filter((e) => !e.byAddress);
+// The elements by address each fill a buffer, even an empty one, since the callee takes the pointer
+// whatever the type turns out to be; the rest form one direct value, copied back by element since
+// scalars merge across element boundaries.
+export interface DestructuredElements {
+  buffers: NativePointer[];
+  directType: Metadata | null;
+  assemble: (out: NativePointer, direct: NativePointer | null) => void;
+}
+
+export function lowerDestructuredElements({ tuple, byAddress }: DestructuredTuple): DestructuredElements {
+  const elements = [...enumerateTupleElements(tuple)].map((e, i) => ({ ...e, size: e.type.valueWitnesses.size, byAddress: byAddress[i] || shouldPassIndirectly(e.type) }));
+  const indirect = elements.filter((e) => e.byAddress).map((element) => ({ element, buffer: Memory.alloc(Math.max(element.type.valueWitnesses.stride, 1)) }));
+  const directElements = elements.filter((e) => !e.byAddress && e.size > 0);
   const directType =
     directElements.length === 0
       ? null
@@ -651,23 +666,41 @@ function lowerDestructuredResult({ tuple, byAddress }: DestructuredTuple): Resul
         ? directElements[0].type
         : getUnlabelledTupleTypeMetadata(directElements.map((e) => e.type));
   const directOffsets = directElements.length === 1 ? [0] : directType === null ? [] : [...enumerateTupleElements(directType)].map((e) => e.offset);
+  return {
+    buffers: indirect.map((i) => i.buffer),
+    directType,
+    assemble: (out, direct) => {
+      for (const { element, buffer } of indirect) {
+        if (element.size > 0) {
+          Memory.copy(out.add(element.offset), buffer, element.size);
+        }
+      }
+      directElements.forEach((e, k) => Memory.copy(out.add(e.offset), direct!.add(directOffsets[k]), e.size));
+    },
+  };
+}
+
+// sret serves a lone indirect result, but beside a direct value or a second indirect result the
+// buffers are passed as the first arguments instead (IRGen's SignatureExpansion drops sret in both
+// cases); a direct value too wide for the registers takes sret itself.
+function lowerDestructuredResult(returnType: DestructuredTuple): ResultLowering {
+  const { size, stride } = returnType.tuple.valueWitnesses;
+  const { buffers, directType, assemble } = lowerDestructuredElements(returnType);
   const directIndirect = directType !== null && shouldPassIndirectly(directType);
   const direct = directType !== null && !directIndirect ? placeDirect(directType) : [];
-  const sret = directIndirect ? Memory.alloc(directType!.valueWitnesses.stride) : directType === null && indirect.length === 1 ? indirect[0].buffer : null;
-  const leading = indirect.map((i) => i.buffer).filter((b) => b !== sret);
-  const assemble = (out: NativePointer, registerDump: NativePointer): void => {
-    for (const { element, buffer } of indirect) {
-      Memory.copy(out.add(element.offset), buffer, element.size);
-    }
+  const sret = directIndirect ? Memory.alloc(directType!.valueWitnesses.stride) : directType === null && buffers.length === 1 ? buffers[0] : null;
+  const leading = buffers.filter((b) => b !== sret);
+  const assembleFromRegisters = (out: NativePointer, registerDump: NativePointer): void => {
+    let value: NativePointer | null = null;
     if (directType !== null) {
-      const value = directIndirect ? sret! : Memory.alloc(directType.valueWitnesses.stride);
+      value = directIndirect ? sret! : Memory.alloc(directType.valueWitnesses.stride);
       if (!directIndirect) {
         copyDirect(direct, registerDump, value);
       }
-      directElements.forEach((e, k) => Memory.copy(out.add(e.offset), value.add(directOffsets[k]), e.size));
     }
+    assemble(out, value);
   };
-  return { size, stride, sret, leading, direct, assemble };
+  return { size, stride, sret, leading, direct, assemble: assembleFromRegisters };
 }
 
 // Each result register a direct result uses, stored by the trampoline at its frame offset.
@@ -859,7 +892,11 @@ export function makeSwiftNativeFunction(
           if ("register" in location) {
             slot.writeU64(0);
           }
-          Memory.copy(slot, value.add(piece.offset), piece.size);
+          if (piece.byAddress === true) {
+            slot.writePointer(value.add(piece.offset));
+          } else {
+            Memory.copy(slot, value.add(piece.offset), piece.size);
+          }
         });
       }
     }

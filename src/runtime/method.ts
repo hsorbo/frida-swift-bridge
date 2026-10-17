@@ -44,6 +44,7 @@ import {
   LoweredScalar,
   argumentRegisterUse,
   argumentSlotBase,
+  lowerDestructuredElements,
   placeAsyncResultScalars,
   placeTypedErrorScalars,
   typedErrorReturnsDirectly,
@@ -282,7 +283,7 @@ export interface ResolvedMethod {
   asyncFunctionPointer?: AsyncFunctionPointer;
   witnessSelf?: WitnessTable;
   witnessTables?: NativePointer[];
-  abstractArgs?: boolean[];
+  abstractArgs?: Abstraction[];
   abstractReturn?: Abstraction;
   returnClosure?: ArgPlan; // a function-typed result, planned in place of returnType
   argConventions?: ParamConvention[];
@@ -1482,9 +1483,13 @@ function planOf(resolved: ResolvedMethod): CallPlan {
   return {
     address: resolved.address,
     selector: resolved.selector,
-    argPlans: resolved.argTypes.map((metadata, i) =>
-      passedByAddress(resolved, i) ? { kind: "abstractIndirect", metadata } : { kind: "concrete", metadata }
-    ),
+    argPlans: resolved.argTypes.map((metadata, i): ArgPlan => {
+      const abstraction = resolved.abstractArgs?.[i];
+      if (passedByAddress(resolved, i)) {
+        return { kind: "abstractIndirect", metadata };
+      }
+      return Array.isArray(abstraction) ? { kind: "destructuredTuple", metadata, byAddress: abstraction } : { kind: "concrete", metadata };
+    }),
     returnPlan:
       returnType === null
         ? resolved.returnClosure ?? null
@@ -1572,13 +1577,17 @@ function withInvoker<T>(plan: CallPlan, hasSelf: boolean, trailingSelf: Metadata
   }
 }
 
-// A generic or abstract return is @out even when its concrete type would ride registers.
+// A generic or abstract return is @out even when its concrete type would ride registers. A
+// destructured tuple's direct elements ride them as one value; its others each take a buffer.
 function resultShapeOf(plan: CallPlan): AsyncResultShape | null {
   if (plan.returnPlan === null) {
     return null;
   }
   if (plan.returnPlan.kind === "closureResult") {
     throw new Error(`${plan.selector}: an async closure result is unsupported`);
+  }
+  if (plan.returnPlan.kind === "destructuredTuple") {
+    return asyncResultShape(lowerDestructuredElements({ tuple: plan.returnPlan.metadata, byAddress: plan.returnPlan.byAddress }).directType);
   }
   const metadata = planMetadata(plan.returnPlan);
   if (plan.returnPlan.kind === "generic" || plan.returnPlan.kind === "abstractIndirect") {
@@ -1632,8 +1641,8 @@ export class BoundMethod {
       if (plan.asyncFunctionPointer === undefined) {
         throw new Error(`${plan.selector} is not async`);
       }
-      if (plan.returnPlan?.kind === "destructuredTuple") {
-        throw new Error(`${plan.selector}: an async tuple result with an opaque element is unsupported`);
+      if (plan.returnPlan?.kind === "destructuredTuple" && plan.thrown !== undefined) {
+        throw new Error(`${plan.selector}: a typed throw beside a destructured tuple result is unsupported`);
       }
       this.result = resultShapeOf(plan);
     } else {
@@ -1731,7 +1740,14 @@ export class BoundMethod {
     const cleanup = (): void => {
       marshalled.destroyBorrowedTemps();
     };
+    // The buffers of a destructured tuple result lead the arguments, behind the one a direct part
+    // too wide for the registers takes.
+    const destructured =
+      plan.returnPlan?.kind === "destructuredTuple"
+        ? lowerDestructuredElements({ tuple: plan.returnPlan.metadata, byAddress: plan.returnPlan.byAddress })
+        : null;
     const lowered = new AsyncArgs(this.result?.kind === "indirect" ? 1 : 0);
+    destructured?.buffers.forEach((buffer) => lowered.pushWord(buffer));
     plan.argPlans.forEach((argPlan, i) => {
       const closure = closures[i];
       if (closure !== null) {
@@ -1739,6 +1755,15 @@ export class BoundMethod {
         lowered.pushWord(closure.context);
       } else if (argPlan.kind === "generic" || argPlan.kind === "abstractIndirect") {
         lowered.pushWord(marshalled.ptrs[i]);
+      } else if (argPlan.kind === "destructuredTuple") {
+        [...enumerateTupleElements(argPlan.metadata)].forEach((element, k) => {
+          const address = marshalled.ptrs[i].add(element.offset);
+          if (argPlan.byAddress[k]) {
+            lowered.pushWord(address);
+          } else {
+            lowered.push(element.type, address);
+          }
+        });
       } else {
         lowered.push(planMetadata(argPlan), marshalled.ptrs[i]);
       }
@@ -1800,7 +1825,13 @@ export class BoundMethod {
     return callAsync(this.asyncFunctionPointer, gp, options).then(
       (ret) => {
         try {
-          return this.decode(this.result === null ? null : ret);
+          let value = this.result === null ? null : ret;
+          if (destructured !== null) {
+            const tuple = Memory.alloc(planMetadata(plan.returnPlan!).valueWitnesses.stride);
+            destructured.assemble(tuple, value);
+            value = tuple;
+          }
+          return this.decode(value);
         } finally {
           cleanup();
           void self; // the trampoline embeds its address; keep it allocated until settle
@@ -2440,6 +2471,12 @@ function planCompoundType(
   if (metadata === null) {
     throw new Error(`cannot resolve generic signature type ${type.text}`);
   }
+  if (type.kind === "tuple") {
+    const byAddress = destructuredTupleLayout(type, (name) => (genericParams.includes(name) && !classBoundParams.has(name) ? "opaque" : null));
+    if (byAddress !== null) {
+      return { kind: "destructuredTuple", metadata, byAddress };
+    }
+  }
   return compoundIsAddressOnly(type, genericParams, classBoundParams)
     ? { kind: "abstractIndirect", metadata }
     : { kind: "concrete", metadata };
@@ -2476,7 +2513,7 @@ function compoundIsAddressOnly(type: TypeExpr, genericParams: string[], classBou
   throw new Error(`unsupported compound generic signature type ${type.text} (only [T], [K: V], T? and a nominal type are supported)`);
 }
 
-// inout passes the caller's value by address whatever its layout.
+// inout passes the caller's value by address whatever its layout, a tuple whole rather than destructured.
 function planParam(plan: ArgPlan, convention: ParamConvention, selector: string): ArgPlan {
   if (convention === "borrowed") {
     return plan;
@@ -2484,7 +2521,9 @@ function planParam(plan: ArgPlan, convention: ParamConvention, selector: string)
   if (plan.kind === "closure") {
     throw new Error(`${selector}: ${convention} closure parameters are unsupported`);
   }
-  return convention === "inout" && plan.kind === "concrete" ? { kind: "abstractIndirect", metadata: plan.metadata } : plan;
+  return convention === "inout" && (plan.kind === "concrete" || plan.kind === "destructuredTuple")
+    ? { kind: "abstractIndirect", metadata: plan.metadata }
+    : plan;
 }
 
 function swiftArgType(plan: ArgPlan): SwiftArgType {
@@ -3983,7 +4022,7 @@ function resolveWitnessSignature(
     throws: signature.throws,
     thrown,
     selector: signature.selector,
-    abstractArgs: params.types.map((t) => hasOpaqueLayout(t, layout)),
+    abstractArgs: params.types.map((t) => destructuredTupleLayout(t, layout) ?? hasOpaqueLayout(t, layout)),
     abstractReturn:
       signature.result === null ? false : destructuredTupleLayout(signature.result, layout) ?? hasOpaqueLayout(signature.result, layout),
     argConventions: params.conventions,

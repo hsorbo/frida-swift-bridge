@@ -3,6 +3,7 @@ import { loadFixture, loadFixtureSyms, loadOptimized } from "./fixtures/load.js"
 import { requireDarwin, requireSymbolTable } from "./swift.js";
 
 import { Swift, SwiftObject, SwiftClass, SwiftStruct } from "../src/index.js";
+import { ValueInstance, asSwiftObject, metadataOf } from "../src/abi.js";
 
 describe("protocol-extension members on a conforming type", () => {
   beforeEach(() => { loadFixture(); });
@@ -111,6 +112,28 @@ describe("protocol-extension members on a conforming type", () => {
     expect(source.paired(9)).toEqual([int64(9), int64(7)]);
     expect(source.twice(4)).toEqual([int64(4), int64(4)]);
     expect(source.bracketed(6)).toEqual([1, int64(6), 2]);
+  });
+
+  test("an extension method taking a tuple with an associated-type element passes that element by address", () => {
+    const source = (Swift.type("fixture.IntSource") as SwiftStruct).$new({ value: 5 });
+    expect(source.flipped([9, 4])).toEqual([int64(4), int64(9)]);
+    expect(source.unbracketed([1, 6, 2])).toEqual([int64(6), int64(12)]);
+  });
+
+  test("an inout tuple with an associated-type element is passed whole by address", () => {
+    const source = (Swift.type("fixture.IntSource") as SwiftStruct).$new({ value: 5 });
+    const pair = asSwiftObject(ValueInstance.fromJS(metadataOf(Swift.reflect("(Swift.Int, Swift.Int)")!), [1, 2]));
+    source.refill(pair, 9);
+    expect(pair.$fields).toEqual([int64(9), int64(3)]);
+  });
+
+  test("an async extension method returning a tuple with an associated-type element gets that element through a buffer", async (ctx) => {
+    requireSymbolTable(ctx);
+    loadFixtureSyms();
+    const source = (Swift.type("fixturesyms.IntSource") as SwiftStruct).$new({ value: 5 });
+    expect(await source.pairedLater(9)).toEqual([int64(9), int64(7)]);
+    expect(await source.twiceLater(4)).toEqual([int64(4), int64(4)]);
+    expect(await source.bracketedLater(6)).toEqual([1, int64(6), 2]);
   });
 
   test("an extension method still ambiguous after filtering lists its overloads", () => {

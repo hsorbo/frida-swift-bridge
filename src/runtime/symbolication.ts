@@ -289,8 +289,8 @@ export function hasOpaqueLayout(type: TypeExpr, paramLayout: (name: string) => P
   return false;
 }
 
-// At protocol level a tuple with an opaque element is destructured: each element is its own
-// result, the opaque ones by address. Null when no element is opaque or one is itself a tuple.
+// A tuple with an opaque element is destructured: each element is its own parameter or result,
+// the opaque ones by address. Null when no element is opaque or one is itself a tuple.
 export function destructuredTupleLayout(type: TypeExpr, paramLayout: (name: string) => ParamLayout | null): boolean[] | null {
   if (type.kind !== "tuple" || type.elements.some((e) => e.type.kind === "tuple")) {
     return null;

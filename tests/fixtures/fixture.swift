@@ -402,6 +402,10 @@ public final class Box {
     public func mix<T>(_ w: Wrapper, _ x: T) -> Int { w.a }
     public func mixAsync<T>(_ w: Wrapper, _ x: T) async -> Int { await Task.yield(); return w.a }
     public func combineAsync(_ w: Wrapper, _ x: Int) async -> Int { await Task.yield(); return w.a + x }
+    // A tuple spelled with a T element is destructured: T by address, Int direct; inout keeps it whole.
+    public func pairFlipped<T>(_ p: (T, Int)) -> (Int, T) { (p.1, p.0) }
+    public func pairFlippedAsync<T>(_ p: (T, Int)) async -> (Int, T) { (p.1, p.0) }
+    public func pairRefill<T>(_ p: inout (T, Int), _ x: T) { p = (x, p.1 + 1) }
 }
 
 public func firstGeneric<T>(_ xs: [T]) -> T { xs[0] }
@@ -1187,6 +1191,12 @@ extension ItemSource {
     public func paired(_ x: Item) -> (Item, Int) { (x, 7) }
     public func twice(_ x: Item) -> (Item, Item) { (x, x) }
     public func bracketed(_ x: Item) -> (Int8, Item, Int8) { (1, x, 2) }
+    public func flipped(_ p: (Item, Int)) -> (Int, Item) { (p.1, p.0) }
+    public func unbracketed(_ p: (Int8, Item, Int8)) -> (Item, Int) { (p.1, Int(p.0) * 10 + Int(p.2)) }
+    public func refill(_ p: inout (Item, Int), _ x: Item) { p = (x, p.1 + 1) }
+    public func pairedLater(_ x: Item) async -> (Item, Int) { (x, 7) }
+    public func twiceLater(_ x: Item) async -> (Item, Item) { (x, x) }
+    public func bracketedLater(_ x: Item) async -> (Int8, Item, Int8) { (1, x, 2) }
 }
 public struct IntSource: ItemSource {
     public var value: Int

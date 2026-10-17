@@ -249,8 +249,9 @@ function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
         setEnumTag(metadata, address, tag);
       };
     }
+    case MetadataKind.Tuple:
     case MetadataKind.FixedArray: {
-      const elements = [...enumerateFixedArrayElements(metadata)];
+      const elements = metadata.kind === MetadataKind.Tuple ? [...enumerateTupleElements(metadata)] : [...enumerateFixedArrayElements(metadata)];
       if (!Array.isArray(value) || value.length !== elements.length) {
         throw new Error(`writeValue: expected an array of ${elements.length} elements for ${typeName(metadata)}`);
       }

@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
-import { ClassType, ValueInstance, asSwiftObject, metadataFor, typeOf } from "../src/abi.js";
+import { ClassType, ValueInstance, asSwiftObject, metadataFor, metadataOf, typeOf } from "../src/abi.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 
 import { Swift } from "../src/index.js";
@@ -54,5 +54,22 @@ describe("compound generic-using exprs in generic methods", () => {
     // The Array is opaque to the JS writers; as a ValueInstance it byte-copies through a high-level .call() arg.
     const arr = ValueInstance.fromCopy(ArrInt, arrPtr);
     expect(box().$method("sumInts").call(asSwiftObject(arr))).toEqual(int64(21));
+  });
+
+  test("a tuple with a T element passes and returns that element by address", () => {
+    const Str = metadataFor("Swift.String")!;
+    expect(box().$method("pairFlipped", { typeArguments: [typeOf(Str)] }).call(["hi", 4])).toEqual([int64(4), "hi"]);
+  });
+
+  test("an async tuple result with a T element arrives through a buffer ahead of the arguments", async () => {
+    const Str = metadataFor("Swift.String")!;
+    expect(await box().$method("pairFlippedAsync", { typeArguments: [typeOf(Str)] }).call(["hi", 4])).toEqual([int64(4), "hi"]);
+  });
+
+  test("an inout tuple with a T element is passed whole by address", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const pair = asSwiftObject(ValueInstance.fromJS(metadataOf(Swift.reflect("(Swift.Int, Swift.Int)")!), [1, 2]));
+    box().$method("pairRefill", { typeArguments: [typeOf(Int)] }).call(pair, 9);
+    expect(pair.$fields).toEqual([int64(9), int64(3)]);
   });
 });
