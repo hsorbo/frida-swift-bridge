@@ -161,4 +161,23 @@ describe("closure captures", () => {
     expect((self.read() as NativePointer).equals(stepper.$handle)).toBe(true);
     expect(() => self.write(ptr(0))).toThrow();
   });
+
+  test("a weak capture reads as its referent while it lives and nil after; an unowned one as its reference; neither is writable", () => {
+    const stepper = Swift.class("fixture.Stepper")!.init()!;
+    const weak = stepper.weakIncrementer() as SwiftClosureValue;
+    {
+      using unowned = stepper.unownedIncrementer() as SwiftClosureValue;
+      const [unownedSelf] = unowned.$captures();
+      expect(unownedSelf.type.name).toBe("fixture.Stepper");
+      expect((unownedSelf.read() as NativePointer).equals(stepper.$handle)).toBe(true);
+      expect(() => unownedSelf.write(stepper.$handle)).toThrow(/unowned/);
+    }
+    const [weakSelf] = weak.$captures();
+    expect(weakSelf.type.name).toBe("Swift.Optional<fixture.Stepper>");
+    expect(weakSelf.read()).toEqual({ some: stepper.$handle });
+    expect(() => weakSelf.write(null)).toThrow(/weak/);
+    stepper.$dispose();
+    expect(weakSelf.read()).toBe("none");
+    expect(weak()).toEqual(int64(-1));
+  });
 });

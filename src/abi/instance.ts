@@ -329,7 +329,7 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
 
 // An unowned slot holds the object pointer itself; a weak one a WeakReference, read by loading a
 // strong reference, which is dropped again so the field reads as a snapshot like a strong one.
-export function readField({ type, address, storage }: InstanceField): SwiftValue {
+export function readField({ type, address, storage }: Pick<InstanceField, "type" | "address" | "storage">): SwiftValue {
   if (type === null) {
     return null;
   }

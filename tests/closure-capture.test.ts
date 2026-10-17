@@ -11,7 +11,7 @@ import { Metadata, MetadataKind } from "../src/abi/metadata.js";
 import { typeName } from "../src/runtime/type-name.js";
 import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
-import { Swift } from "../src/index.js";
+import { Swift, SwiftClosureValue } from "../src/index.js";
 import { ARM64E_ABI } from "../src/basic/pac.js";
 const HEAP_LOCAL_VARIABLE = 0x400;
 const NOT_A_CLOSURE = 0x0;
@@ -289,6 +289,14 @@ describe("closure capture values (live runtime)", () => {
     const context = capturingContext() as NativePointer;
 
     expect(readCaptures(context)).toEqual([int64(7), "-fixture"]);
+  });
+
+  test("readCaptures loads a weak capture's referent rather than its weak reference", () => {
+    requireSwift();
+    loadFixture();
+    const stepper = Swift.class("fixture.Stepper")!.init()!;
+    const weak = stepper.weakIncrementer() as SwiftClosureValue;
+    expect(readCaptures(weak.context)).toEqual([{ some: stepper.$handle }]);
   });
 
   test("decodes a captured struct", () => {

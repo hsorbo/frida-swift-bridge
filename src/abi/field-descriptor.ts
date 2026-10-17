@@ -75,12 +75,13 @@ export class Field {
   // the runtime drops when resolving it, so the slot's layout is only told apart here.
   get referenceStorage(): ReferenceStorage | null {
     const ptr = RelativeDirectPointer.resolve(this.handle.add(OFFSETOF_FR_MANGLED_TYPE_NAME));
-    if (ptr === null) {
-      return null;
-    }
-    const { trailingText } = scanSymbolicMangledName(ptr);
-    return REFERENCE_STORAGE_OPERATORS[trailingText.slice(-2)] ?? null;
+    return ptr === null ? null : referenceStorageOf(ptr);
   }
+}
+
+export function referenceStorageOf(mangledTypeName: NativePointer): ReferenceStorage | null {
+  const { trailingText } = scanSymbolicMangledName(mangledTypeName);
+  return REFERENCE_STORAGE_OPERATORS[trailingText.slice(-2)] ?? null;
 }
 
 export function* enumerateFields(descriptor: ContextDescriptor): Generator<Field> {

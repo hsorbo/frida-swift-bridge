@@ -1,5 +1,7 @@
 import {
   MangledName,
+  ReferenceStorage,
+  referenceStorageOf,
   resolveTypeByMangledName,
   resolveTypeByMangledNameInEnvironment,
   symbolicMangledNameLength,
@@ -36,6 +38,11 @@ export class CaptureTypeRecord {
   get mangledTypeName(): MangledName | null {
     const ptr = RelativeDirectPointer.resolve(this.handle);
     return ptr === null ? null : { address: ptr, length: symbolicMangledNameLength(ptr) };
+  }
+
+  get referenceStorage(): ReferenceStorage | null {
+    const ptr = RelativeDirectPointer.resolve(this.handle);
+    return ptr === null ? null : referenceStorageOf(ptr);
   }
 }
 

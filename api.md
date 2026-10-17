@@ -1215,6 +1215,8 @@ descriptor into field views (`SwiftField`: `handle`, `type`, `read()`,
 `write()`), one per capture in declaration order, each valid as long as the
 closure is. A captured object reads as its reference, a captured metatype as
 its type's [reflection](#reflection), and a captured closure as another view. A
+`[weak x]` capture reads as an optional of its referent, `"none"` once that is
+gone; a weak or unowned capture's view refuses writes. A
 closure made in a generic function types its captures by the arguments it was
 made with:
 

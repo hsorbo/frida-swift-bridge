@@ -8,11 +8,13 @@ import {
 } from "./capture-descriptor.js";
 import { Metadata, MetadataKind } from "./metadata.js";
 import { classMetadataOf } from "./class-metadata.js";
-import { readValue, SwiftValue } from "./instance.js";
+import { readField, SwiftValue } from "./instance.js";
+import { ReferenceStorage } from "./field-descriptor.js";
 
 export interface CaptureSlot {
   type: Metadata;
   address: NativePointer;
+  storage: ReferenceStorage | null;
 }
 
 // null: no closure, a generic parameter no metadata source supplies, or an unresolved capture type.
@@ -51,7 +53,7 @@ function layoutSoleClassCapture(context: NativePointer): CaptureSlot[] | null {
   const address = context.add(offsetToFirstCapture(context)).add(Process.pointerSize);
   try {
     const type = new Metadata(classMetadataOf(address.readPointer()).handle);
-    return type.kind === MetadataKind.Class ? [{ type, address }] : null;
+    return type.kind === MetadataKind.Class ? [{ type, address, storage: null }] : null;
   } catch {
     return null;
   }
@@ -63,7 +65,7 @@ function layoutObjectAsContext(context: NativePointer): CaptureSlot[] | null {
   if (type.kind !== MetadataKind.Class) {
     return null;
   }
-  return [{ type, address: Memory.alloc(Process.pointerSize).writePointer(context) }];
+  return [{ type, address: Memory.alloc(Process.pointerSize).writePointer(context), storage: null }];
 }
 
 // A class reference or metatype capture is placed before its type resolves, since the generic
@@ -108,12 +110,12 @@ function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
     if (type === null) {
       return null;
     }
-    slots.push({ type, address: addresses[i] });
+    slots.push({ type, address: addresses[i], storage: records[i].referenceStorage });
   }
   return slots;
 }
 
 export function readCaptures(context: NativePointer): SwiftValue[] | null {
   const slots = layoutCaptures(context);
-  return slots === null ? null : slots.map(({ type, address }) => readValue(type, address));
+  return slots === null ? null : slots.map(readField);
 }

@@ -1810,6 +1810,19 @@ public final class Stepper {
             return self.n
         }
     }
+    public func weakIncrementer() -> () -> Int {
+        return { [weak self] in
+            guard let self else { return -1 }
+            self.n += 1
+            return self.n
+        }
+    }
+    public func unownedIncrementer() -> () -> Int {
+        return { [unowned self] in
+            self.n += 1
+            return self.n
+        }
+    }
 }
 
 public actor Ticker {

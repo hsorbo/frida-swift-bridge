@@ -1,5 +1,7 @@
-import { layoutCaptures } from "../abi/closure-capture.js";
+import { CaptureSlot, layoutCaptures } from "../abi/closure-capture.js";
+import { readField } from "../abi/instance.js";
 import { ValueInstance } from "../abi/value.js";
+import { typeOf } from "./swift-type.js";
 import type { SwiftField } from "./object-facade.js";
 import type { SwiftClosureValue, RawInstance } from "./method.js";
 import { isOnCurrentThreadStack } from "./thread-stack.js";
@@ -23,7 +25,23 @@ export function captureFields(closure: SwiftClosureValue, lifetime: ClosureLifet
       `the captures of closure ${closure.function} cannot be laid out: its context carries no capture descriptor, or a capture's type does not resolve`
     );
   }
-  return slots.map(({ type, address }) => ValueInstance.borrow(type, address, lifetime));
+  return slots.map((slot) =>
+    slot.storage === null ? ValueInstance.borrow(slot.type, slot.address, lifetime) : referenceStorageField(slot, lifetime)
+  );
+}
+
+function referenceStorageField(slot: CaptureSlot, lifetime: ClosureLifetime | null): SwiftField {
+  return {
+    handle: slot.address,
+    type: typeOf(slot.type),
+    read() {
+      lifetime?.checkLive();
+      return readField(slot);
+    },
+    write() {
+      throw new Error(`a ${slot.storage} capture is not writable through its view`);
+    },
+  };
 }
 
 // Shared by every closure view, so a borrowed one costs its two words and nothing per bridge member.
