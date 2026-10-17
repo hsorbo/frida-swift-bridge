@@ -554,9 +554,17 @@ export function argumentRegisterUse(argTypes: SwiftArgType[], implicitWords: num
   return allocator.registersUsed;
 }
 
-// The argument slot the formal arguments start at, past an indirect result's pointer where that is an argument.
+// The argument slot the formal arguments start at, past an indirect result's pointer where that is an
+// argument and past the buffers of a destructured tuple result, which are arguments on every platform.
 export function argumentSlotBase(returnType: SwiftArgType | null): number {
-  if (!SWIFTCC.indirectResultIsArgument || returnType === null || isDestructuredTuple(returnType) || isClosureRef(returnType)) {
+  if (returnType === null || isClosureRef(returnType)) {
+    return 0;
+  }
+  if (isDestructuredTuple(returnType)) {
+    const { sret, leading } = destructuredResultSlots(returnType);
+    return leading + (SWIFTCC.indirectResultIsArgument && sret ? 1 : 0);
+  }
+  if (!SWIFTCC.indirectResultIsArgument) {
     return 0;
   }
   const indirect = returnType instanceof Metadata ? returnType.valueWitnesses.size > 0 && shouldPassIndirectly(returnType) : true;
@@ -655,9 +663,8 @@ export interface DestructuredElements {
   assemble: (out: NativePointer, direct: NativePointer | null) => void;
 }
 
-export function lowerDestructuredElements({ tuple, byAddress }: DestructuredTuple): DestructuredElements {
+function destructuredElements({ tuple, byAddress }: DestructuredTuple) {
   const elements = [...enumerateTupleElements(tuple)].map((e, i) => ({ ...e, size: e.type.valueWitnesses.size, byAddress: byAddress[i] || shouldPassIndirectly(e.type) }));
-  const indirect = elements.filter((e) => e.byAddress).map((element) => ({ element, buffer: Memory.alloc(Math.max(element.type.valueWitnesses.stride, 1)) }));
   const directElements = elements.filter((e) => !e.byAddress && e.size > 0);
   const directType =
     directElements.length === 0
@@ -665,6 +672,12 @@ export function lowerDestructuredElements({ tuple, byAddress }: DestructuredTupl
       : directElements.length === 1
         ? directElements[0].type
         : getUnlabelledTupleTypeMetadata(directElements.map((e) => e.type));
+  return { indirectElements: elements.filter((e) => e.byAddress), directElements, directType };
+}
+
+export function lowerDestructuredElements(returnType: DestructuredTuple): DestructuredElements {
+  const { indirectElements, directElements, directType } = destructuredElements(returnType);
+  const indirect = indirectElements.map((element) => ({ element, buffer: Memory.alloc(Math.max(element.type.valueWitnesses.stride, 1)) }));
   const directOffsets = directElements.length === 1 ? [0] : directType === null ? [] : [...enumerateTupleElements(directType)].map((e) => e.offset);
   return {
     buffers: indirect.map((i) => i.buffer),
@@ -701,6 +714,14 @@ function lowerDestructuredResult(returnType: DestructuredTuple): ResultLowering 
     assemble(out, value);
   };
   return { size, stride, sret, leading, direct, assemble: assembleFromRegisters };
+}
+
+function destructuredResultSlots(returnType: DestructuredTuple): { sret: boolean; leading: number } {
+  const { indirectElements, directType } = destructuredElements(returnType);
+  if (directType !== null) {
+    return { sret: shouldPassIndirectly(directType), leading: indirectElements.length };
+  }
+  return indirectElements.length === 1 ? { sret: true, leading: 0 } : { sret: false, leading: indirectElements.length };
 }
 
 // Each result register a direct result uses, stored by the trampoline at its frame offset.

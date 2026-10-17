@@ -35,6 +35,13 @@ describe("generic methods on value receivers", () => {
     expect(value.$field("base").read()).toEqual(int64(4));
   });
 
+  test("small loadable receiver: a mutating self is inferred past the buffer of a destructured tuple result", () => {
+    const Int = Swift.type("Swift.Int")!;
+    const value = box("fixture.SmallGenericBox", { base: 10 });
+    expect(value.$method("swapped", { typeArguments: [Int] }).call(3)).toEqual([int64(3), int64(10)]);
+    expect(value.$field("base").read()).toEqual(int64(11));
+  });
+
   test("small receiver: a String generic argument routes through the value self", () => {
     const Str = Swift.type("Swift.String")!;
     expect(box("fixture.SmallGenericBox", { base: 1 }).$method("echo", { typeArguments: [Str], self: "borrowing" }).call("hi")).toBe("hi");

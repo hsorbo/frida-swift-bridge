@@ -5,12 +5,14 @@ import { Swift } from "../src/index.js";
 import {
   shouldPassIndirectly,
   makeSwiftNativeFunction,
+  argumentSlotBase,
 } from "../src/runtime/calling-convention.js";
+import { SWIFTCC } from "../src/runtime/swiftcc.js";
 import { SwiftError } from "../src/runtime/thrown-error.js";
 import { readString } from "../src/abi/string.js";
 import { findProtocol, conformsToProtocol } from "../src/abi/protocol-conformance.js";
 
-import { metadataFor } from "../src/abi.js";
+import { metadataFor, metadataOf } from "../src/abi.js";
 // Exposed by the GumJS runtime, not declared in @types/frida-gum.
 declare function gc(): void;
 
@@ -332,5 +334,22 @@ describe("makeSwiftNativeFunction", () => {
       { typeArguments: [Int], witnessTables: [witnessTable] }
     );
     expect(scale(intValue(6), intValue(7))!.readU64().toNumber()).toBe(42);
+  });
+});
+
+describe("argumentSlotBase", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("the by-address elements of a destructured tuple result are passed ahead of the arguments", () => {
+    const pair = metadataOf(Swift.reflect("(Swift.Int, Swift.Int)")!);
+    expect(argumentSlotBase({ tuple: pair, byAddress: [false, false] })).toBe(0);
+    expect(argumentSlotBase({ tuple: pair, byAddress: [true, false] })).toBe(1);
+    expect(argumentSlotBase({ tuple: pair, byAddress: [true, true] })).toBe(2);
+  });
+
+  test("a direct part too wide for the registers takes sret beside the by-address elements", () => {
+    const wide = metadataOf(Swift.reflect("(Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int, Swift.Int)")!);
+    const sretSlot = SWIFTCC.indirectResultIsArgument ? 1 : 0;
+    expect(argumentSlotBase({ tuple: wide, byAddress: [true, false, false, false, false, false] })).toBe(1 + sretSlot);
   });
 });

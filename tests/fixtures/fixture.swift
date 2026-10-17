@@ -448,6 +448,7 @@ public struct SmallGenericBox {
     public func ignore<T>(_ x: T) {}
     public func scaledByAsync<T: Scalable>(_ x: T, _ k: Int) async -> Int { base + x.scaled(by: k) }
     public mutating func accumulateAsync<T: Scalable>(_ x: T, _ k: Int) async { base += x.scaled(by: k) }
+    public mutating func swapped<T>(_ x: T) -> (T, Int) { let old = base; base += 1; return (x, old) }
 }
 public struct BigGenericBox {
     public var a: Int; public var b: Int; public var c: Int; public var d: Int; public var e: Int
