@@ -5,7 +5,7 @@ import { Swift, isSwiftObject, type SwiftValue, type SwiftObject, type CallResul
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
 import { requireSymbolTable } from "./swift.js";
 
-import { metadataFor, metadataOf, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
+import { metadataFor, metadataOf, typeOf, type ClassType, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
 
 const MAKE_LINK = "$s7fixture8makeLinkyAA0C0VSSF";
 const LINK_ADDRESS = "$s7fixture11linkAddressySSAA4LinkVF";
@@ -840,5 +840,106 @@ describe("Swift.Interceptor.attach on members of generic types", () => {
     makeSwiftNativeFunction(fixtureExport("fixture.addInts"), metadataFor("Swift.Int")!, [metadataFor("Swift.Int")!, metadataFor("Swift.Int")!])(intValue(1), intValue(2));
     listener.detach();
     expect(seen).toEqual([[], []]);
+  });
+});
+
+describe("Swift.Interceptor.attach on tuples the signature spells", () => {
+  function hookDuring(target: Parameters<typeof Swift.Interceptor.attach>[0], call: () => unknown): { args: SwiftValue[]; ret: CallResult; called: unknown } {
+    let args: SwiftValue[] = [];
+    let ret: CallResult = null;
+    const listener = Swift.Interceptor.attach(target, {
+      onEnter(a) {
+        args = [...a];
+      },
+      onLeave(r) {
+        ret = r;
+      },
+    });
+    let called: unknown;
+    try {
+      called = call();
+    } finally {
+      listener.detach();
+    }
+    return { args, ret, called };
+  }
+
+  test("reads a concrete tuple argument element by element, nested and wide ones too", () => {
+    const module = loadFixture();
+    const packedSum = Swift.function(module, "$s7fixture9packedSumySis4Int8V_ADt_tF");
+    expect(hookDuring(packedSum, () => packedSum.call([1, 2]))).toEqual({ args: [[1, 2]], ret: int64(12), called: int64(12) });
+
+    const nestedSum = fixtureExport("fixture.nestedSum");
+    const nested = metadataOf(Swift.reflect("((Swift.Int8, Swift.Int8), Swift.Int8)")!);
+    const triple = Memory.alloc(3).writeS8(1);
+    triple.add(1).writeS8(2);
+    triple.add(2).writeS8(3);
+    const nestedCall = makeSwiftNativeFunction(nestedSum, metadataFor("Swift.Int")!, [nested]);
+    expect(hookDuring(nestedSum, () => nestedCall(triple)!.readS64().toNumber())).toEqual({ args: [[[1, 2], 3]], ret: int64(123), called: 123 });
+
+    const wideElementSum = fixtureExport("fixture.wideElementSum");
+    const wide = metadataOf(Swift.reflect("(Swift.Int8, fixture.WideScalar)")!);
+    const pair = Memory.alloc(wide.typeLayout.stride).writeS8(4);
+    [1, 2, 3, 4, 5].forEach((v, i) => pair.add(8 + i * 8).writeS64(v));
+    const wideCall = makeSwiftNativeFunction(wideElementSum, metadataFor("Swift.Int")!, [wide]);
+    expect(hookDuring(wideElementSum, () => wideCall(pair)!.readS64().toNumber())).toEqual({
+      args: [[4, { a: int64(1), b: int64(2), c: int64(3), d: int64(4), e: int64(5) }]],
+      ret: int64(9),
+      called: 9,
+    });
+  });
+
+  function box(): SwiftObject {
+    return (typeOf(metadataFor("fixture.Box")!) as ClassType).facade.init() as SwiftObject;
+  }
+
+  test("a concrete tuple argument keeps the arguments after it in place", () => {
+    const packedPlus = box().$method("packedPlus", { typeArguments: [typeOf(metadataFor("Swift.Int")!)] });
+    expect(hookDuring(packedPlus, () => packedPlus.call([1, 2], 5))).toEqual({ args: [[1, 2], int64(5)], ret: int64(20), called: int64(20) });
+  });
+
+  test("a generic method's tuples with a T element pass and return that element by address", () => {
+    const pairFlipped = box().$method("pairFlipped", { typeArguments: [typeOf(metadataFor("Swift.String")!)] });
+    expect(hookDuring(pairFlipped, () => pairFlipped.call(["hi", 4]))).toEqual({ args: [["hi", int64(4)]], ret: [int64(4), "hi"], called: [int64(4), "hi"] });
+  });
+
+  test("a tuple result of T elements only, or with a direct part too wide for the registers, comes back whole", () => {
+    const String_ = typeOf(metadataFor("Swift.String")!);
+    const twinned = box().$method("twinned", { typeArguments: [String_] });
+    expect(hookDuring(twinned, () => twinned.call("hi"))).toEqual({ args: ["hi"], ret: ["hi", "hi"], called: ["hi", "hi"] });
+    const spread = box().$method("spread", { typeArguments: [String_] });
+    const spreadOut = ["hi", int64(1), int64(2), int64(3), int64(4), int64(5)];
+    expect(hookDuring(spread, () => spread.call("hi", 1))).toEqual({ args: ["hi", int64(1)], ret: spreadOut, called: spreadOut });
+  });
+
+  test("an async hook reads tuple arguments per element and a tuple result's T element from its buffer", async () => {
+    const module = loadFixture();
+    const packedSumAsync = Swift.function(module, "$s7fixture14packedSumAsyncySis4Int8V_ADt_tYaF");
+    const pairFlippedAsync = box().$method("pairFlippedAsync", { typeArguments: [typeOf(metadataFor("Swift.String")!)] });
+    const seen: { args: SwiftValue[]; ret?: CallResult }[] = [];
+    const completions: (() => void)[] = [];
+    const completed = [0, 1].map((i) => new Promise<void>((resolve) => (completions[i] = resolve)));
+    const listeners = [packedSumAsync, pairFlippedAsync].map((target, i) =>
+      Swift.Interceptor.attachAsync(target, {
+        onEnter(args) {
+          seen[i] = { args: [...args] };
+        },
+        onComplete(ret) {
+          seen[i].ret = ret;
+          completions[i]();
+        },
+      })
+    );
+    try {
+      expect(await packedSumAsync.call([3, 4])).toEqual(int64(34));
+      expect(await pairFlippedAsync.call(["hi", 4])).toEqual([int64(4), "hi"]);
+      await Promise.all(completed);
+    } finally {
+      listeners.forEach((l) => l.detach());
+    }
+    expect(seen).toEqual([
+      { args: [[3, 4]], ret: int64(34) },
+      { args: [["hi", int64(4)]], ret: [int64(4), "hi"] },
+    ]);
   });
 });

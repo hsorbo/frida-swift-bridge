@@ -21,6 +21,11 @@ import {
   typedErrorReturnsDirectly,
   registerCount,
   PlacedResultScalar,
+  SwiftArgType,
+  DestructuredTuple,
+  argumentSlotBase,
+  destructuredElements,
+  lowerDestructuredElements,
 } from "./calling-convention.js";
 import { probeSelfOwnership, probeTypedErrorBuffer } from "./value-convention.js";
 import { AsyncFunctionPointer, isAsyncFunctionPointerSymbol } from "../abi/async-function-pointer.js";
@@ -33,6 +38,7 @@ import {
   isSingleReference,
   mentionsParam,
   resolveType,
+  voidMetadata,
   SwiftFunctionSignature,
   TypeExpr,
 } from "./symbolication.js";
@@ -100,7 +106,11 @@ type TypePlan =
   | { kind: "use"; expr: TypeExpr; indirect: boolean } // param-referencing expression: A?, [A], Array<A>
   | { kind: "metatype" } // T.Type: one GP holding the metadata pointer directly (loadable POD)
   | { kind: "closure" } // a thick function value: two GPs, the function then its context
-  | { kind: "inout"; target: ValuePlan }; // the caller's storage by address, whatever its layout
+  | { kind: "inout"; target: ValuePlan } // the caller's storage by address, whatever its layout
+  | TuplePlan;
+
+// A spelled tuple mentioning a param; a concrete one is planned whole and split by its metadata.
+type TuplePlan = { kind: "tuple"; expr: TypeExpr; elements: TypePlan[] };
 
 type ValuePlan = Exclude<TypePlan, { kind: "metatype" } | { kind: "closure" } | { kind: "inout" }>;
 
@@ -188,6 +198,9 @@ function thrownLowering(shape: CallShape, onResume: boolean, target: NativePoint
   if (thrown === null) {
     return null;
   }
+  if (ret?.kind === "tuple") {
+    throw new Error("a typed throw beside a destructured tuple result is unsupported");
+  }
   if (thrown.kind === "metatype" || thrown.kind === "closure" || thrown.kind === "inout") {
     throw new Error(`unsupported thrown type: ${thrown.kind}`);
   }
@@ -203,9 +216,7 @@ function thrownLowering(shape: CallShape, onResume: boolean, target: NativePoint
 // The argument register past the formal arguments, a trailing self and the generic words; null
 // when a trailing self's routing is unknown or the register would be on the stack.
 function thrownSlotRegister({ args, receiver, generics, witnessWords }: CallShape, startReg: number): number | null {
-  const argTypes = args.map((plan) =>
-    plan.kind === "concrete" ? plan.metadata : plan.kind === "closure" ? { closure: true as const } : { genericParam: 0 }
-  );
+  const argTypes = argumentTypes(args);
   if (receiver !== null && receiver.trailing !== false) {
     const lowering = receiverLowering(receiver);
     if (receiver.trailing === null || lowering === null) {
@@ -216,6 +227,14 @@ function thrownSlotRegister({ args, receiver, generics, witnessWords }: CallShap
   const passedWords = generics.sources.filter((s) => s.kind === "passed").length + (generics.passesSelfMetadata ? 1 : 0);
   const gp = startReg + argumentRegisterUse(argTypes, passedWords + witnessWords).gp;
   return gp < SWIFTCC.gpArgs.length ? gp : null;
+}
+
+function argumentTypes(plans: TypePlan[]): SwiftArgType[] {
+  return plans.flatMap((plan): SwiftArgType[] =>
+    plan.kind === "tuple"
+      ? argumentTypes(plan.elements)
+      : [plan.kind === "concrete" ? plan.metadata : plan.kind === "closure" ? { closure: true } : { genericParam: 0 }]
+  );
 }
 
 // A direct result's scalars: a metatype or a single-reference generic use is one word, a thick
@@ -231,7 +250,7 @@ function directResultScalars(ret: TypePlan | null): LoweredScalar[] {
 }
 
 function needsGenerics(plan: TypePlan | null): boolean {
-  return plan !== null && (plan.kind === "param" || plan.kind === "use");
+  return plan !== null && (plan.kind === "param" || plan.kind === "use" || plan.kind === "tuple");
 }
 
 function planType(type: TypeExpr, genericParams: string[]): TypePlan {
@@ -248,6 +267,9 @@ function planType(type: TypeExpr, genericParams: string[]): TypePlan {
   }
   if (type.kind === "function") {
     return { kind: "closure" };
+  }
+  if (type.kind === "tuple") {
+    return { kind: "tuple", expr: type, elements: type.elements.map((e) => planType(e.type, genericParams)) };
   }
   if (mentionsParam(type, genericParams)) {
     const indirect = hasOpaqueLayout(type, (n) => (genericParams.includes(n) ? "opaque" : null));
@@ -267,7 +289,8 @@ function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, ge
       return plan.metadata;
     case "param":
       return generics[plan.paramIndex];
-    case "use": {
+    case "use":
+    case "tuple": {
       const metadata = resolveParsedType(plan.expr, (name) => {
         const i = genericParams.indexOf(name);
         return i >= 0 ? generics[i] : null;
@@ -500,7 +523,13 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
       throws: parsed.throws,
       receiver,
     };
-    return accessor === "modify" || accessor === "read" ? { ...shape, coroutine: accessor } : shape;
+    if (accessor !== "modify" && accessor !== "read") {
+      return shape;
+    }
+    if (ret?.kind === "tuple") {
+      throw new Error(`unsupported yield: ${parsed.result!.text}`);
+    }
+    return { ...shape, coroutine: accessor };
   }
 
   const memberType = resolveParsedType(parsed.type, () => null);
@@ -614,9 +643,7 @@ function probedOwnership(
   implicitWords: { trailingSelf: number; selfInRegister: number },
   startReg: number
 ): SelfOwnership | null {
-  const argTypes = args.map((plan) =>
-    plan.kind === "concrete" ? plan.metadata : plan.kind === "closure" ? { closure: true as const } : { genericParam: 0 }
-  );
+  const argTypes = argumentTypes(args);
   const trailing = argumentRegisterUse([...argTypes, receiver], implicitWords.trailingSelf, startReg);
   const inRegister = argumentRegisterUse(argTypes, implicitWords.selfInRegister, startReg);
   return probeSelfOwnership(target, {
@@ -646,9 +673,45 @@ function decodeClosure(fn: NativePointer, context: NativePointer): SwiftValue {
 }
 
 // An async indirect result's pointer takes the first argument slot everywhere; a sync one only where
-// the convention passes it as an argument.
+// the convention passes it as an argument. A destructured result's buffers are arguments everywhere.
 function syncArgumentSlotBase(ret: TypePlan | null): number {
+  if (ret?.kind === "tuple") {
+    return argumentSlotBase(destructuredResult(ret).layout);
+  }
   return SWIFTCC.indirectResultIsArgument && returnIsIndirect(ret) ? 1 : 0;
+}
+
+interface DestructuredResult {
+  layout: DestructuredTuple; // an element by address stands in as Void: only its buffer is counted
+  buffers: number;
+  direct: "none" | "registers" | "indirect";
+}
+
+function destructuredResult(ret: TuplePlan): DestructuredResult {
+  const byAddress = ret.elements.map(isIndirectPlan);
+  const elements = ret.elements.map((plan, i) => {
+    if (byAddress[i]) {
+      return voidMetadata();
+    }
+    if (plan.kind !== "concrete") {
+      throw new Error(`unsupported tuple result: ${ret.expr.text}`);
+    }
+    return plan.metadata;
+  });
+  const layout = { tuple: getUnlabelledTupleTypeMetadata(elements), byAddress };
+  const { indirectElements, directType } = destructuredElements(layout);
+  const direct = directType === null ? "none" : shouldPassIndirectly(directType) ? "indirect" : "registers";
+  return { layout, buffers: indirectElements.length, direct };
+}
+
+// A sync call passes a lone buffer as its indirect result; the others lead the arguments, behind the
+// one a direct part too wide for the registers takes.
+function elementBuffers(context: CpuContext, result: DestructuredResult, isAsync: boolean): NativePointer[] {
+  if (!isAsync && result.direct === "none" && result.buffers === 1) {
+    return [indirectResultRegister(context)];
+  }
+  const start = result.direct === "indirect" && (isAsync || SWIFTCC.indirectResultIsArgument) ? 1 : 0;
+  return Array.from({ length: result.buffers }, (_, i) => gpArg(context, start + i));
 }
 
 function returnIsIndirect(ret: TypePlan | null): boolean {
@@ -783,6 +846,13 @@ function words(metadata: Metadata): number {
   return Math.ceil(metadata.valueWitnesses.size / 8);
 }
 
+interface ValueSlot {
+  plan: Exclude<TypePlan, TuplePlan>;
+  address: NativePointer;
+}
+
+type ArgSlot = ValueSlot | { elements: ArgSlot[] };
+
 interface MaterializedArgs {
   values(): SwiftHookArgs;
   generics: Metadata[];
@@ -803,41 +873,43 @@ function materializeArgs(
   thrownSlotAfterWords: number | null = null // the witness-table words it follows; null: no buffer
 ): MaterializedArgs {
   const cursor = new ArgumentCursor(context, startReg);
-  const slots: { plan: TypePlan; address: NativePointer }[] = [];
 
-  for (const plan of args) {
+  const take = (plan: TypePlan): ArgSlot => {
+    if (plan.kind === "tuple") {
+      return { elements: plan.elements.map(take) };
+    }
     if (plan.kind === "metatype") {
-      slots.push({ plan, address: cursor.gp() }); // address IS the metadata pointer
-      continue;
+      return { plan, address: cursor.gp() }; // address IS the metadata pointer
     }
     if (plan.kind === "closure") {
       const words = Memory.alloc(2 * Process.pointerSize);
       words.writePointer(cursor.gp());
       words.writePointer(cursor.gp(), Process.pointerSize);
-      slots.push({ plan, address: words });
-      continue;
+      return { plan, address: words };
     }
     if (isIndirectPlan(plan)) {
-      slots.push({ plan, address: cursor.gp() });
-      continue;
+      return { plan, address: cursor.gp() };
     }
     if (plan.kind !== "concrete") {
-      slots.push({ plan, address: Memory.alloc(8).writePointer(cursor.gp()) });
-      continue;
+      return { plan, address: Memory.alloc(8).writePointer(cursor.gp()) };
     }
     const metadata = plan.metadata;
-    if (metadata.kind === MetadataKind.Class) {
-      slots.push({ plan, address: Memory.alloc(8).writePointer(cursor.gp()) });
-    } else if (shouldPassIndirectly(metadata)) {
-      slots.push({ plan, address: cursor.gp() });
-    } else {
-      const scratch = Memory.alloc(Math.max(words(metadata), 1) * 8);
-      for (const scalar of loweredScalars(metadata)) {
-        cursor.readScalar(scalar, scratch);
-      }
-      slots.push({ plan, address: scratch });
+    if (metadata.kind === MetadataKind.Tuple && metadata.valueWitnesses.size > 0) {
+      return { elements: [...enumerateTupleElements(metadata)].map((e) => take({ kind: "concrete", metadata: e.type })) };
     }
-  }
+    if (metadata.kind === MetadataKind.Class) {
+      return { plan, address: Memory.alloc(8).writePointer(cursor.gp()) };
+    }
+    if (shouldPassIndirectly(metadata)) {
+      return { plan, address: cursor.gp() };
+    }
+    const scratch = Memory.alloc(Math.max(words(metadata), 1) * 8);
+    for (const scalar of loweredScalars(metadata)) {
+      cursor.readScalar(scalar, scratch);
+    }
+    return { plan, address: scratch };
+  };
+  const slots = args.map(take);
 
   let trailingSelf: NativePointer | null = null;
   const lowering = receiver === null ? null : receiverLowering(receiver);
@@ -852,7 +924,7 @@ function materializeArgs(
   const generics = environment.sources.map((source) =>
     source.kind === "passed"
       ? new Metadata(cursor.gp())
-      : carriedMetadata(source, context, (arg) => slots[arg].address.readPointer(), selfMetadata)
+      : carriedMetadata(source, context, (arg) => (slots[arg] as ValueSlot).address.readPointer(), selfMetadata)
   );
   if (receiver !== null && isFixedLayoutReceiver(receiver.metadata) && selfMetadata === null) {
     const { type } = receiver.metadata;
@@ -866,22 +938,26 @@ function materializeArgs(
     thrownSlot = cursor.gp();
   }
 
-  const values = (): SwiftHookArgs =>
-    nameArgs(slots.map((s) => {
-      if (s.plan.kind === "metatype") {
-        return decodeMetatype(s.address);
-      }
-      if (s.plan.kind === "closure") {
-        return decodeClosure(s.address.readPointer(), s.address.readPointer(Process.pointerSize));
-      }
-      const metadata = planMetadata(s.plan, generics, environment.params);
-      if (s.plan.kind === "inout") {
-        return decodeInoutArgument(metadata, s.address);
-      }
-      return metadata.kind === MetadataKind.Class
-        ? readValue(metadata, s.address)
-        : decodeBorrowedValue(metadata, s.address);
-    }), labels);
+  const decode = (slot: ArgSlot): CallResult => {
+    if ("elements" in slot) {
+      return slot.elements.map(decode);
+    }
+    const { plan, address } = slot;
+    if (plan.kind === "metatype") {
+      return decodeMetatype(address);
+    }
+    if (plan.kind === "closure") {
+      return decodeClosure(address.readPointer(), address.readPointer(Process.pointerSize));
+    }
+    const metadata = planMetadata(plan, generics, environment.params);
+    if (plan.kind === "inout") {
+      return decodeInoutArgument(metadata, address);
+    }
+    return metadata.kind === MetadataKind.Class
+      ? readValue(metadata, address)
+      : decodeBorrowedValue(metadata, address);
+  };
+  const values = (): SwiftHookArgs => nameArgs(slots.map(decode), labels);
   return { values, generics, trailingSelf, selfMetadata, thrownSlot };
 }
 
@@ -962,12 +1038,20 @@ function materializeReturn(
   context: CpuContext,
   ret: TypePlan | null,
   indirectReturn: NativePointer | null,
+  resultBuffers: NativePointer[],
   generics: Metadata[],
   genericParams: string[],
   onResume = false
 ): CallResult {
   if (ret === null) {
     return null;
+  }
+  if (ret.kind === "tuple") {
+    const tuple = planMetadata(ret, generics, genericParams);
+    const { directType, assemble } = lowerDestructuredElements({ tuple, byAddress: ret.elements.map(isIndirectPlan) }, resultBuffers);
+    const value = Memory.alloc(Math.max(tuple.valueWitnesses.stride, 1));
+    assemble(value, directType === null ? null : indirectReturn ?? directResult(context, directType, onResume));
+    return decodeBorrowedValue(tuple, value);
   }
   if (ret.kind === "metatype") {
     return decodeMetatype(gpResult(context, 0));
@@ -1005,8 +1089,12 @@ function materializeReturn(
 
   // Direct multi-register return: the bytes live only in the result registers, so a non-POD value is
   // borrowed over this private reassembly — readable/callable in the callback, not write-through.
-  const scratch = Memory.alloc(Math.max(words(returnType), 1) * 8);
-  const placed = onResume ? placeAsyncResultScalars(returnType) : placeResultScalars(returnType);
+  return decodeBorrowedValue(returnType, directResult(context, returnType, onResume));
+}
+
+function directResult(context: CpuContext, metadata: Metadata, onResume: boolean): NativePointer {
+  const scratch = Memory.alloc(Math.max(words(metadata), 1) * 8);
+  const placed = onResume ? placeAsyncResultScalars(metadata) : placeResultScalars(metadata);
   for (const { scalar, location } of placed) {
     writeRegisterScalar(
       scratch,
@@ -1016,11 +1104,12 @@ function materializeReturn(
       (n, cls) => fpResult(context, n, cls)
     );
   }
-  return decodeBorrowedValue(returnType, scratch);
+  return scratch;
 }
 
 interface SwiftInvocationState {
   indirectReturn?: NativePointer;
+  resultBuffers?: NativePointer[];
   generics?: Metadata[];
   trailingSelf?: NativePointer;
   selfMetadata?: Metadata;
@@ -1042,7 +1131,9 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
   const genericParams = environment.params;
   const argRegBase = syncArgumentSlotBase(ret);
   const thrown = thrownLowering(shape, false, target, argRegBase);
-  const captureIndirect = returnIsIndirect(ret);
+  const destructured = ret?.kind === "tuple" ? destructuredResult(ret) : null;
+  const captureIndirect = destructured === null ? returnIsIndirect(ret) : destructured.direct === "indirect";
+  const captureBuffers = destructured !== null && callbacks.onLeave !== undefined;
   const returnNeedsGenerics = (needsGenerics(ret) || needsGenerics(shape.thrown)) && genericParams.length > 0;
   const decodesArgs = callbacks.onEnter !== undefined || returnNeedsGenerics;
   const receiver = knownReceiver(shape, decodesArgs);
@@ -1053,12 +1144,15 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
   const wantsArgs = decodesArgs || (selfReadOnEnter && callbacks.onLeave !== undefined) || capturesGenerics || (takesThrownSlot && callbacks.onLeave !== undefined);
 
   const onEnter =
-    wantsArgs || captureIndirect
+    wantsArgs || captureIndirect || captureBuffers
       ? function (this: SwiftInvocationContext) {
           const context = this.context;
           const state = this as unknown as SwiftInvocationState;
           if (captureIndirect) {
             state.indirectReturn = indirectResultRegister(context);
+          }
+          if (captureBuffers) {
+            state.resultBuffers = elementBuffers(context, destructured!, false);
           }
           if (wantsArgs) {
             const { values, generics, trailingSelf, selfMetadata, thrownSlot } = materializeArgs(context, args, shape.labels, environment, argRegBase, receiver, takesThrownSlot ? shape.witnessWords : null);
@@ -1107,6 +1201,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
               context,
               ret,
               state.indirectReturn ?? null,
+              state.resultBuffers ?? [],
               state.generics ?? [],
               genericParams
             )
@@ -1409,6 +1504,7 @@ interface CompletionEntry {
   genericParams: string[];
   typeArguments: Metadata[] | string;
   outBuffer: NativePointer | null;
+  resultBuffers: NativePointer[];
   throws: boolean;
   owner: Set<CompletionEntry>;
   slot: CompletionSlot;
@@ -1475,7 +1571,7 @@ function fireCompletion(entry: CompletionEntry, context: CpuContext, self: Invoc
   }
   entry.callbacks.onComplete!.call(
     self,
-    materializeReturn(context, entry.ret, entry.outBuffer, entry.generics, entry.genericParams, true)
+    materializeReturn(context, entry.ret, entry.outBuffer, entry.resultBuffers, entry.generics, entry.genericParams, true)
   );
 }
 
@@ -1590,8 +1686,9 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
   const genericParams = environment.params;
 
   const wantsCompletion = callbacks.onComplete !== undefined;
-  const indirectReturn = returnIsIndirect(ret);
-  const argRegBase = indirectReturn ? 1 : 0; // an @out result takes x0
+  const destructured = ret?.kind === "tuple" ? destructuredResult(ret) : null;
+  const indirectReturn = destructured === null ? returnIsIndirect(ret) : destructured.direct === "indirect";
+  const argRegBase = (indirectReturn ? 1 : 0) + (destructured?.buffers ?? 0); // an @out result takes x0
   const thrown = thrownLowering(shape, true, code, argRegBase);
   const takesThrownSlot = thrown !== null && thrown.placed === null;
   const returnNeedsGenerics = wantsCompletion && (needsGenerics(ret) || needsGenerics(shape.thrown)) && genericParams.length > 0;
@@ -1621,6 +1718,7 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
       genericParams,
       typeArguments: generics ?? unlocatable ?? [],
       outBuffer: indirectReturn ? gpArg(context, 0) : null,
+      resultBuffers: destructured === null ? [] : elementBuffers(context, destructured, true),
       throws,
       owner: liveEntries,
       slot,

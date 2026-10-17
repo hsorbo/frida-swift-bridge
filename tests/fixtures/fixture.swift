@@ -406,6 +406,8 @@ public final class Box {
     public func pairFlipped<T>(_ p: (T, Int)) -> (Int, T) { (p.1, p.0) }
     public func pairFlippedAsync<T>(_ p: (T, Int)) async -> (Int, T) { (p.1, p.0) }
     public func pairRefill<T>(_ p: inout (T, Int), _ x: T) { p = (x, p.1 + 1) }
+    public func twinned<T>(_ x: T) -> (T, T) { (x, x) }
+    public func spread<T>(_ x: T, _ n: Int) -> (T, Int, Int, Int, Int, Int) { (x, n, n + 1, n + 2, n + 3, n + 4) }
     public func packedPlus<T>(_ p: (Int8, Int8), _ x: T) -> Int { Int(p.0) * 10 + Int(p.1) + MemoryLayout<T>.size }
 }
 

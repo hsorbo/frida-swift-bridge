@@ -673,7 +673,7 @@ export interface DestructuredElements {
   assemble: (out: NativePointer, direct: NativePointer | null) => void;
 }
 
-function destructuredElements({ tuple, byAddress }: DestructuredTuple) {
+export function destructuredElements({ tuple, byAddress }: DestructuredTuple) {
   const elements = [...enumerateTupleElements(tuple)].map((e, i) => ({ ...e, size: e.type.valueWitnesses.size, byAddress: byAddress[i] || shouldPassIndirectly(e.type) }));
   const directElements = elements.filter((e) => !e.byAddress && e.size > 0);
   const directType =
@@ -685,9 +685,9 @@ function destructuredElements({ tuple, byAddress }: DestructuredTuple) {
   return { indirectElements: elements.filter((e) => e.byAddress), directElements, directType };
 }
 
-export function lowerDestructuredElements(returnType: DestructuredTuple): DestructuredElements {
+export function lowerDestructuredElements(returnType: DestructuredTuple, filled?: NativePointer[]): DestructuredElements {
   const { indirectElements, directElements, directType } = destructuredElements(returnType);
-  const indirect = indirectElements.map((element) => ({ element, buffer: Memory.alloc(Math.max(element.type.valueWitnesses.stride, 1)) }));
+  const indirect = indirectElements.map((element, i) => ({ element, buffer: filled?.[i] ?? Memory.alloc(Math.max(element.type.valueWitnesses.stride, 1)) }));
   const directOffsets = directElements.length === 1 ? [0] : directType === null ? [] : [...enumerateTupleElements(directType)].map((e) => e.offset);
   return {
     buffers: indirect.map((i) => i.buffer),
