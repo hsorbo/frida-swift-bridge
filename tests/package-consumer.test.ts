@@ -185,7 +185,8 @@ function rawMetadataStaysUnderAbi(type: SwiftType) {
 
 function protocolRawInspectionStaysUnderAbi(p: Protocol, comp: ProtocolComposition) {
   const conformers: NominalType[] = p.conformingTypes();
-  void [p.name, p.fullName, p.isClassOnly, conformers];
+  const conforms: boolean = conformers[0].conformsTo(p);
+  void [p.name, p.fullName, p.isClassOnly, conformers, conforms];
   // @ts-expect-error raw protocol descriptor stays under /abi
   p.descriptor;
   // @ts-expect-error raw requirements stay under /abi

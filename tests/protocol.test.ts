@@ -146,6 +146,33 @@ describe("protocols()", () => {
   });
 });
 
+describe("conformsTo", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("answers true for a conformer and false for a non-conformer, given a name or a Protocol", () => {
+    const person = Swift.type("fixture.Person")!.$type;
+    expect(person.conformsTo("fixture.Greeter")).toBe(true);
+    expect(person.conformsTo(Swift.Protocol.find("fixture.Greeter")!)).toBe(true);
+    expect(person.conformsTo("fixture.Named")).toBe(false);
+  });
+
+  test("a conditional conformance holds per specialization", () => {
+    expect(Swift.struct("fixture.Pair<fixture.PoliteGreeter>")!.$type.conformsTo("fixture.Greeter")).toBe(true);
+    expect(Swift.struct("fixture.Pair<Swift.Int>")!.$type.conformsTo("fixture.Greeter")).toBe(false);
+  });
+
+  test("a subclass conforms through its superclass although its own protocols() omit the protocol", () => {
+    const sub = Swift.class("fixture.SubSpeaker")!.$type;
+    expect(Object.keys(sub.protocols())).not.toContain("fixture.Vocal");
+    expect(sub.conformsTo("fixture.Vocal")).toBe(true);
+  });
+
+  test("throws for an unknown protocol and for a generic type named without its arguments", () => {
+    expect(() => Swift.type("fixture.Person")!.$type.conformsTo("fixture.NoSuchProtocolQX")).toThrow("unknown protocol: fixture.NoSuchProtocolQX");
+    expect(() => Swift.struct("fixture.Pair")!.$type.conformsTo("fixture.Greeter")).toThrow("requires type arguments");
+  });
+});
+
 describe("ProtocolComposition", () => {
   beforeEach(() => { loadFixture(); });
 

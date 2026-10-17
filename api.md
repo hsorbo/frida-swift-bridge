@@ -373,6 +373,8 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
 - `info.properties(query?)`: the properties as `{ name, typeName, isStatic, writable }`;
   `query` is `{ deep? }`.
 - `info.protocols()`: a `{ [name]: Protocol }` map of declared conformances.
+- `info.conformsTo(protocol)`: whether the type conforms, as Swift's `is P`
+  answers it. See [Protocols](#protocols).
 - `info.specializations()`: on a generic type named without its arguments, the
   facades of every specialization built so far, the compiler's prespecialized
   ones included, whether or not an instance lives. Each call reads the
@@ -978,6 +980,22 @@ Relate types and protocols in both directions:
 Swift.Protocol.find("MyApp.Scalable").conformingTypes().map(t => t.name);   // ["Swift.Int", ...]: reflection
 
 Swift.type("MyApp.Person").$type.protocols();   // { "MyApp.Greeter": Protocol, "MyApp.Aged": Protocol }
+```
+
+`protocols()` lists the conformances the type's own descriptor declares.
+Whether a type conforms is a different question, the one Swift's `is P`
+answers: a conditional conformance holds for one specialization and not
+another, and a class inherits its superclass's conformances. `conformsTo`
+asks the runtime, given a `Protocol` or a qualified name; an unknown name
+throws. It realizes the type's metadata, so a generic type named without its
+arguments throws, as `layout` does.
+
+```js
+Swift.type("MyApp.Person").$type.conformsTo("MyApp.Greeter");                    // true
+Swift.type("MyApp.Person").$type.conformsTo(greeter);                            // true, given the Protocol
+Swift.struct("MyApp.Pair<MyApp.Person>").$type.conformsTo("MyApp.Greeter");      // true: `extension Pair: Greeter where T: Greeter`
+Swift.struct("MyApp.Pair<Swift.Int>").$type.conformsTo("MyApp.Greeter");         // false
+Swift.class("MyApp.SubSpeaker").$type.conformsTo("MyApp.Vocal");                 // true, declared on its superclass
 ```
 
 `ProtocolComposition` models an `any P & Q` existential, built from a signature:

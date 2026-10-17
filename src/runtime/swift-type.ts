@@ -3,7 +3,7 @@ import type { TypeLayout } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
 import { isActor, isDefaultActor, MethodDescriptorKind, readVTable } from "../abi/class-descriptor.js";
-import { conformancesOf, witnessTableOf } from "../abi/protocol-conformance.js";
+import { conformancesOf, conformsToProtocol, witnessTableOf } from "../abi/protocol-conformance.js";
 import { ProtocolRequirement, ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { WitnessTable } from "../abi/witness-table.js";
@@ -44,7 +44,7 @@ import { borrowReferentType } from "../abi/borrow.js";
 import { readFunctionType, ParameterOwnership } from "../abi/function-type.js";
 import { typeName } from "./type-name.js";
 import { objcClassName } from "./objc.js";
-import { Protocol, protocolsForType } from "./protocol.js";
+import { Protocol, protocolsForType, type StableProtocol } from "./protocol.js";
 import { SwiftTypeFacade, SwiftClass, SwiftStruct, SwiftEnum, SwiftObjCClass, typeFacade } from "./type-facade.js";
 
 export interface TypeMember {
@@ -412,6 +412,16 @@ export abstract class NominalType extends SwiftType {
 
   protocols(): { [name: string]: Protocol } {
     return protocolsForType(descriptorOf(this).handle);
+  }
+
+  // The runtime's answer to `is P`: a conditional conformance holds per specialization and a
+  // class inherits its superclass's conformances, neither of which protocols() lists.
+  conformsTo(protocol: StableProtocol | string): boolean {
+    const found = typeof protocol === "string" ? Protocol.find(protocol) : (protocol as Protocol);
+    if (found === null) {
+      throw new Error(`unknown protocol: ${protocol}`);
+    }
+    return conformsToProtocol(metadataOf(this), found.descriptor) !== null;
   }
 
   // Answered afresh on each call: the specializations built so far, whether or not any instance lives.
