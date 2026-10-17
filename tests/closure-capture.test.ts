@@ -3,6 +3,7 @@ import { requireDarwin, requireSwift } from "./swift.js";
 import { arenaAlloc, arenaString, writeRelativeDirectPointer } from "./arena.js";
 
 import { readObject } from "../src/abi/instance.js";
+import { decodeBridgedContainer } from "../src/abi/container.js";
 import { metadataFor, typeOf } from "../src/abi.js";
 import { layoutCaptures, readCaptures, unwrapReabstractionThunk } from "../src/abi/closure-capture.js";
 import { captureDescriptorOf, offsetToFirstCapture } from "../src/abi/capture-descriptor.js";
@@ -172,6 +173,13 @@ describe("closure capture layout (synthetic)", () => {
     const slots = layoutCaptures(context)!;
     expect(slots.map(({ type }) => typeName(type))).toEqual(["fixture.GenericCapturingBox<Swift.Bool>.Type", "Swift.Bool"]);
     expect(slots.map(({ address }) => address.sub(context).toInt32())).toEqual([0x10, 0x18]);
+  });
+
+  test("returns null when a capture placed before its parameter resolves to a different layout than assumed", () => {
+    requireSwift();
+    const context = makeHeapContext(makeCaptureDescriptor(["x", "xm"], 0, [["x", "M1"]]), 0x10);
+    context.add(0x18).writePointer(metadataOf("SS"));
+    expect(layoutCaptures(context)).toBeNull();
   });
 
   test("returns null when a reference source does not land on a class-typed capture", () => {
@@ -418,6 +426,45 @@ describe("closure capture values (live runtime)", () => {
     ]);
     const values = readCaptures(context)!;
     expect(readObject(values[0] as NativePointer)).toEqual({ value: int64(3) });
+  });
+
+  test("decodes a sole capture of a class-bound generic parameter, which the closure's bindings supply", () => {
+    requireSwift();
+    new NativeFunction(fixtureExport("triggerClassBoundSoleCapturing"), "void", [])();
+    const context = new NativeFunction(fixtureExport("genericCapturingContext"), "pointer", [])() as NativePointer;
+    expect(layoutCaptures(context)!.map(({ type }) => typeName(type))).toEqual(["fixture.GenericCapturingRef<Swift.Int>"]);
+    expect(readObject(readCaptures(context)![0] as NativePointer)).toEqual({ value: int64(4) });
+  });
+
+  test("places a capture whose type needs a parameter that a later capture supplies", () => {
+    requireSwift();
+    const genericCapturingContext = new NativeFunction(fixtureExport("genericCapturingContext"), "pointer", []);
+    const layoutAfter = (trigger: string) => {
+      new NativeFunction(fixtureExport(trigger), "void", [])();
+      const context = genericCapturingContext() as NativePointer;
+      const slots = layoutCaptures(context)!;
+      return { slots, types: slots.map(({ type }) => typeName(type)), values: readCaptures(context)! };
+    };
+
+    const array = layoutAfter("triggerArrayBeforeRefCapturing");
+    expect(array.types).toEqual(["Swift.Array<Swift.Int>", "fixture.GenericCapturingRef<Swift.Int>"]);
+    expect(decodeBridgedContainer(array.slots[0].type, array.slots[0].address)).toEqual({ value: [int64(1), int64(2)] });
+    expect(readObject(array.values[1] as NativePointer)).toEqual({ value: int64(3) });
+
+    const optional = layoutAfter("triggerOptionalBeforeRefCapturing");
+    expect(optional.types).toEqual([
+      "Swift.Optional<fixture.GenericCapturingRef<Swift.Int>>",
+      "fixture.GenericCapturingRef<Swift.Int>",
+    ]);
+    expect(readObject((optional.values[0] as { some: NativePointer }).some)).toEqual({ value: int64(1) });
+    expect(readObject(optional.values[1] as NativePointer)).toEqual({ value: int64(2) });
+
+    const classBound = layoutAfter("triggerClassBoundBeforeRefCapturing");
+    expect(classBound.types).toEqual([
+      "fixture.GenericCapturingRef<Swift.Int>",
+      "fixture.GenericCapturingRef<fixture.GenericCapturingRef<Swift.Int>>",
+    ]);
+    expect(readObject(classBound.values[0] as NativePointer)).toEqual({ value: int64(5) });
   });
 
   test("counts a closure's explicit parameters before its captures in a capture source", () => {

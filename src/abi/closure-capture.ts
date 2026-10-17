@@ -6,7 +6,7 @@ import {
   offsetToFirstCapture,
   resolveCaptureType,
 } from "./capture-descriptor.js";
-import { Metadata, MetadataKind } from "./metadata.js";
+import { Metadata, MetadataKind, TypeLayout } from "./metadata.js";
 import { classMetadataOf } from "./class-metadata.js";
 import { readField, SwiftValue } from "./instance.js";
 import { ReferenceStorage } from "./field-descriptor.js";
@@ -87,19 +87,21 @@ function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
   let offset = offsetToFirstCapture(context) + descriptor.numBindings * Process.pointerSize;
   const addresses: NativePointer[] = [];
   const types: (Metadata | null)[] = [];
+  const layouts: TypeLayout[] = [];
   for (const record of records) {
     generics?.derive(addresses);
     const type = resolve(record);
-    if (type === null && !(generics !== null && isReferenceSizedCaptureType(record))) {
+    const layout = type !== null ? type.typeLayout : generics === null ? null : placeholderLayout(generics, record);
+    if (layout === null) {
       return null;
     }
-    const { size, alignment } =
-      type === null ? { size: Process.pointerSize, alignment: Process.pointerSize } : type.typeLayout;
+    const { size, alignment } = layout;
     if (size !== 0) {
       offset = (offset + alignment - 1) & ~(alignment - 1);
     }
     addresses.push(context.add(offset));
     types.push(type);
+    layouts.push(layout);
     offset += size;
   }
   generics?.derive(addresses);
@@ -107,12 +109,23 @@ function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
   const slots: CaptureSlot[] = [];
   for (let i = 0; i < records.length; i++) {
     const type = types[i] ?? resolve(records[i]);
-    if (type === null) {
+    if (type === null || (types[i] === null && !sameLayout(type.typeLayout, layouts[i]))) {
       return null;
     }
     slots.push({ type, address: addresses[i], storage: records[i].referenceStorage });
   }
   return slots;
+}
+
+function placeholderLayout(generics: CaptureGenericArguments, record: CaptureTypeRecord): TypeLayout | null {
+  if (isReferenceSizedCaptureType(record)) {
+    return { size: Process.pointerSize, stride: Process.pointerSize, alignment: Process.pointerSize };
+  }
+  return generics.resolveWithPlaceholders(record)?.typeLayout ?? null;
+}
+
+function sameLayout(a: TypeLayout, b: TypeLayout): boolean {
+  return a.size === b.size && a.alignment === b.alignment;
 }
 
 export function readCaptures(context: NativePointer): SwiftValue[] | null {

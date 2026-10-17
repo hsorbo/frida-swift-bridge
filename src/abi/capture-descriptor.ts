@@ -251,6 +251,7 @@ function explicitParameterCount(sources: MetadataSource[], records: CaptureTypeR
 function makeGenericEnvironment(params: GenericParam[]): {
   environment: NativePointer;
   genericArguments: NativePointer;
+  argumentCount: number;
   flatIndexOf: (param: GenericParam) => number;
 } {
   const countPerLevel: number[] = [];
@@ -279,7 +280,7 @@ function makeGenericEnvironment(params: GenericParam[]): {
     genericArguments.writePointer(NULL, i * Process.pointerSize);
   }
   const flatIndexOf = ({ depth, index }: GenericParam) => (depth === 0 ? 0 : cumulative[depth - 1]) + index;
-  return { environment, genericArguments, flatIndexOf };
+  return { environment, genericArguments, argumentCount: total, flatIndexOf };
 }
 
 function genericArgumentsOf(handle: NativePointer): NativePointer {
@@ -320,6 +321,7 @@ export class CaptureGenericArguments {
     private pending: { param: GenericParam; source: MetadataSource }[],
     private readonly environment: NativePointer,
     private readonly genericArguments: NativePointer,
+    private readonly argumentCount: number,
     private readonly flatIndexOf: (param: GenericParam) => number
   ) {}
 
@@ -343,11 +345,11 @@ export class CaptureGenericArguments {
     if (shift === null) {
       return null;
     }
-    const { environment, genericArguments, flatIndexOf } = makeGenericEnvironment(
+    const { environment, genericArguments, argumentCount, flatIndexOf } = makeGenericEnvironment(
       entries.map(({ param }) => param)
     );
     const pending = entries.map(({ param, source }) => ({ param, source: withCaptureShift(source, shift) }));
-    return new CaptureGenericArguments(context, pending, environment, genericArguments, flatIndexOf);
+    return new CaptureGenericArguments(context, pending, environment, genericArguments, argumentCount, flatIndexOf);
   }
 
   derive(captureAddresses: NativePointer[]): void {
@@ -366,5 +368,24 @@ export class CaptureGenericArguments {
     return mangled === null
       ? null
       : resolveTypeByMangledNameInEnvironment(mangled, this.environment, this.genericArguments);
+  }
+
+  // Captures supply metadata only when every capture's layout is fixed, so a parameter not derived
+  // yet can only change a capture's layout by being class-bound; AnyObject stands in for it.
+  resolveWithPlaceholders(record: CaptureTypeRecord): Metadata | null {
+    const mangled = record.mangledTypeName;
+    if (mangled === null) {
+      return null;
+    }
+    const anyObject = resolveTypeByMangledName({ address: Memory.allocUtf8String("yXl"), length: 3 });
+    if (anyObject === null) {
+      return null;
+    }
+    const genericArguments = Memory.alloc(this.argumentCount * Process.pointerSize);
+    for (let i = 0; i < this.argumentCount; i++) {
+      const argument = this.genericArguments.readPointer(i * Process.pointerSize);
+      genericArguments.writePointer(argument.isNull() ? anyObject.handle : argument, i * Process.pointerSize);
+    }
+    return resolveTypeByMangledNameInEnvironment(mangled, this.environment, genericArguments);
   }
 }

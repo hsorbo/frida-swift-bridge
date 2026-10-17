@@ -2329,3 +2329,11 @@ public func storeRefAndArrayCapturingWithParam<T>(_ ref: GenericCapturingRef<T>,
     genericCapturingParamBody = { n in _ = (n, ref, xs) }
 }
 public func triggerRefAndArrayCapturingWithParam() { storeRefAndArrayCapturingWithParam(GenericCapturingRef("q"), ["r"]) }
+public func storeClassBoundSoleCapturing<T: AnyObject>(_ object: T) { genericCapturingBody = { _ = object } }
+public func triggerClassBoundSoleCapturing() { storeClassBoundSoleCapturing(GenericCapturingRef(4)) }
+public func storeClassBoundBeforeRefCapturing<T: AnyObject>(_ object: T, _ ref: GenericCapturingRef<T>) { genericCapturingBody = { _ = (object, ref) } }
+public func triggerClassBoundBeforeRefCapturing() { storeClassBoundBeforeRefCapturing(GenericCapturingRef(5), GenericCapturingRef(GenericCapturingRef(5))) }
+public func storeArrayBeforeRefCapturing<T>(_ xs: [T], _ ref: GenericCapturingRef<T>) { genericCapturingBody = { _ = (xs, ref) } }
+public func triggerArrayBeforeRefCapturing() { storeArrayBeforeRefCapturing([1, 2], GenericCapturingRef(3)) }
+public func storeOptionalBeforeRefCapturing<T>(_ other: GenericCapturingRef<T>?, _ ref: GenericCapturingRef<T>) { genericCapturingBody = { _ = (other, ref) } }
+public func triggerOptionalBeforeRefCapturing() { storeOptionalBeforeRefCapturing(GenericCapturingRef(1), GenericCapturingRef(2)) }
