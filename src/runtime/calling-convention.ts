@@ -503,32 +503,42 @@ function wordPieces(count: number): LoweredScalar[] {
   return Array.from({ length: count }, (_, i) => ({ offset: i * 8, size: 8, cls: "int" }));
 }
 
-interface LoweredPiece extends LoweredScalar {
+export interface LoweredPiece extends LoweredScalar {
   byAddress?: boolean;
 }
 
-interface LoweredArg {
+export interface LoweredArg {
   indirect: boolean;
   pieces: LoweredPiece[];
 }
 
-function destructuredPieces({ tuple, byAddress }: DestructuredTuple): LoweredPiece[] {
-  return [...enumerateTupleElements(tuple)].flatMap((element, i) =>
-    byAddress[i] || shouldPassIndirectly(element.type)
-      ? [{ offset: element.offset, size: Process.pointerSize, cls: "int" as const, byAddress: true }]
-      : loweredScalars(element.type).map((scalar) => ({ ...scalar, offset: element.offset + scalar.offset }))
-  );
+// SIL expands a tuple a signature spells into one parameter per element, nested tuples too, before
+// the direct/indirect choice: an opaque element (byAddress) or one too wide for the registers goes
+// by address, the rest keep their own scalars, so (Int8, Int8) is (i8, i8), never one i16.
+function tuplePieces(tuple: Metadata, byAddress: boolean[] = []): LoweredPiece[] {
+  return [...enumerateTupleElements(tuple)].flatMap((element, i) => {
+    const pieces: LoweredPiece[] =
+      element.type.kind === MetadataKind.Tuple
+        ? tuplePieces(element.type)
+        : byAddress[i] === true || shouldPassIndirectly(element.type)
+          ? [{ offset: 0, size: Process.pointerSize, cls: "int", byAddress: true }]
+          : loweredScalars(element.type);
+    return pieces.map((piece) => ({ ...piece, offset: element.offset + piece.offset }));
+  });
 }
 
-function lowerArg(arg: SwiftArgType): LoweredArg {
+export function lowerArg(arg: SwiftArgType): LoweredArg {
   if (isDestructuredTuple(arg)) {
-    return { indirect: false, pieces: destructuredPieces(arg) };
+    return { indirect: false, pieces: tuplePieces(arg.tuple, arg.byAddress) };
   }
   if (isClosureRef(arg)) {
     return { indirect: false, pieces: wordPieces(CLOSURE_WORDS) };
   }
   if (isGenericRef(arg) || isAbstractIndirect(arg)) {
     return { indirect: true, pieces: [] };
+  }
+  if (arg.kind === MetadataKind.Tuple) {
+    return { indirect: false, pieces: tuplePieces(arg) };
   }
   // indirect before HFA: a resilient float aggregate is @in, not spread across v-registers
   if (shouldPassIndirectly(arg)) {

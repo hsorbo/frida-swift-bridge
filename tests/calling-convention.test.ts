@@ -224,6 +224,22 @@ describe("makeSwiftNativeFunction", () => {
     expect(r.readS64().toNumber()).toBe(25);
   });
 
+  test("passes a tuple element by element: nested ones flattened, a wide one by address", () => {
+    const Int = metadataFor("Swift.Int")!;
+    const nested = metadataOf(Swift.reflect("((Swift.Int8, Swift.Int8), Swift.Int8)")!);
+    const nestedSum = makeSwiftNativeFunction(fixtureExport("fixture.nestedSum"), Int, [nested]);
+    const triple = Memory.alloc(3).writeS8(1);
+    triple.add(1).writeS8(2);
+    triple.add(2).writeS8(3);
+    expect(nestedSum(triple)!.readS64().toNumber()).toBe(123);
+
+    const wide = metadataOf(Swift.reflect("(Swift.Int8, fixture.WideScalar)")!);
+    const wideElementSum = makeSwiftNativeFunction(fixtureExport("fixture.wideElementSum"), Int, [wide]);
+    const pair = Memory.alloc(wide.typeLayout.stride).writeS8(4);
+    pair.add(8 + 4 * 8).writeS64(5);
+    expect(wideElementSum(pair)!.readS64().toNumber()).toBe(9);
+  });
+
   test("passes a single-case enum as its payload", () => {
     const Int = metadataFor("Swift.Int")!;
     const Bool_ = metadataFor("Swift.Bool")!;

@@ -406,9 +406,25 @@ public final class Box {
     public func pairFlipped<T>(_ p: (T, Int)) -> (Int, T) { (p.1, p.0) }
     public func pairFlippedAsync<T>(_ p: (T, Int)) async -> (Int, T) { (p.1, p.0) }
     public func pairRefill<T>(_ p: inout (T, Int), _ x: T) { p = (x, p.1 + 1) }
+    public func packedPlus<T>(_ p: (Int8, Int8), _ x: T) -> Int { Int(p.0) * 10 + Int(p.1) + MemoryLayout<T>.size }
 }
 
 public func firstGeneric<T>(_ xs: [T]) -> T { xs[0] }
+
+// A tuple a signature spells is passed element by element: (Int8, Int8) is (i8, i8), never one i16,
+// a nested tuple flattens, and an element too wide for the registers goes by address on its own.
+public func packedSum(_ p: (Int8, Int8)) -> Int { Int(p.0) * 10 + Int(p.1) }
+public func nestedSum(_ p: ((Int8, Int8), Int8)) -> Int { Int(p.0.0) * 100 + Int(p.0.1) * 10 + Int(p.1) }
+public func wideElementSum(_ p: (Int8, WideScalar)) -> Int { Int(p.0) + p.1.e }
+public func packedSumAsync(_ p: (Int8, Int8)) async -> Int { await Task.yield(); return Int(p.0) * 10 + Int(p.1) }
+public final class PackedBox {
+    public var v = 0
+    public init() {}
+    public var packed: (Int8, Int8) {
+        get { (Int8(v / 10), Int8(v % 10)) }
+        set { v = Int(newValue.0) * 10 + Int(newValue.1) }
+    }
+}
 
 // Array return: a non-POD struct backed by a Builtin.BridgeObject (Opaque), adopted not decoded.
 public struct Bag {
@@ -1195,9 +1211,11 @@ extension ItemSource {
     public func flipped(_ p: (Item, Int)) -> (Int, Item) { (p.1, p.0) }
     public func unbracketed(_ p: (Int8, Item, Int8)) -> (Item, Int) { (p.1, Int(p.0) * 10 + Int(p.2)) }
     public func refill(_ p: inout (Item, Int), _ x: Item) { p = (x, p.1 + 1) }
+    public func packed(_ p: (Int8, Int8)) -> Int { Int(p.0) * 10 + Int(p.1) }
     public func pairedLater(_ x: Item) async -> (Item, Int) { (x, 7) }
     public func twiceLater(_ x: Item) async -> (Item, Item) { (x, x) }
     public func bracketedLater(_ x: Item) async -> (Int8, Item, Int8) { (1, x, 2) }
+    public func packedLater(_ p: (Int8, Int8)) async -> Int { Int(p.0) * 10 + Int(p.1) }
 }
 public struct IntSource: ItemSource {
     public var value: Int

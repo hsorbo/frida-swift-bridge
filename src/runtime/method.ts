@@ -39,6 +39,7 @@ import {
   SwiftNativeFunction,
   SwiftArgType,
   shouldPassIndirectly,
+  lowerArg,
   loweredScalars,
   ArgumentAllocator,
   LoweredScalar,
@@ -1753,19 +1754,8 @@ export class BoundMethod {
       if (closure !== null) {
         lowered.pushWord(closure.fnPointer);
         lowered.pushWord(closure.context);
-      } else if (argPlan.kind === "generic" || argPlan.kind === "abstractIndirect") {
-        lowered.pushWord(marshalled.ptrs[i]);
-      } else if (argPlan.kind === "destructuredTuple") {
-        [...enumerateTupleElements(argPlan.metadata)].forEach((element, k) => {
-          const address = marshalled.ptrs[i].add(element.offset);
-          if (argPlan.byAddress[k]) {
-            lowered.pushWord(address);
-          } else {
-            lowered.push(element.type, address);
-          }
-        });
       } else {
-        lowered.push(planMetadata(argPlan), marshalled.ptrs[i]);
+        lowered.push(swiftArgType(argPlan), marshalled.ptrs[i]);
       }
     });
     const options: AsyncCallOptions = { throws: plan.throws };
@@ -1922,14 +1912,17 @@ class AsyncArgs {
     this.place({ offset: 0, size: Process.pointerSize, cls: "int" }, value);
   }
 
-  push(metadata: Metadata, buffer: NativePointer): void {
-    if (metadata.kind === MetadataKind.Class) {
-      this.pushWord(buffer.readPointer());
-    } else if (shouldPassIndirectly(metadata)) {
+  push(arg: SwiftArgType, buffer: NativePointer): void {
+    const { indirect, pieces } = lowerArg(arg);
+    if (indirect) {
       this.pushWord(buffer);
-    } else {
-      for (const scalar of loweredScalars(metadata)) {
-        this.place(scalar, buffer);
+      return;
+    }
+    for (const piece of pieces) {
+      if (piece.byAddress === true) {
+        this.pushWord(buffer.add(piece.offset));
+      } else {
+        this.place(piece, buffer);
       }
     }
   }
@@ -2483,10 +2476,14 @@ function planCompoundType(
 }
 
 // Array/Set/Dictionary are a fixed-layout buffer (direct); Optional<param> embeds the abstract param
-// (indirect) unless the param is class-bound, which makes it a nullable reference.
+// (indirect) unless the param is class-bound, which makes it a nullable reference; a tuple without
+// an opaque element is concrete, the call expanding its elements.
 function compoundIsAddressOnly(type: TypeExpr, genericParams: string[], classBoundParams: Set<string>): boolean {
   if (type.kind === "variadic") {
     return false;
+  }
+  if (type.kind === "tuple") {
+    return hasOpaqueLayout(type, (name) => (genericParams.includes(name) && !classBoundParams.has(name) ? "opaque" : null));
   }
   if (type.kind === "optional") {
     const payload = type.wrapped;
@@ -2510,7 +2507,7 @@ function compoundIsAddressOnly(type: TypeExpr, genericParams: string[], classBou
       );
     }
   }
-  throw new Error(`unsupported compound generic signature type ${type.text} (only [T], [K: V], T? and a nominal type are supported)`);
+  throw new Error(`unsupported compound generic signature type ${type.text} (only [T], [K: V], T?, a tuple and a nominal type are supported)`);
 }
 
 // inout passes the caller's value by address whatever its layout, a tuple whole rather than destructured.
