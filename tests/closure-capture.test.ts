@@ -148,6 +148,19 @@ describe("closure capture layout (synthetic)", () => {
     expect(layout("SiIetyd_")).toEqual([0x10, 0x18]);
   });
 
+  test("sizes a closure nested in an Optional or a tuple by the representation it spells", () => {
+    requireSwift();
+    const layout = (closure: string | NativePointer) => {
+      const context = makeHeapContext(makeCaptureDescriptor([closure, "Si"]), 0x10);
+      return layoutCaptures(context)!.map(({ address }) => address.sub(context).toInt32());
+    };
+    expect(layout("SiS2SIegygo_Sg")).toEqual([0x10, 0x20]);
+    expect(layout("SiSiIetCyd_Sg")).toEqual([0x10, 0x18]);
+    expect(layout("Si_S2iIegyd_t")).toEqual([0x10, 0x28]);
+    expect(layout("SiIegd_SgSg")).toEqual([0x10, 0x20]);
+    expect(layout(symbolicTypeName(metadataOf("Si"), "AAIegyd_Sg_AAt"))).toEqual([0x10, 0x28]);
+  });
+
   test("returns null for a generic-bound closure without attempting to resolve it", () => {
     const context = makeHeapContext(makeCaptureDescriptor(["Si"], 1), 0x10);
     expect(layoutCaptures(context)).toBeNull();

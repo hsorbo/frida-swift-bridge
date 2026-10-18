@@ -11,6 +11,7 @@ import { Metadata, MetadataKind } from "./metadata.js";
 import { ClassMetadata, classMetadataOf } from "./class-metadata.js";
 import { ContextDescriptorKind, symbolicallyReferencedDescriptor } from "./context-descriptor.js";
 import { RelativeDirectPointer } from "../basic/relative-pointer.js";
+import { ARM64E_ABI } from "../basic/pac.js";
 
 // TargetHeapLocalVariableMetadata: Kind, OffsetToFirstCapture, CaptureDescription.
 const OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE = 0x8;
@@ -116,11 +117,22 @@ export function offsetToFirstCapture(context: NativePointer): number {
 // Only its representation fixes the layout, so a formal () -> () of that representation stands in.
 const PARAM_CONVENTION = "[iclbnXxgeyvpm]";
 const RESULT_CONVENTION = "[rodualkgm]";
-const LOWERED_FUNCTION_TYPE = new RegExp(
-  `Is?I?P?e?A?N?[dlfr]?([ygxt])([BCMOKW]?)[AIG]?h?H?T?(?:${PARAM_CONVENTION}w?T?I?L?)*(?:${RESULT_CONVENTION}w?)*` +
-    `(?:Y${PARAM_CONVENTION})*(?:z${RESULT_CONVENTION}w?)?_$`
-);
+const LOWERED_FUNCTION_ATTRIBUTES =
+  `e?A?N?[dlfr]?([ygxt])([BCMOKW]?)[AIG]?h?H?T?((?:${PARAM_CONVENTION}w?T?I?L?)*(?:${RESULT_CONVENTION}w?)*` +
+  `(?:Y${PARAM_CONVENTION})*(?:z${RESULT_CONVENTION}w?)?)_`;
+const LOWERED_FUNCTION_TYPE = new RegExp(`Is?I?P?${LOWERED_FUNCTION_ATTRIBUTES}$`);
+const NESTED_LOWERED_FUNCTION_TYPE = new RegExp(`I${LOWERED_FUNCTION_ATTRIBUTES}`, "g");
+const CONVENTION_MODIFIERS = /[wTILYz]/g;
 const THICK_FUNCTION = "yyc";
+const SYMBOLIC_REF_INDIRECT = 0x02;
+const TYPE_DESCRIPTOR_DISCRIMINATOR = 0xae86;
+
+function formalFunctionOperator(callee: string, representation: string): string {
+  if (representation === "B" || representation === "C") {
+    return `X${representation}`;
+  }
+  return callee === "t" || (representation !== "" && representation !== "K") ? "Xf" : "c";
+}
 
 function loweredFunctionStandIn(record: CaptureTypeRecord): string | null {
   const mangled = record.mangledTypeName;
@@ -129,10 +141,79 @@ function loweredFunctionStandIn(record: CaptureTypeRecord): string | null {
     return null;
   }
   const [, callee, representation] = match;
-  if (representation === "B" || representation === "C") {
-    return `yyX${representation}`;
+  return `yy${formalFunctionOperator(callee, representation)}`;
+}
+
+// Below the top of the name, the lowered function's parameter and result types stay in place, so
+// the substitutions they define keep their indices, and formal functions of its representation
+// consume them; only the outermost one's layout matters.
+function formalNestedFunctions(text: string): string {
+  return text.replace(NESTED_LOWERED_FUNCTION_TYPE, (_, callee, representation, conventions: string) => {
+    const operator = formalFunctionOperator(callee, representation);
+    const typeCount = conventions.replace(CONVENTION_MODIFIERS, "").length;
+    return typeCount < 2 ? "yy".slice(typeCount) + operator : "c".repeat(typeCount - 2) + operator;
+  });
+}
+
+// A relative reference from a fresh allocation may not reach the image, so each context reference
+// in the copy goes through a pointer slot behind it.
+function withNestedFunctionsFormal(name: MangledName): MangledName | null {
+  const bytes = new Uint8Array(name.address.readByteArray(name.length)!);
+  const formal: number[] = [];
+  const references: { at: number; descriptor: NativePointer }[] = [];
+  let changed = false;
+  for (let i = 0; i < bytes.length; ) {
+    if (bytes[i] <= 0x1f) {
+      const descriptor = symbolicallyReferencedDescriptor(name.address.add(i));
+      if (descriptor === null) {
+        return null;
+      }
+      references.push({ at: formal.length + 1, descriptor: descriptor.handle });
+      formal.push(SYMBOLIC_REF_INDIRECT, 0, 0, 0, 0);
+      i += 5;
+      continue;
+    }
+    let end = i;
+    while (end < bytes.length && bytes[end] > 0x1f) {
+      end++;
+    }
+    const text = String.fromCharCode(...bytes.subarray(i, end));
+    const rewritten = formalNestedFunctions(text);
+    changed ||= rewritten !== text;
+    for (let j = 0; j < rewritten.length; j++) {
+      formal.push(rewritten.charCodeAt(j));
+    }
+    i = end;
   }
-  return callee === "t" || (representation !== "" && representation !== "K") ? "yyXf" : THICK_FUNCTION;
+  if (!changed) {
+    return null;
+  }
+  const slots = (formal.length + Process.pointerSize) & ~(Process.pointerSize - 1);
+  const copy = Memory.alloc(slots + references.length * Process.pointerSize);
+  copy.writeByteArray(formal);
+  references.forEach(({ at, descriptor }, i) => {
+    const slot = copy.add(slots + i * Process.pointerSize);
+    slot.writePointer(ARM64E_ABI ? descriptor.sign("da", slot.blend(TYPE_DESCRIPTOR_DISCRIMINATOR)) : descriptor);
+    copy.add(at).writeS32(slot.sub(copy.add(at)).toInt32());
+  });
+  return { address: copy, length: formal.length };
+}
+
+// An identifier can spell the same characters, so the rewrite is only tried on a name that fails as written.
+function resolveFormally(
+  record: CaptureTypeRecord,
+  resolveName: (name: MangledName) => Metadata | null
+): Metadata | null {
+  const mangled = record.mangledTypeName;
+  if (mangled === null) {
+    return null;
+  }
+  const resolved = resolveName(mangled);
+  if (resolved !== null) {
+    return resolved;
+  }
+  const formal = withNestedFunctionsFormal(mangled);
+  return formal === null ? null : resolveName(formal);
 }
 
 export function resolveLoweredFunctionCapture(record: CaptureTypeRecord): Metadata | null {
@@ -147,8 +228,7 @@ export function isThickFunctionCaptureType(record: CaptureTypeRecord): boolean {
 }
 
 export function resolveCaptureType(record: CaptureTypeRecord): Metadata | null {
-  const mangled = record.mangledTypeName;
-  return mangled === null ? null : resolveTypeByMangledName(mangled);
+  return resolveFormally(record, (name) => resolveTypeByMangledName(name));
 }
 
 interface GenericParam {
@@ -399,19 +479,14 @@ export class CaptureGenericArguments {
   }
 
   resolve(record: CaptureTypeRecord): Metadata | null {
-    const mangled = record.mangledTypeName;
-    return mangled === null
-      ? null
-      : resolveTypeByMangledNameInEnvironment(mangled, this.environment, this.genericArguments);
+    return resolveFormally(record, (name) =>
+      resolveTypeByMangledNameInEnvironment(name, this.environment, this.genericArguments)
+    );
   }
 
   // Captures supply metadata only when every capture's layout is fixed, so a parameter not derived
   // yet can only change a capture's layout by being class-bound; AnyObject stands in for it.
   resolveWithPlaceholders(record: CaptureTypeRecord): Metadata | null {
-    const mangled = record.mangledTypeName;
-    if (mangled === null) {
-      return null;
-    }
     const anyObject = resolveTypeByMangledName({ address: Memory.allocUtf8String("yXl"), length: 3 });
     if (anyObject === null) {
       return null;
@@ -421,6 +496,8 @@ export class CaptureGenericArguments {
       const argument = this.genericArguments.readPointer(i * Process.pointerSize);
       genericArguments.writePointer(argument.isNull() ? anyObject.handle : argument, i * Process.pointerSize);
     }
-    return resolveTypeByMangledNameInEnvironment(mangled, this.environment, genericArguments);
+    return resolveFormally(record, (name) =>
+      resolveTypeByMangledNameInEnvironment(name, this.environment, genericArguments)
+    );
   }
 }

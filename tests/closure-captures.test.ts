@@ -170,6 +170,22 @@ describe("closure captures", () => {
     expect(value.read()).toEqual(int64(6));
   });
 
+  test("a closure held in an Optional or a tuple reads as a closure view", () => {
+    new NativeFunction(fixtureExport("storeNestedClosureCapturing"), "void", ["int64"])(5);
+    const [scale, pair] = Swift.borrowClosure(fixtureContext("genericCapturingContext")).$captures();
+    expect((scale.read() as { some: SwiftClosureValue }).some.$captures().map((c) => c.read())).toEqual([int64(5)]);
+    const [n, add] = pair.read() as [Int64, SwiftClosureValue];
+    expect(n).toEqual(int64(5));
+    expect(add.$captures().map((c) => c.read())).toEqual([int64(5)]);
+  });
+
+  test("an optional closure captured in a generic function lays out alongside the parameter-typed capture", () => {
+    new NativeFunction(fixtureExport("triggerGenericOptionalClosureCapturing"), "void", [])();
+    const [make, value] = Swift.borrowClosure(fixtureContext("genericCapturingContext")).$captures();
+    expect((make.read() as { some: SwiftClosureValue }).some.$captures().map((c) => c.read())).toEqual([int64(8)]);
+    expect(value.read()).toEqual(int64(8));
+  });
+
   test("a closure without captures has none", () => {
     const seven = Swift.function(module, MAKE_CONSTANT_SEVEN).call() as SwiftClosureValue;
     expect(seven.$captures()).toEqual([]);

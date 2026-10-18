@@ -2370,3 +2370,10 @@ public func storeGenericClosureCapturing<T>(_ value: T) {
     genericCapturingBody = { _ = (make(), value) }
 }
 public func triggerGenericClosureCapturing() { storeGenericClosureCapturing(6) }
+public func storeNestedClosureCapturing(_ n: Int) {
+    let scale: ((GenericCapturingRef<Int>) -> Int)? = { $0.value * n }
+    let pair: (Int, (Int) -> Int) = (n, { $0 + n })
+    genericCapturingBody = { _ = (scale?(GenericCapturingRef(1)), pair.1(pair.0)) }
+}
+public func storeGenericOptionalClosureCapturing<T>(_ value: T, _ make: ((T) -> T)?) { genericCapturingBody = { _ = make?(value) } }
+public func triggerGenericOptionalClosureCapturing() { let n = 8; storeGenericOptionalClosureCapturing(n, { $0 + n }) }
