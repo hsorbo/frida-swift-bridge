@@ -2356,3 +2356,17 @@ public func storeArrayBeforeRefCapturing<T>(_ xs: [T], _ ref: GenericCapturingRe
 public func triggerArrayBeforeRefCapturing() { storeArrayBeforeRefCapturing([1, 2], GenericCapturingRef(3)) }
 public func storeOptionalBeforeRefCapturing<T>(_ other: GenericCapturingRef<T>?, _ ref: GenericCapturingRef<T>) { genericCapturingBody = { _ = (other, ref) } }
 public func triggerOptionalBeforeRefCapturing() { storeOptionalBeforeRefCapturing(GenericCapturingRef(1), GenericCapturingRef(2)) }
+public func storeClosureCapturing(_ n: Int) {
+    let add: (Int) -> Int = { $0 + n }
+    let twice: @convention(c) (Int) -> Int = { $0 * 2 }
+    genericCapturingBody = { _ = twice(add(n)) }
+}
+public func storeSoleClosureCapturing(_ n: Int) {
+    let add: (Int) -> Int = { $0 + n }
+    genericCapturingBody = { _ = add(1) }
+}
+public func storeGenericClosureCapturing<T>(_ value: T) {
+    let make: () -> T = { value }
+    genericCapturingBody = { _ = (make(), value) }
+}
+public func triggerGenericClosureCapturing() { storeGenericClosureCapturing(6) }

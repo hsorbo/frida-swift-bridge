@@ -5,6 +5,7 @@ import {
   resolveTypeByMangledName,
   resolveTypeByMangledNameInEnvironment,
   symbolicMangledNameLength,
+  trailingMangledText,
 } from "./field-descriptor.js";
 import { Metadata, MetadataKind } from "./metadata.js";
 import { ClassMetadata, classMetadataOf } from "./class-metadata.js";
@@ -109,6 +110,40 @@ export function captureDescriptorOf(context: NativePointer): CaptureDescriptor |
 export function offsetToFirstCapture(context: NativePointer): number {
   const metadata = context.readPointer().strip();
   return metadata.readU32(OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE);
+}
+
+// A closure capture is spelled as a lowered SIL function type, which the runtime cannot realize.
+// Only its representation fixes the layout, so a formal () -> () of that representation stands in.
+const PARAM_CONVENTION = "[iclbnXxgeyvpm]";
+const RESULT_CONVENTION = "[rodualkgm]";
+const LOWERED_FUNCTION_TYPE = new RegExp(
+  `Is?I?P?e?A?N?[dlfr]?([ygxt])([BCMOKW]?)[AIG]?h?H?T?(?:${PARAM_CONVENTION}w?T?I?L?)*(?:${RESULT_CONVENTION}w?)*` +
+    `(?:Y${PARAM_CONVENTION})*(?:z${RESULT_CONVENTION}w?)?_$`
+);
+const THICK_FUNCTION = "yyc";
+
+function loweredFunctionStandIn(record: CaptureTypeRecord): string | null {
+  const mangled = record.mangledTypeName;
+  const match = mangled === null ? null : LOWERED_FUNCTION_TYPE.exec(trailingMangledText(mangled.address));
+  if (match === null) {
+    return null;
+  }
+  const [, callee, representation] = match;
+  if (representation === "B" || representation === "C") {
+    return `yyX${representation}`;
+  }
+  return callee === "t" || (representation !== "" && representation !== "K") ? "yyXf" : THICK_FUNCTION;
+}
+
+export function resolveLoweredFunctionCapture(record: CaptureTypeRecord): Metadata | null {
+  const standIn = loweredFunctionStandIn(record);
+  return standIn === null
+    ? null
+    : resolveTypeByMangledName({ address: Memory.allocUtf8String(standIn), length: standIn.length });
+}
+
+export function isThickFunctionCaptureType(record: CaptureTypeRecord): boolean {
+  return loweredFunctionStandIn(record) === THICK_FUNCTION;
 }
 
 export function resolveCaptureType(record: CaptureTypeRecord): Metadata | null {

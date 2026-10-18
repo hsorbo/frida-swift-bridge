@@ -136,6 +136,18 @@ describe("closure capture layout (synthetic)", () => {
     expect(slots.map(({ address }) => address.sub(context).toInt32())).toEqual([0x10, 0x11, 0x11]);
   });
 
+  test("sizes a captured closure by the representation its lowered function type spells", () => {
+    requireSwift();
+    const layout = (closure: string) => {
+      const context = makeHeapContext(makeCaptureDescriptor([closure, "Si"]), 0x10);
+      return layoutCaptures(context)!.map(({ address }) => address.sub(context).toInt32());
+    };
+    expect(layout("S2iIegyd_")).toEqual([0x10, 0x20]);
+    expect(layout("xIegr_")).toEqual([0x10, 0x20]);
+    expect(layout("SiSiIetCyd_")).toEqual([0x10, 0x18]);
+    expect(layout("SiIetyd_")).toEqual([0x10, 0x18]);
+  });
+
   test("returns null for a generic-bound closure without attempting to resolve it", () => {
     const context = makeHeapContext(makeCaptureDescriptor(["Si"], 1), 0x10);
     expect(layoutCaptures(context)).toBeNull();
@@ -218,7 +230,7 @@ describe("closure capture layout (synthetic)", () => {
     // arm64e authenticates the isa, so let the runtime sign it.
     const instance = Swift.api.swift_allocObject(classMetadata, 2 * Process.pointerSize, Process.pointerSize - 1) as NativePointer;
 
-    const context = makeHeapContext(makeCaptureDescriptor(["garbage"]), 0x10);
+    const context = makeHeapContext(makeCaptureDescriptor(["Ieg_"]), 0x10);
     context.add(0x10).add(Process.pointerSize).writePointer(instance);
 
     const slots = layoutCaptures(context);
@@ -244,7 +256,7 @@ describe("closure capture layout (synthetic)", () => {
     const taggedPointerMask = libobjc.getExportByName("objc_debug_taggedpointer_mask").readPointer();
     expect(number.and(taggedPointerMask).isNull()).toBe(false);
 
-    const context = makeHeapContext(makeCaptureDescriptor(["garbage"]), 0x10);
+    const context = makeHeapContext(makeCaptureDescriptor(["Ieg_"]), 0x10);
     context.add(0x10).add(Process.pointerSize).writePointer(number);
 
     const slots = layoutCaptures(context);
@@ -258,12 +270,19 @@ describe("closure capture layout (synthetic)", () => {
 describe("reabstraction-thunk unwrap (synthetic)", () => {
   test("finds the inner closure behind a one-capture, zero-binding wrapper", () => {
     const innerContext = makeHeapContext(makeCaptureDescriptor(["Si"]), 0x10);
-    const outerContext = makeHeapContext(makeCaptureDescriptor(["garbage"]), 0x10);
+    const outerContext = makeHeapContext(makeCaptureDescriptor(["Ieg_"]), 0x10);
     outerContext.add(0x10).add(Process.pointerSize).writePointer(innerContext);
 
     const inner = unwrapReabstractionThunk(outerContext);
     expect(inner).not.toBeNull();
     expect(inner!.equals(innerContext)).toBeTruthy();
+  });
+
+  test("returns null when the sole capture is not a thick closure", () => {
+    const innerContext = makeHeapContext(makeCaptureDescriptor(["Si"]), 0x10);
+    const outerContext = makeHeapContext(makeCaptureDescriptor(["SiSiIetCyd_"]), 0x10);
+    outerContext.add(0x10).add(Process.pointerSize).writePointer(innerContext);
+    expect(unwrapReabstractionThunk(outerContext)).toBeNull();
   });
 
   test("returns null for a two-capture descriptor (not wrapper-shaped)", () => {
@@ -280,7 +299,7 @@ describe("reabstraction-thunk unwrap (synthetic)", () => {
     const notAClosureContext = Memory.alloc(Process.pointerSize);
     notAClosureContext.writePointer(notAClosureMetadata);
 
-    const outerContext = makeHeapContext(makeCaptureDescriptor(["garbage"]), 0x10);
+    const outerContext = makeHeapContext(makeCaptureDescriptor(["Ieg_"]), 0x10);
     outerContext.add(0x10).add(Process.pointerSize).writePointer(notAClosureContext);
 
     expect(unwrapReabstractionThunk(outerContext)).toBeNull();

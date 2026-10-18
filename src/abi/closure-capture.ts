@@ -3,8 +3,10 @@ import {
   CaptureTypeRecord,
   captureDescriptorOf,
   isReferenceSizedCaptureType,
+  isThickFunctionCaptureType,
   offsetToFirstCapture,
   resolveCaptureType,
+  resolveLoweredFunctionCapture,
 } from "./capture-descriptor.js";
 import { Metadata, MetadataKind, TypeLayout } from "./metadata.js";
 import { classMetadataOf } from "./class-metadata.js";
@@ -19,21 +21,27 @@ export interface CaptureSlot {
 
 // null: no closure, a generic parameter no metadata source supplies, or an unresolved capture type.
 export function layoutCaptures(context: NativePointer): CaptureSlot[] | null {
-  const direct = layoutCapturesAt(context);
-  if (direct !== null) {
-    return direct;
+  if (!isReabstractionThunk(context)) {
+    return layoutCapturesAt(context) ?? layoutObjectAsContext(context);
   }
   const inner = unwrapReabstractionThunk(context);
-  if (inner !== null) {
-    return layoutCapturesAt(inner);
-  }
-  return layoutSoleClassCapture(context) ?? layoutObjectAsContext(context);
+  return inner !== null ? layoutCapturesAt(inner) : layoutSoleClassCapture(context);
 }
 
-// escaping closures wrap in a reabstraction thunk with an unresolvable mangled name; detection is structural.
-export function unwrapReabstractionThunk(context: NativePointer): NativePointer | null {
+// A thunk's context holds only the closure it wraps, as does a closure whose sole capture is a
+// closure; the context alone does not tell them apart, so both read as the inner closure's captures.
+function isReabstractionThunk(context: NativePointer): boolean {
   const descriptor = captureDescriptorOf(context);
-  if (descriptor === null || descriptor.numBindings !== 0 || descriptor.numCaptureTypes !== 1) {
+  return (
+    descriptor !== null &&
+    descriptor.numBindings === 0 &&
+    descriptor.numCaptureTypes === 1 &&
+    isThickFunctionCaptureType(descriptor.captureTypes[0])
+  );
+}
+
+export function unwrapReabstractionThunk(context: NativePointer): NativePointer | null {
+  if (!isReabstractionThunk(context)) {
     return null;
   }
   try {
@@ -44,12 +52,8 @@ export function unwrapReabstractionThunk(context: NativePointer): NativePointer 
   }
 }
 
-// sole unresolved capture holding an indirect class reference at its second word.
+// the wrapped closure's context is an indirect class reference rather than a closure box.
 function layoutSoleClassCapture(context: NativePointer): CaptureSlot[] | null {
-  const descriptor = captureDescriptorOf(context);
-  if (descriptor === null || descriptor.numBindings !== 0 || descriptor.numCaptureTypes !== 1) {
-    return null;
-  }
   const address = context.add(offsetToFirstCapture(context)).add(Process.pointerSize);
   try {
     const type = new Metadata(classMetadataOf(address.readPointer()).handle);
@@ -81,7 +85,8 @@ function layoutCapturesAt(context: NativePointer): CaptureSlot[] | null {
     return null;
   }
   const resolve = (record: CaptureTypeRecord) =>
-    generics === null ? resolveCaptureType(record) : generics.resolve(record);
+    resolveLoweredFunctionCapture(record) ??
+    (generics === null ? resolveCaptureType(record) : generics.resolve(record));
 
   const records = descriptor.captureTypes;
   let offset = offsetToFirstCapture(context) + descriptor.numBindings * Process.pointerSize;

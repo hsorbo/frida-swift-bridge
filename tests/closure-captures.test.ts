@@ -146,6 +146,30 @@ describe("closure captures", () => {
     expect(type.read()).toBe(Swift.reflect("Swift.Bool"));
   });
 
+  test("a captured closure reads as a borrowed closure view whose own captures read in turn", () => {
+    new NativeFunction(fixtureExport("storeClosureCapturing"), "void", ["int64"])(3);
+    const [twice, add, n] = Swift.borrowClosure(fixtureContext("genericCapturingContext")).$captures();
+    expect([twice.type.name, add.type.name, n.type.name]).toEqual(["@convention(c) () -> ()", "() -> ()", "Swift.Int"]);
+    const [addend] = (add.read() as SwiftClosureValue).$captures();
+    expect(addend.read()).toEqual(int64(3));
+    expect(twice.read() instanceof NativePointer).toBe(true);
+    expect(n.read()).toEqual(int64(3));
+  });
+
+  test("a closure whose sole capture is a closure reads it as a closure view", () => {
+    new NativeFunction(fixtureExport("storeSoleClosureCapturing"), "void", ["int64"])(4);
+    const [add, ...rest] = Swift.borrowClosure(fixtureContext("genericCapturingContext")).$captures();
+    expect(rest).toEqual([]);
+    expect((add.read() as SwiftClosureValue).$captures().map((c) => c.read())).toEqual([int64(4)]);
+  });
+
+  test("a closure captured in a generic function lays out alongside the parameter-typed capture", () => {
+    new NativeFunction(fixtureExport("triggerGenericClosureCapturing"), "void", [])();
+    const [make, value] = Swift.borrowClosure(fixtureContext("genericCapturingContext")).$captures();
+    expect((make.read() as SwiftClosureValue).$captures().map((c) => c.read())).toEqual([int64(6)]);
+    expect(value.read()).toEqual(int64(6));
+  });
+
   test("a closure without captures has none", () => {
     const seven = Swift.function(module, MAKE_CONSTANT_SEVEN).call() as SwiftClosureValue;
     expect(seven.$captures()).toEqual([]);

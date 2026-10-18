@@ -79,6 +79,10 @@ export class Field {
   }
 }
 
+export function trailingMangledText(mangledTypeName: NativePointer): string {
+  return scanSymbolicMangledName(mangledTypeName).trailingText;
+}
+
 export function referenceStorageOf(mangledTypeName: NativePointer): ReferenceStorage | null {
   const { trailingText } = scanSymbolicMangledName(mangledTypeName);
   return REFERENCE_STORAGE_OPERATORS[trailingText.slice(-2)] ?? null;
