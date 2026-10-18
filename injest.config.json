@@ -2,10 +2,10 @@
   "$schema": "./node_modules/@frida/injest/schema/injest.config.schema.json",
   "default": "local",
   "targets": {
-    "local": { "device": "local", "session": "system" },
-    "local-v8": { "device": "local", "session": "system", "runtime": "v8" },
-    "macos-arm64e": { "device": "local", "session": { "spawn": "./tests/fixtures/host" } },
-    "macos-arm64e-v8": { "device": "local", "session": { "spawn": "./tests/fixtures/host" }, "runtime": "v8" },
-    "ios": { "device": "usb", "session": "system" }
+    "local": { "device": "local", "session": "system", "timeout": 30000 },
+    "local-v8": { "device": "local", "session": "system", "runtime": "v8", "timeout": 30000 },
+    "macos-arm64e": { "device": "local", "session": { "spawn": "./tests/fixtures/host" }, "timeout": 30000 },
+    "macos-arm64e-v8": { "device": "local", "session": { "spawn": "./tests/fixtures/host" }, "runtime": "v8", "timeout": 30000 },
+    "ios": { "device": "usb", "session": "system", "timeout": 30000 }
   }
 }
