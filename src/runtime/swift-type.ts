@@ -699,6 +699,16 @@ export type NativeFunctionType = SwiftType | SwiftTypeFacade;
 
 export interface MarshalledFunctionOptions {
   throws?: boolean;
+  conventions?: ParamConvention[];
+}
+
+const PARAM_CONVENTIONS = new Set<ParamConvention>(["borrowed", "owned", "inout"]);
+
+function statedConventions(conventions: ParamConvention[], arity: number): ParamConvention[] {
+  if (conventions.length !== arity || !conventions.every((c) => PARAM_CONVENTIONS.has(c))) {
+    throw new Error(`swiftFunction: conventions must give one of borrowed, owned or inout per argument (${arity})`);
+  }
+  return conventions;
 }
 
 function marshalledMetadataOf(type: NativeFunctionType, role: string): Metadata {
@@ -709,7 +719,7 @@ function marshalledMetadataOf(type: NativeFunctionType, role: string): Metadata 
 }
 
 // Best-effort: an address with no exported symbol (stripped/private) is assumed to borrow its
-// arguments and, if it throws, to throw an untyped error.
+// arguments unless the caller states their conventions and, if it throws, to throw an untyped error.
 function symbolSignatureAt(address: NativePointer): { conventions: ParamConvention[]; thrown: Metadata | undefined } {
   const symbol = symbolicate(address);
   const parsed = symbol === null ? null : parseSwiftSignature(symbol.demangled);
@@ -729,7 +739,8 @@ export function swiftFunction(
   argTypes: NativeFunctionType[],
   options: MarshalledFunctionOptions = {}
 ): (...args: CallArg[]) => CallResult {
-  const { conventions, thrown } = symbolSignatureAt(address);
+  const { conventions: symbolConventions, thrown } = symbolSignatureAt(address);
+  const conventions = options.conventions === undefined ? symbolConventions : statedConventions(options.conventions, argTypes.length);
   const argMetadata = argTypes.map((t, i) => marshalledMetadataOf(t, `argument type ${i}`));
   const returnMetadata = returnType === null ? null : marshalledMetadataOf(returnType, "return type");
   const lowered = argMetadata.map((m, i) => (conventions[i] === "inout" ? indirect(m) : m));

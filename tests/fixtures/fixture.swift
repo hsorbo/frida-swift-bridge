@@ -736,6 +736,9 @@ public func makeToken(_ id: Int) -> Token { Token(id: id) }
 public func makeWrapper(_ t: Token) -> Wrapper { Wrapper(token: t, a: 1, b: 2, c: 3, d: 4) }
 @inline(never)
 public func consumeWrapper(_ w: __owned Wrapper) -> Int { w.token.id }
+@inline(never)
+public func consumeToken(_ t: __owned Token) -> Int { t.id }
+public func doubleInPlace(_ n: inout Int) { n *= 2 }
 
 // A non-consuming init param demangles as `init(name: __shared Swift.String)`; resolving it exercises
 // the borrow-modifier strip in the arg-type resolver.

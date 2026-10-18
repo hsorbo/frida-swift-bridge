@@ -1,8 +1,25 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
-import { Swift, SwiftObject, SwiftError } from "../src/index.js";
+import { Swift, SwiftObject, SwiftError, SwiftStruct } from "../src/index.js";
 import { ClassInstance } from "../src/abi.js";
+
+// A jump to target from memory outside any module, so no symbol states its parameter conventions.
+function symbolless(target: NativePointer): NativePointer {
+  const stub = Memory.alloc(Process.pageSize);
+  Memory.patchCode(stub, 32, (code) => {
+    if (Process.arch === "arm64") {
+      const writer = new Arm64Writer(code, { pc: stub });
+      writer.putBranchAddress(target.strip());
+      writer.flush();
+    } else {
+      const writer = new X86Writer(code, { pc: stub });
+      writer.putJmpAddress(target);
+      writer.flush();
+    }
+  });
+  return stub;
+}
 
 describe("Swift.NativeFunction (marshalled)", () => {
   beforeEach(() => { loadFixture(); });
@@ -149,5 +166,35 @@ describe("Swift.NativeFunction (marshalled)", () => {
     const len = Swift.NativeFunction(fixtureExport("fixture.stringLength"), Int, [String_]);
     const token = makeToken(7) as SwiftObject;
     expect(() => len(token as never)).toThrow(/expected Swift.String/);
+  });
+
+  test("an address with no symbol takes a consuming parameter from the stated conventions", () => {
+    const Int = Swift.type("Swift.Int")!;
+    const Token = Swift.type("fixture.Token")!;
+    const makeToken = Swift.NativeFunction(fixtureExport("fixture.makeToken"), Token, [Int]);
+    const stub = symbolless(fixtureExport("fixture.consumeToken"));
+    const consume = Swift.NativeFunction(stub, Int, [Token], { conventions: ["owned"] });
+    const token = makeToken(7) as SwiftObject;
+    const view = new ClassInstance(token.$handle);
+    const before = view.retainCount;
+    expect(consume(token)).toEqual(int64(7));
+    expect(view.retainCount).toBe(before);
+    expect(token.$field("id").read()).toEqual(int64(7));
+  });
+
+  test("an address with no symbol writes an inout parameter back when the conventions state it", () => {
+    const Int = Swift.type("Swift.Int") as SwiftStruct;
+    const stub = symbolless(fixtureExport("fixture.doubleInPlace"));
+    const double = Swift.NativeFunction(stub, null, [Int], { conventions: ["inout"] });
+    const n = Int.$new(21);
+    double(n);
+    expect(n.$fields).toEqual(int64(42));
+  });
+
+  test("stated conventions must give a known convention per argument", () => {
+    const Int = Swift.type("Swift.Int")!;
+    const add = fixtureExport("fixture.addInts");
+    expect(() => Swift.NativeFunction(add, Int, [Int, Int], { conventions: ["borrowed"] })).toThrow(/one of borrowed, owned or inout per argument/);
+    expect(() => Swift.NativeFunction(add, Int, [Int, Int], { conventions: ["borrowed", "consuming" as never] })).toThrow(/one of borrowed/);
   });
 });

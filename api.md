@@ -1065,12 +1065,26 @@ const greetCounted = Swift.NativeFunction(countedAddr, pair, [Greeter]);
 greetCounted(Swift.type("MyApp.PoliteGreeter").$new({ name: "Ada" }));   // ["Hello, Ada", 10]
 ```
 
-The only option the stable wrapper accepts is `{ throws: true }` for a Swift
-`throws` function (see [Errors](#errors)). Consuming (`__owned`) and `inout`
-parameters are handled as for methods when the address has a symbol; without
-one, every parameter is assumed to be borrowed. Generics, witness tables, and
-other lowering controls are not supported here — reach for the raw primitive
-under `/abi` when you need them.
+The stable wrapper accepts two options. `{ throws: true }` marks a Swift
+`throws` function (see [Errors](#errors)). `{ conventions }` states each
+parameter's ownership, one of `"borrowed"`, `"owned"` (a consuming or `__owned`
+parameter) or `"inout"` per argument. When the address has a symbol the
+conventions are read from it, as for methods; a stripped or private address has
+none, and every parameter is then taken as borrowed. State them for such an
+address whenever a parameter is not borrowed: a consuming parameter taken as
+borrowed is released by both the callee and the bridge, and an inout one is
+not passed by address, so the callee reads and writes the wrong memory.
+
+```js
+const consume = Swift.NativeFunction(strippedAddr, Int, [Token], { conventions: ["owned"] });
+const double = Swift.NativeFunction(otherAddr, null, [Int], { conventions: ["inout"] });
+const n = Int.$new(21);
+double(n);
+n.$fields;    // int64(42)
+```
+
+Generics, witness tables, and other lowering controls are not supported here —
+reach for the raw primitive under `/abi` when you need them.
 
 Finding an address is ordinary Frida work: `Module.getGlobalExportByName` with a
 mangled symbol, a scan of `module.enumerateExports()` filtered through
