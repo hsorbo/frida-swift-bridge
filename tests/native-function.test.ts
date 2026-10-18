@@ -10,7 +10,7 @@ function symbolless(target: NativePointer): NativePointer {
   Memory.patchCode(stub, 32, (code) => {
     if (Process.arch === "arm64") {
       const writer = new Arm64Writer(code, { pc: stub });
-      writer.putBranchAddress(target.strip());
+      writer.putBranchAddress(target);
       writer.flush();
     } else {
       const writer = new X86Writer(code, { pc: stub });
