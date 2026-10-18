@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
+import { requireDarwin } from "./swift.js";
 
 import { Swift, SwiftValueObject } from "../src/index.js";
 
@@ -36,6 +37,10 @@ describe("indexing a Collection facade", () => {
     expect(slice[2]).toEqual(int64(30));
     expect(slice[3]).toEqual(int64(40));
     expect(slice[4]).toBeUndefined();
+  });
+
+  test("a Data slice keeps its parent's indices", (ctx) => {
+    requireDarwin(ctx);
     using data = Swift.struct("Foundation.Data")!.init({ count: 4 }) as SwiftValueObject;
     expect(data[0]).toEqual(0);
     using tail = data.$method("suffix", { labels: ["from"] }).call(2) as SwiftValueObject;

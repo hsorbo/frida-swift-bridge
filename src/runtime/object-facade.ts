@@ -10,6 +10,7 @@ import {
   ValueMethodResolveOptions,
   lowerResolveOptions,
   splitSelector,
+  bindRequirementAt,
 } from "./method.js";
 import { SwiftType, NominalType, ClassType, StructType, EnumType, SlotSignature } from "./swift-type.js";
 import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js";
@@ -119,7 +120,8 @@ function equatableEquals(value: ValueInstance, other: SwiftObject | ClassInstanc
   if (table === null) {
     throw new Error(`${typeName(value.metadata)} does not conform to Swift.Equatable; ValueInstance.equals under /abi compares storage`);
   }
-  return new WitnessTable(table, value.metadata).method(value.metadata.handle, "==").call(value, raw) === true;
+  const equals = bindRequirementAt(new WitnessTable(table, value.metadata), 0, "static Swift.Equatable.== infix(A, A) -> Swift.Bool", value.metadata.handle);
+  return equals.call(value, raw) === true;
 }
 
 // One facade for class and value alike; $kind discriminates. The proxy roots its target, so an

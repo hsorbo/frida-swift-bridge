@@ -1,13 +1,10 @@
 import { ClassInstance } from "../abi/heap-object.js";
 import { ValueInstance } from "../abi/value.js";
 import { Metadata, MetadataKind } from "../abi/metadata.js";
-import { ContextDescriptor } from "../abi/context-descriptor.js";
 import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js";
-import { ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
 import { WitnessTable } from "../abi/witness-table.js";
-import { CallResult, ResolvedMethod, bindResolved, resolveWitnessRequirement, decodeReturn, copyOfValue } from "./method.js";
+import { CallResult, bindRequirementAt, decodeReturn, copyOfValue } from "./method.js";
 import { RAW } from "./object-facade.js";
-import { SwiftFunctionSignature, parseSwiftSignature } from "./type-expr.js";
 
 // A facade's Symbol.iterator: the Swift iterator driven through the Sequence and IteratorProtocol
 // witness tables, so it reaches every conformer, not only the containers $container() can decode.
@@ -23,7 +20,7 @@ export function sequenceIterator(instance: ClassInstance | ValueInstance): (() =
     return undefined;
   }
   const sequence = new WitnessTable(table, metadata);
-  return () => iterate(protocol, sequence, witnessSelf(metadata, instance.handle));
+  return () => iterate(sequence, witnessSelf(metadata, instance.handle));
 }
 
 // A facade's integer key: Swift traps on an index outside startIndex..<endIndex and takes the
@@ -45,7 +42,9 @@ export function isCollectionIndex(instance: ClassInstance | ValueInstance, index
     return false;
   }
   const self = witnessSelf(metadata, instance.handle);
-  return Number(collection.get(self, "startIndex")) <= index && index < Number(collection.get(self, "endIndex"));
+  const startIndex = bindRequirementAt(collection, 0, "Swift.Collection.startIndex.getter : A.Index", self);
+  const endIndex = bindRequirementAt(collection, 1, "Swift.Collection.endIndex.getter : A.Index", self);
+  return Number(startIndex.call()) <= index && index < Number(endIndex.call());
 }
 
 // Self is @in_guaranteed through a witness thunk, so a class reference is passed in a cell.
@@ -58,9 +57,9 @@ function witnessSelf(metadata: Metadata, handle: NativePointer): NativePointer {
   return cell;
 }
 
-function* iterate(protocol: ContextDescriptor, sequence: WitnessTable, self: NativePointer): Generator<CallResult> {
+function* iterate(sequence: WitnessTable, self: NativePointer): Generator<CallResult> {
   // makeIterator() is __consuming: the thunk takes self at +1, so it gets a copy and the facade keeps its own.
-  const makeIterator = bindResolved(firstMethodWitness(sequence, protocol, "Swift.Sequence.makeIterator() -> A.Iterator"), self, {
+  const makeIterator = bindRequirementAt(sequence, 0, "Swift.Sequence.makeIterator() -> A.Iterator", self, {
     adoptResult: true,
     consumedSelf: sequence.conformingType,
   });
@@ -71,7 +70,7 @@ function* iterate(protocol: ContextDescriptor, sequence: WitnessTable, self: Nat
     // next() returns Element?; when Element is itself optional the decoder would fold .some(nil)
     // into the end of the sequence, so the element is adopted whole and decoded from a copy.
     const optionalElement = sequence.associatedType("Element").kind === MetadataKind.Optional;
-    const next = bindResolved(firstMethodWitness(table, iteratorProtocol, "Swift.IteratorProtocol.next() -> A.Element?"), iterator.handle, {
+    const next = bindRequirementAt(table, 0, "Swift.IteratorProtocol.next() -> A.Element?", iterator.handle, {
       adoptResult: optionalElement,
     });
     for (;;) {
@@ -84,13 +83,6 @@ function* iterate(protocol: ContextDescriptor, sequence: WitnessTable, self: Nat
   } finally {
     iterator.dispose();
   }
-}
-
-// Witness thunks have no symbol on PE, so the witness is taken by position: a protocol's requirement
-// order is ABI, and makeIterator and next are the first method requirements of their protocols.
-function firstMethodWitness(table: WitnessTable, protocol: ContextDescriptor, spelling: string): ResolvedMethod {
-  const requirement = readProtocolRequirements(protocol).find((r) => r.kind === ProtocolRequirementKind.Method)!;
-  return resolveWitnessRequirement(table, requirement, parseSwiftSignature(spelling) as SwiftFunctionSignature);
 }
 
 function decodeOptionalElement(element: ValueInstance): CallResult {

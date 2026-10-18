@@ -4235,6 +4235,30 @@ export function witnessGetProperty(table: WitnessTable, self: NativePointer, nam
   return new BoundMethod(witnessAccessorPlan(accessor), { self }).call() as CallResult;
 }
 
+// Witness thunks have no symbol on PE, so a requirement the bridge calls itself is taken by position:
+// a protocol's requirement order is ABI, and `ordinal` counts the requirements of the spelled kind.
+function requirementAt(protocol: ContextDescriptor, kind: ProtocolRequirementKind, ordinal: number): ProtocolRequirement {
+  return readProtocolRequirements(protocol).filter((r) => r.kind === kind)[ordinal];
+}
+
+export function bindRequirementAt(
+  table: WitnessTable,
+  ordinal: number,
+  spelling: string,
+  self: NativePointer,
+  binding: Omit<Binding, "self"> = {}
+): BoundMethod {
+  const signature = parseSwiftSignature(spelling)!;
+  if (signature.kind === "function") {
+    const requirement = requirementAt(protocolOf(table), ProtocolRequirementKind.Method, ordinal);
+    return bindResolved(resolveWitnessRequirement(table, requirement, signature), self, binding);
+  }
+  const requirement = requirementAt(protocolOf(table), ProtocolRequirementKind.Getter, ordinal);
+  const address = table.requirement(requirement.witnessIndex);
+  const accessor = witnessAccessor(table, address, signature.member, "getter", signature.type, selfSignature(table, [])!);
+  return new BoundMethod(witnessAccessorPlan(accessor), { ...binding, self });
+}
+
 export function witnessSetProperty(table: WitnessTable, self: NativePointer, name: string, value: CallArg): void {
   const accessor = resolveWitnessAccessor(table, name, "setter");
   new BoundMethod(witnessAccessorPlan(accessor), { self }).call(value);
@@ -4255,10 +4279,7 @@ export function actorSerialExecutor(actorType: Metadata, self: NativePointer): S
   if (tableAddr === null) {
     return null;
   }
-  const getter = readProtocolRequirements(actorProtocol).find((r) => r.kind === ProtocolRequirementKind.Getter);
-  if (getter === undefined) {
-    return null;
-  }
+  const getter = requirementAt(actorProtocol, ProtocolRequirementKind.Getter, 0);
   if (unownedSerialExecutorType === undefined) {
     unownedSerialExecutorType = resolveType("Swift.UnownedSerialExecutor");
   }
