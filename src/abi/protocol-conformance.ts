@@ -8,9 +8,11 @@ import { getSwiftSection } from "../image/sections.js";
 import { swiftMatches, NameFilter, nameQuery } from "../runtime/swift-resolver.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import {
+  GENERIC_REQUIREMENT_DESCRIPTOR_SIZE,
   GenericRequirementDescriptor,
   readGenericRequirementDescriptors,
 } from "./generic-requirement-descriptor.js";
+import { ProtocolRequirement } from "./protocol-descriptor.js";
 
 const RECORD_SIZE = 4;
 const PROTOCOL_RECORD_INT_MASK = 0x2;
@@ -25,7 +27,15 @@ const CONFORMANCE_FLAG_IS_RETROACTIVE = 0x40;
 const CONFORMANCE_FLAG_IS_SYNTHESIZED_NON_UNIQUE = 0x80;
 const CONFORMANCE_NUM_CONDITIONAL_REQUIREMENTS_SHIFT = 8;
 const CONFORMANCE_NUM_CONDITIONAL_REQUIREMENTS_MASK = 0xff;
+const CONFORMANCE_FLAG_HAS_RESILIENT_WITNESSES = 0x10000;
 const CONFORMANCE_FLAG_HAS_GENERIC_WITNESS_TABLE = 0x20000;
+const CONFORMANCE_NUM_CONDITIONAL_PACK_SHAPES_SHIFT = 24;
+const CONFORMANCE_NUM_CONDITIONAL_PACK_SHAPES_MASK = 0xff;
+
+const GENERIC_PACK_SHAPE_DESCRIPTOR_SIZE = 8;
+const RESILIENT_WITNESSES_HEADER_SIZE = 4;
+const RESILIENT_WITNESS_SIZE = 8;
+const OFFSETOF_RESILIENT_WITNESS_IMPL = 0x4;
 
 const enum TypeReferenceKind {
   DirectTypeDescriptor = 0,
@@ -91,6 +101,46 @@ export class ProtocolConformance {
     const base = this.handle.add(OFFSETOF_CONF_TRAILING_OBJECTS + (this.isRetroactive ? 4 : 0));
     return readGenericRequirementDescriptors(base, count);
   }
+}
+
+export interface Witness {
+  requirement: ProtocolRequirement;
+  entry: NativePointer;
+}
+
+// The table entries a conformance carries before any instantiation, given its protocol's
+// requirements: a conformance to a resilient protocol lists them by requirement, any other holds
+// them in its pattern.
+export function readWitnesses(conformance: ProtocolConformance, requirements: ProtocolRequirement[]): Witness[] {
+  const flags = conformance.flags;
+  if ((flags & CONFORMANCE_FLAG_HAS_RESILIENT_WITNESSES) === 0) {
+    const pattern = conformance.witnessTablePattern;
+    if (pattern === null) {
+      return [];
+    }
+    return requirements
+      .map((requirement) => ({ requirement, entry: pattern.readPointer(requirement.witnessIndex * Process.pointerSize).strip() }))
+      .filter((w) => !w.entry.isNull());
+  }
+  const numPackShapes = (flags >>> CONFORMANCE_NUM_CONDITIONAL_PACK_SHAPES_SHIFT) & CONFORMANCE_NUM_CONDITIONAL_PACK_SHAPES_MASK;
+  const header = conformance.handle.add(
+    OFFSETOF_CONF_TRAILING_OBJECTS +
+      (conformance.isRetroactive ? 4 : 0) +
+      conformance.numConditionalRequirements * GENERIC_REQUIREMENT_DESCRIPTOR_SIZE +
+      numPackShapes * GENERIC_PACK_SHAPE_DESCRIPTOR_SIZE
+  );
+  const witnesses: Witness[] = [];
+  const count = header.readU32();
+  for (let i = 0; i < count; i++) {
+    const record = header.add(RESILIENT_WITNESSES_HEADER_SIZE + i * RESILIENT_WITNESS_SIZE);
+    const target = RelativeIndirectablePointer.resolve(record);
+    const entry = RelativeDirectPointer.resolve(record.add(OFFSETOF_RESILIENT_WITNESS_IMPL));
+    const requirement = target === null ? undefined : requirements.find((r) => r.address.equals(target));
+    if (requirement !== undefined && entry !== null) {
+      witnesses.push({ requirement, entry });
+    }
+  }
+  return witnesses;
 }
 
 export function* enumerateProtocolConformances(module: Module): Generator<ProtocolConformance> {

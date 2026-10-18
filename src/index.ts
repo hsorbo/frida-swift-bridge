@@ -9,7 +9,7 @@ import {
   swiftEnums,
 } from "./reflection/registry.js";
 import type { NameFilter } from "./runtime/swift-resolver.js";
-import { swiftFunctions, SwiftFunctionMatch } from "./runtime/function-listing.js";
+import { swiftFunctions, findSwiftFunction, SwiftFunctionMatch, SwiftFunctionSlot, FunctionListingOptions } from "./runtime/function-listing.js";
 import { symbolicate } from "./runtime/symbolication.js";
 import { SwiftInterceptor } from "./runtime/interceptor.js";
 import {
@@ -133,7 +133,7 @@ export {
 export { isSwiftObject } from "./runtime/method.js";
 export type { FacadeCallable } from "./runtime/facade-members.js";
 export type { SwiftMemberFunction } from "./runtime/qualified-function.js";
-export type { SwiftFunctionMatch };
+export type { SwiftFunctionMatch, SwiftFunctionSlot, FunctionListingOptions };
 export type { ModuleRegistry, ModuleNamespace, ModuleMember } from "./runtime/module-namespace.js";
 export type {
   SwiftBoundMethod,
@@ -185,6 +185,7 @@ export const Swift = {
   images: swiftImages,
   enumerateProtocols: swiftProtocols,
   enumerateFunctions: swiftFunctions,
+  findFunctionByAddress: findSwiftFunction,
 
   get modules(): ModuleRegistry {
     return moduleRegistry();

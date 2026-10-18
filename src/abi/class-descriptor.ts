@@ -2,7 +2,7 @@ import { ContextDescriptor, ContextDescriptorKind } from "./context-descriptor.j
 import { ClassMetadata } from "./class-metadata.js";
 import { getClassMetadataBounds } from "./class-metadata-bounds.js";
 import { genericContextEnd } from "./generic-instantiation.js";
-import { RelativeDirectPointer } from "../basic/relative-pointer.js";
+import { RelativeDirectPointer, RelativeIndirectablePointer } from "../basic/relative-pointer.js";
 
 export enum MethodDescriptorKind {
   Method = 0,
@@ -20,6 +20,7 @@ export interface VTableEntry {
   isAsync: boolean; // the slot holds the method's async function pointer record, not code
   declaredImpl: NativePointer;
   metadataOffset: number; // VTableOffset + slot
+  methodDescriptor: NativePointer;
 }
 
 export enum MetadataInitializationKind {
@@ -54,6 +55,8 @@ const OFFSETOF_EXTRA_CLASS_FLAGS = 0x1c;
 const VTABLE_DESCRIPTOR_HEADER_SIZE = 8;
 const OVERRIDE_TABLE_HEADER_SIZE = 4;
 const METHOD_OVERRIDE_DESCRIPTOR_SIZE = 12;
+const OFFSETOF_OVERRIDE_METHOD = 0x4;
+const OFFSETOF_OVERRIDE_IMPL = 0x8;
 const OBJC_RESILIENT_CLASS_STUB_INFO_SIZE = 4;
 const METADATA_LIST_COUNT_SIZE = 4;
 const METADATA_LIST_ENTRY_SIZE = 4;
@@ -178,7 +181,49 @@ export function readVTable(descriptor: ContextDescriptor): VTableEntry[] {
       isAsync: (flags & IS_ASYNC) !== 0,
       declaredImpl,
       metadataOffset: vtableOffset + i,
+      methodDescriptor: md,
     });
+  }
+  return entries;
+}
+
+// Each override keeps the slot of the method it overrides, so the entry is that method's with the override's impl.
+export function readOverrides(descriptor: ContextDescriptor): VTableEntry[] {
+  if ((kindFlags(descriptor) & CLASS_HAS_OVERRIDE_TABLE) === 0) {
+    return [];
+  }
+  if (descriptor.isGeneric) {
+    throw new Error(`readOverrides: ${descriptor.fullTypeName} is generic; its trailing objects are not at a fixed offset`);
+  }
+  const base = descriptor.handle;
+  let offset = classTrailingObjectsStart(descriptor);
+  if ((kindFlags(descriptor) & CLASS_HAS_VTABLE) !== 0) {
+    offset += VTABLE_DESCRIPTOR_HEADER_SIZE + base.readU32(offset + OFFSETOF_VTABLE_SIZE) * METHOD_DESCRIPTOR_SIZE;
+  }
+  const count = base.readU32(offset);
+  const vtables = new Map<string, VTableEntry[]>();
+  const entries: VTableEntry[] = [];
+  for (let i = 0; i < count; i++) {
+    const od = base.add(offset + OVERRIDE_TABLE_HEADER_SIZE + i * METHOD_OVERRIDE_DESCRIPTOR_SIZE);
+    const owner = RelativeIndirectablePointer.resolve(od);
+    const method = RelativeIndirectablePointer.resolve(od.add(OFFSETOF_OVERRIDE_METHOD));
+    const impl = RelativeDirectPointer.resolve(od.add(OFFSETOF_OVERRIDE_IMPL));
+    if (owner === null || method === null || impl === null) {
+      continue;
+    }
+    const ownerDescriptor = new ContextDescriptor(owner);
+    if (ownerDescriptor.isGeneric) {
+      continue;
+    }
+    let vtable = vtables.get(owner.toString());
+    if (vtable === undefined) {
+      vtable = readVTable(ownerDescriptor);
+      vtables.set(owner.toString(), vtable);
+    }
+    const overridden = vtable.find((e) => e.methodDescriptor.equals(method));
+    if (overridden !== undefined) {
+      entries.push({ ...overridden, declaredImpl: impl });
+    }
   }
   return entries;
 }

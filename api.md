@@ -82,9 +82,13 @@ The default export is the whole facade. Its members:
   generators over the types in a module, matching a name glob, or in every
   loaded module. Enumerating does not realize metadata for types you skip.
 - `Swift.enumerateProtocols(filter?)`: a generator of [`Protocol`](#protocols)s.
-- `Swift.enumerateFunctions(filter?)`: a generator over the functions and
-  accessors a module exports, by demangled-name glob, each hookable as it is.
+- `Swift.enumerateFunctions(filter?, options?)`: a generator over the functions
+  and accessors a module exports, by demangled-name glob, each hookable as it
+  is; `{ slots: true }` adds the vtable and witness slots no symbol names.
   See [Finding types](#finding-types).
+- `Swift.findFunctionByAddress(address)`: the function an interior address
+  lies in, named by its symbol or by the slot it fills. Not on Windows. See
+  [Finding types](#finding-types).
 - `Swift.Protocol.find(name)`, `Swift.ProtocolComposition.fromSignature(signature)`:
   look up protocols. See [Protocols](#protocols).
 - `Swift.NativeFunction(address, returnType, argTypes, options?)`: wrap a free
@@ -274,6 +278,41 @@ for (const fn of Swift.enumerateFunctions("MyApp.*open*"))
 
 const [open] = Swift.enumerateFunctions("MyApp.Door.open(*");
 Swift.Interceptor.attach(open, { onLeave(ret) { console.log(ret); } });
+```
+
+A stripped module keeps its class and protocol dispatch in metadata, not in
+symbols. `{ slots: true }` adds, after the named matches, each vtable and
+witness-table entry of the module's classes and conformances, read from their
+descriptors without realizing any metadata: `MyApp.Door.vtable#11` for a
+class's slot at its metadata offset (an override is listed under the
+overriding class at the slot it fills) and `MyApp.Door.MyApp.Lockable#2` for a
+witness, by protocol and requirement index, the spelling a type's member
+listing uses (see [Reflection](#reflection)). A slot's `kind` comes from its
+descriptor and its `signature` is `null`, so hook it by `address` with
+Frida's `Interceptor`. A slot whose function the same listing already named is
+left out. Slots are read for every module the filter covers: scope a glob
+with a literal head (`"MyApp.Door.*"`), which skips any type it cannot match,
+since a glob that starts with a wildcard reads every conformance of every
+loaded module.
+
+```js
+for (const fn of Swift.enumerateFunctions(Process.getModuleByName("MyApp"), { slots: true }))
+    if (fn.signature === null)
+        console.log(fn.kind, fn.name, fn.address);
+// function MyApp.Door.vtable#14 0x1000a3f20
+```
+
+`Swift.findFunctionByAddress(address)` maps an address inside a function, a
+return address or a crash PC, to the function it lies in: its start comes from
+`Process.findFunctionRange`, then a match from the module's Swift symbols, or
+else the slot it fills, in the shape the listing yields. It returns `null`
+when the address is in no function or the function has neither. Each call
+reads that one module afresh. It throws on Windows (see
+[Known limitations](#known-limitations)).
+
+```js
+const fn = Swift.findFunctionByAddress(this.returnAddress);
+fn?.name;   // "MyApp.Door.open() -> Swift.Bool"
 ```
 
 ## Types
@@ -1688,6 +1727,13 @@ corrupts memory instead of failing cleanly.
   exists anywhere: one that no code has used yet is absent, and naming it, as
   `Swift.type("Module.Generic<Arg>")` does, builds it, so it is listed from
   then on.
+- **Function boundaries on Windows.** `Swift.findFunctionByAddress` throws
+  there. A PE image records a function's bounds only in its `.pdata` unwind
+  entries, and a leaf function needs none: the one- or two-instruction thunks
+  most witnesses dispatch through have no entry, so `Process.findFunctionRange`
+  answers with the gap between the nearest symbols, a range that starts well
+  before the function and takes milliseconds to find. The slots
+  `Swift.enumerateFunctions` lists are read from metadata and are unaffected.
 - **Module unloading.** A type found by name and its wrapper are kept for the
   life of the script, since a descriptor never changes. If a module is unloaded
   and another mapped at the same address, the old wrapper is stale.

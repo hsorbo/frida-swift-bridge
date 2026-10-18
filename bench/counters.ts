@@ -15,3 +15,10 @@ counter("pointerScans", Memory, "findPointers");
 counter("conformsToProtocol", swift.swift_conformsToProtocol);
 counter("demangle", swift.swift_demangle);
 counter("typeByMangledName", swift.swift_getTypeByMangledNameInContext);
+counter("functionRanges", Process, "findFunctionRange");
+counter(
+  "swiftSections",
+  Process.platform === "darwin"
+    ? Process.getModuleByName("libmacho.dylib").getExportByName("getsectiondata")
+    : Process.findModuleByAddress(swift.swift_conformsToProtocol)!.getExportByName("swift_enumerateAllMetadataSections"),
+);

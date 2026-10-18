@@ -11,11 +11,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 2,
-          "median": 3
+          "min": 1,
+          "median": 2
         }
       },
       "lookup › instanceMethod by name": {
@@ -27,11 +29,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 63,
-          "median": 64
+          "min": 72,
+          "median": 74
         }
       },
       "lookup › class init": {
@@ -43,11 +47,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 226,
-          "median": 233
+          "min": 154,
+          "median": 156
         }
       },
       "lookup › object method call": {
@@ -59,11 +65,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 202,
-          "median": 210
+          "min": 160,
+          "median": 162
         }
       },
       "lookup › Array facade element by index": {
@@ -75,11 +83,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 11,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 539,
-          "median": 545
+          "min": 632,
+          "median": 654
         }
       },
       "lookup › Swift.Interceptor attach and detach on a facade method": {
@@ -91,11 +101,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 159,
-          "median": 161
+          "min": 148,
+          "median": 154
         }
       },
       "lookup › Swift.demangle of an exported symbol": {
@@ -107,7 +119,9 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
           "min": 0,
@@ -123,11 +137,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 862,
-          "median": 886
+          "min": 865,
+          "median": 904
         }
       },
       "listing › instanceMethods on a struct": {
@@ -139,11 +155,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 774,
-          "median": 786
+          "min": 795,
+          "median": 812
         }
       },
       "listing › instanceMethods on Swift.Int, shallow": {
@@ -155,11 +173,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 12,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 3181,
-          "median": 3231
+          "min": 4177,
+          "median": 4348
         }
       },
       "listing › instanceMethods on Swift.Int, deep": {
@@ -171,11 +191,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 66,
           "demangle": 0,
-          "typeByMangledName": 3
+          "typeByMangledName": 3,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 39060,
-          "median": 39557
+          "min": 34002,
+          "median": 34632
         }
       },
       "listing › properties on a class": {
@@ -187,11 +209,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 17,
-          "median": 19
+          "min": 13,
+          "median": 17
         }
       },
       "listing › Object.keys on a type facade": {
@@ -203,11 +227,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 711,
-          "median": 723
+          "min": 771,
+          "median": 798
         }
       },
       "listing › Object.keys on an object facade": {
@@ -219,11 +245,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 14,
-          "median": 15
+          "min": 12,
+          "median": 13
         }
       },
       "scan › Swift.choose over a class with live instances": {
@@ -235,11 +263,13 @@
           "pointerScans": 2,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 230769,
-          "median": 232611
+          "min": 84797,
+          "median": 86792
         }
       },
       "scan › specializations of a generic struct": {
@@ -251,11 +281,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 5,
-          "median": 5
+          "min": 4,
+          "median": 4
         }
       },
       "scan › enumerateFunctions with a selector glob": {
@@ -267,11 +299,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 7296,
-          "median": 7378
+          "min": 6563,
+          "median": 6630
         }
       },
       "scan › enumerateTypes over one module": {
@@ -283,11 +317,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 988,
-          "median": 1016
+          "min": 861,
+          "median": 936
         }
       },
       "scan › protocols of a type": {
@@ -299,11 +335,13 @@
           "pointerScans": 0,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 693,
-          "median": 703
+          "min": 735,
+          "median": 765
         }
       },
       "first Swift.type lookup in a fresh process": {
@@ -363,11 +401,13 @@
           "pointerScans": 3,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 232022,
-          "median": 232930
+          "min": 85451,
+          "median": 88040
         }
       },
       "scan › Swift.choose over a generic class named without arguments": {
@@ -379,11 +419,157 @@
           "pointerScans": 3,
           "conformsToProtocol": 0,
           "demangle": 0,
-          "typeByMangledName": 0
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
         },
         "wallUs": {
-          "min": 231990,
-          "median": 233791
+          "min": 87269,
+          "median": 87875
+        }
+      },
+      "function listing › enumerateFunctions over a module": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
+        },
+        "wallUs": {
+          "min": 61496,
+          "median": 61943
+        }
+      },
+      "function listing › enumerateFunctions with slots over a module": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 3
+        },
+        "wallUs": {
+          "min": 65533,
+          "median": 66994
+        }
+      },
+      "function listing › enumerateFunctions over swiftCore": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
+        },
+        "wallUs": {
+          "min": 573486,
+          "median": 579326
+        }
+      },
+      "function listing › enumerateFunctions with slots over swiftCore": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 3
+        },
+        "wallUs": {
+          "min": 600253,
+          "median": 607755
+        }
+      },
+      "function listing › enumerateFunctions with slots by a type glob": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 2,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 465
+        },
+        "wallUs": {
+          "min": 397699,
+          "median": 412443
+        }
+      },
+      "function lookup › findFunctionByAddress inside an exported function": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 1,
+          "swiftSections": 0
+        },
+        "wallUs": {
+          "min": 971,
+          "median": 993
+        }
+      },
+      "function lookup › findFunctionByAddress inside an unnamed slot": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 1,
+          "swiftSections": 1
+        },
+        "wallUs": {
+          "min": 1499,
+          "median": 1519
+        }
+      },
+      "function lookup › findFunctionByAddress of a swiftCore witness": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 1,
+          "moduleLists": 1,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 1,
+          "swiftSections": 3
+        },
+        "wallUs": {
+          "min": 10195,
+          "median": 10328
         }
       }
     }
