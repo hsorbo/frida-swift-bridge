@@ -25,6 +25,7 @@ import {
   hookTargetOf,
   PropertyInfo,
   callMarshalled,
+  checkedReceiver,
   enumerateMethods,
   enumerateProperties,
   lowerResolveOptions,
@@ -263,7 +264,10 @@ export abstract class NominalType extends SwiftType {
     const member = this.member(name, false, options, `instance method ${name}`);
     const bind = member.signature === null
       ? (): never => { throw new Error(`${name} on ${this.name} has no symbol to read a signature from`); }
-      : (receiver: SwiftObject): SwiftBoundMethod => receiver.$method(name, options);
+      : (receiver: SwiftObject): SwiftBoundMethod => {
+          checkedReceiver(receiver, declaringTypeOf(this), name);
+          return receiver.$method(name, options);
+        };
     return withHookTarget({ ...member, bind }, hookTargetOf(member) ?? null);
   }
 
@@ -682,6 +686,10 @@ function backingDescriptorOf(type: SwiftType): ContextDescriptor | null {
 export function isUnboundGeneric(type: SwiftType): boolean {
   const state = rawStateOf(type);
   return state.metadata === null && state.descriptor !== null && state.descriptor.isGeneric;
+}
+
+export function declaringTypeOf(type: SwiftType): Metadata | ContextDescriptor {
+  return isUnboundGeneric(type) ? descriptorOf(type) : metadataOf(type);
 }
 
 function metadataDescriptorOf(type: SwiftType): ContextDescriptor {

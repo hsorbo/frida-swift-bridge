@@ -4,6 +4,8 @@ import { SWIFTCORE_MODULE } from "./swift.js";
 
 import { Swift, SwiftError, SwiftObject, SwiftStruct, SwiftType } from "../src/index.js";
 
+declare function gc(): void;
+
 const ADD_INTS = "$s7fixture7addIntsyS2i_SitF";
 const STRING_LENGTH = "$s7fixture12stringLengthySiSSF";
 const REPEAT_STRING = "$s7fixture12repeatStringySiSS_SitF";
@@ -299,5 +301,62 @@ describe("Swift.function from a qualified selector", () => {
     } finally {
       asyncListener.detach();
     }
+  });
+});
+
+describe("receivers across binding routes", () => {
+  const BASE_SPEAKER_SPEAK = "$s7fixture11BaseSpeakerC5speakSSyF";
+  let module: Module;
+  beforeEach(() => {
+    module = loadFixture();
+  });
+
+  test("a function bound by symbol refuses a disposed receiver", () => {
+    const acc = (Swift.type("fixture.Accumulator") as SwiftStruct).$new({ total: 10 });
+    const peek = Swift.function(module, ACCUMULATOR_PEEK).bind(acc);
+    expect(peek(5)).toEqual(int64(15));
+    acc.$dispose();
+    expect(() => peek(5)).toThrow(/disposed/);
+
+    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const greet = Swift.function(module, ROBOT_GREET).bind(robot);
+    robot.$dispose();
+    expect(() => greet("X")).toThrow(/disposed/);
+    expect(() => Swift.function(module, ROBOT_GREET).bind(robot)).toThrow(/disposed/);
+  });
+
+  test("a function bound by symbol keeps its receiver alive", () => {
+    const greet = (() => Swift.function(module, ROBOT_GREET).bind(Swift.class("fixture.Robot")!.init("R2")))();
+    gc();
+    expect(greet("X")).toBe("Hello X, I am R2");
+  });
+
+  test("a function bound by symbol refuses a receiver of an unrelated type", () => {
+    const speaker = Swift.class("fixture.BaseSpeaker")!.init();
+    expect(() => Swift.function(module, ROBOT_GREET).bind(speaker)).toThrow(/takes a fixture.Robot receiver, not a fixture.BaseSpeaker/);
+    const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 10 });
+    expect(() => Swift.function(module, ACCUMULATOR_PEEK).bind(box)).toThrow(/takes a fixture.Accumulator receiver/);
+    expect(Swift.function(module, BASE_SPEAKER_SPEAK).bind(Swift.class("fixture.SubSpeaker")!.init())()).toBe("base");
+  });
+
+  test("a reflected member binds a subclass instance to its override and refuses an unrelated one", () => {
+    const speak = Swift.class("fixture.BaseSpeaker")!.$type.instanceMethod("speak");
+    expect(speak.bind(Swift.class("fixture.SubSpeaker")!.init()).call()).toBe("sub");
+    expect(() => speak.bind(Swift.class("fixture.BaseSquawker")!.init())).toThrow(/takes a fixture.BaseSpeaker receiver, not a fixture.BaseSquawker/);
+    const subSpeak = Swift.class("fixture.SubSpeaker")!.$type.instanceMethod("speak");
+    expect(() => subSpeak.bind(Swift.class("fixture.BaseSpeaker")!.init())).toThrow(/takes a fixture.SubSpeaker receiver/);
+  });
+
+  test("a member of an unbound generic type binds any specialization of it", () => {
+    const get = Swift.struct("fixture.Keyed")!.$type.instanceMethod("get");
+    expect(get.bind(Swift.struct("fixture.Keyed<Swift.Int>")!.init(5)!).call()).toEqual(int64(5));
+    expect(get.bind(Swift.struct("fixture.Keyed<Swift.String>")!.init("c")!).call()).toBe("c");
+    expect(() => get.bind(Swift.class("fixture.BaseSpeaker")!.init())).toThrow(/takes a fixture.Keyed receiver/);
+  });
+
+  test("a qualified function dispatches on a subclass self and refuses an unrelated one", () => {
+    const speak = Swift.function("fixture.BaseSpeaker.speak()");
+    expect(speak.call(Swift.class("fixture.SubSpeaker")!.init())).toBe("sub");
+    expect(() => speak.call(Swift.class("fixture.BaseSquawker")!.init())).toThrow(/takes a fixture.BaseSpeaker receiver/);
   });
 });

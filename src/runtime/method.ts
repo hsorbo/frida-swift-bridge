@@ -412,6 +412,46 @@ function assertClassAssignable(arg: ClassInstance, declared: Metadata): void {
   throw new Error(`argument is a ${typeName(arg.dynamicType)}, expected ${typeName(declared)}`);
 }
 
+// A member declared on a type takes an instance of it, or of a subclass when it is a class; a raw
+// pointer or an ObjC.Object receiver is taken as given.
+export function checkedReceiver(receiver: unknown, declaring: Metadata | ContextDescriptor, selector: string): ClassInstance | ValueInstance | null {
+  const raw = rawArg(receiver as CallArg);
+  if (!(raw instanceof ClassInstance) && !(raw instanceof ValueInstance)) {
+    return null;
+  }
+  raw.checkLive();
+  const declares = (type: Metadata): boolean =>
+    declaring instanceof ContextDescriptor ? nominalDescriptorOf(type)?.handle.equals(declaring.handle) === true : type.handle.equals(metatypeSelf(declaring));
+  if (raw instanceof ValueInstance) {
+    if (declares(raw.metadata)) {
+      return raw;
+    }
+  } else {
+    for (let cls: ClassMetadata | null = raw.metadata; cls !== null; cls = cls.superclass) {
+      if (declares(new Metadata(cls.handle))) {
+        return raw;
+      }
+    }
+  }
+  const expected = declaring instanceof ContextDescriptor ? declaring.fullTypeName ?? "its declaring type" : typeName(declaring);
+  throw new Error(`${selector} takes a ${expected} receiver, not a ${typeName(raw instanceof ValueInstance ? raw.metadata : raw.dynamicType)}`);
+}
+
+function nominalDescriptorOf(type: Metadata): ContextDescriptor | null {
+  switch (type.kind) {
+    case MetadataKind.Class: {
+      const cls = new ClassMetadata(type.handle);
+      return cls.isTypeMetadata ? cls.description : null;
+    }
+    case MetadataKind.Struct:
+    case MetadataKind.Enum:
+    case MetadataKind.Optional:
+      return type.description;
+    default:
+      return null;
+  }
+}
+
 // A conforming value or object facade is boxed into an existential argument; an existential value
 // facade copies like any other value.
 function boxIntoExistential(metadata: Metadata, container: NativePointer, arg: ValueInstance | ClassInstance): void {
@@ -2055,11 +2095,15 @@ export class SwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends 
     if (instanceType === null) {
       throw new Error(`${this.plan.selector} takes no receiver`);
     }
+    const instance = checkedReceiver(receiver, instanceType, this.plan.selector);
     const self = toReceiverPointer(receiver);
     const binding: Binding = isClassType(instanceType)
       ? { self }
       : { self, routing: valueReceiverRouting(instanceType, this.plan, this.selfOwnership), consumedSelf: this.selfOwnership === "consuming" ? instanceType : null };
-    return (...args: Args) => rootAsyncReceiver(new BoundMethod(this.plan, binding), receiver).call(...args) as Ret;
+    return (...args: Args) => {
+      instance?.checkLive();
+      return rootAsyncReceiver(new BoundMethod(this.plan, binding), receiver).call(...args) as Ret;
+    };
   }
 }
 

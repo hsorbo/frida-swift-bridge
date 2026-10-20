@@ -1,4 +1,4 @@
-import { nominalTypeNamed } from "./swift-type.js";
+import { declaringTypeOf, nominalTypeNamed } from "./swift-type.js";
 import {
   CallArg,
   CallResult,
@@ -8,6 +8,7 @@ import {
   SwiftFunction,
   SwiftMemberSignature,
   ValueMethodResolveOptions,
+  checkedReceiver,
   findMember,
   isSwiftObject,
   lowerResolveOptions,
@@ -94,6 +95,7 @@ export function qualifiedFunction(qualified: string, options: ValueMethodResolve
         if (self === undefined || !isSwiftObject(self)) {
           throw new Error(`${type.name}.${found.selector} is an instance method; pass self as the first argument`);
         }
+        checkedReceiver(self, declaringTypeOf(type), `${type.name}.${found.selector}`);
         return self.$method(selector, { ...lookup, static: false }).call(...args);
       };
   return withHookTarget(
