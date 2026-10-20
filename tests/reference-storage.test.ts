@@ -9,19 +9,19 @@ function makeToken(id: number): SwiftClassObject {
 }
 
 describe("reference storage fields", () => {
-  test("a weak field reads as the referent while it lives and as none once it is gone", () => {
+  test("a weak field reads as the referent while it lives and as null once it is gone", () => {
     const token = makeToken(7);
     const handle = token.$handle;
     const watcher = Swift.type("fixture.Watcher")!.init(token) as SwiftClassObject;
     watcher.delegate = token;
-    const live = watcher.$fields as { delegate: { some: NativePointer }; owner: NativePointer; unsafeOwner: NativePointer };
-    expect(live.delegate.some.equals(handle)).toBe(true);
+    const live = watcher.$fields as { delegate: NativePointer; owner: NativePointer; unsafeOwner: NativePointer };
+    expect(live.delegate.equals(handle)).toBe(true);
     expect(live.owner.equals(handle)).toBe(true);
     expect(live.unsafeOwner.equals(handle)).toBe(true);
-    expect(live).toEqual({ delegate: { some: handle }, owner: handle, unsafeOwner: handle, tag: int64(1) });
+    expect(live).toEqual({ delegate: handle, owner: handle, unsafeOwner: handle, tag: int64(1) });
 
     token.$dispose();
-    expect((watcher.$fields as { delegate: unknown }).delegate).toBe("none");
+    expect((watcher.$fields as { delegate: unknown }).delegate).toBeNull();
   });
 
   test("a weak field has no borrowed view; a plain field keeps one", () => {
@@ -34,8 +34,8 @@ describe("reference storage fields", () => {
   test("a struct's weak field reads through the same load", () => {
     const token = makeToken(9);
     const slot = Swift.type("fixture.WeakSlot")!.init(token, 3) as SwiftValueObject;
-    expect(slot.$fields).toEqual({ ref: { some: token.$handle }, n: int64(3) });
+    expect(slot.$fields).toEqual({ ref: token.$handle, n: int64(3) });
     token.$dispose();
-    expect(slot.$fields).toEqual({ ref: "none", n: int64(3) });
+    expect(slot.$fields).toEqual({ ref: null, n: int64(3) });
   });
 });

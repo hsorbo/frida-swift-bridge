@@ -142,8 +142,8 @@ describe("Swift.Interceptor.attach", () => {
     });
     makeSwiftNativeFunction(fixtureExport("fixture.makeUnwrapOrZero"), Int, [])();
     listener.detach();
-    expect(seenArgs).toEqual([{ some: int64(5) }]);
-    expect(seenRet).toEqual({ some: int64(5) });
+    expect(seenArgs).toEqual([int64(5)]);
+    expect(seenRet).toEqual(int64(5));
   });
 
   test("hooks a function taking and returning a concrete Array", () => {
@@ -182,8 +182,8 @@ describe("Swift.Interceptor.attach", () => {
     makeSwiftNativeFunction(fixtureExport("fixture.roundTripIntSourceMaybe"), Int, [])();
     setter.detach();
     getter.detach();
-    expect(setterArgs).toEqual([{ some: int64(7) }]);
-    expect(getterRet).toEqual({ some: int64(7) });
+    expect(setterArgs).toEqual([int64(7)]);
+    expect(getterRet).toEqual(int64(7));
   });
 
   test("hooks a modify accessor: self on enter, the mutated value on resume", () => {

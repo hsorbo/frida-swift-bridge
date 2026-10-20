@@ -15,14 +15,13 @@ describe("compound generic-using exprs in generic methods", () => {
   test("T? argument and return pass indirectly (Optional payload is address-only)", () => {
     const Int = metadataFor("Swift.Int")!;
     const roundOpt = box().$method("roundOpt", { typeArguments: [typeOf(Int)] });
-    // The `.some`/`"none"` spelling is the argument representation; a decoded Optional return unwraps.
-    expect(roundOpt.call({ some: 9 })).toEqual(int64(9));
-    expect(roundOpt.call("none")).toBeNull();
+    expect(roundOpt.call(9)).toEqual(int64(9));
+    expect(roundOpt.call(null)).toBeNull();
   });
 
   test("T? round-trips a non-POD payload through the indirect path", () => {
     const Str = metadataFor("Swift.String")!;
-    expect(box().$method("roundOpt", { typeArguments: [typeOf(Str)] }).call({ some: "hi" })).toBe("hi");
+    expect(box().$method("roundOpt", { typeArguments: [typeOf(Str)] }).call("hi")).toBe("hi");
   });
 
   test("[T] is a fixed-layout Array passed/returned directly", () => {

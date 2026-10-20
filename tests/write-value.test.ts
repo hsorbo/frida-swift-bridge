@@ -39,10 +39,10 @@ describe("writeValue", () => {
     expect(() => roundTrip(Int128).write(1.5)).toThrow(/in range/);
   });
 
-  test("marshals JS null as Optional .none", () => {
+  test("marshals JS null as Optional .none and a bare value as .some", () => {
     const opt = roundTrip(metadataFor("Swift.Optional", [metadataFor("Swift.Int")!]));
-    expect(opt.write(null)).toBe("none");
-    expect(opt.write({ some: 7 })).toEqual({ some: int64(7) });
+    expect(opt.write(null)).toBeNull();
+    expect(opt.write(7)).toEqual(int64(7));
   });
 
   test("accepts an Int64-wrapped value for a narrow field, range-checked", () => {

@@ -19,7 +19,7 @@ describe("hook decodes generic uses", () => {
     });
     Swift.NativeFunction(trigger, Swift.type("Swift.Int")!, [])();
     listener.detach();
-    expect(seenArgs).toEqual([{ some: int64(9) }]);
-    expect(seenRet).toEqual({ some: int64(9) });
+    expect(seenArgs).toEqual([int64(9)]);
+    expect(seenRet).toEqual(int64(9));
   });
 });

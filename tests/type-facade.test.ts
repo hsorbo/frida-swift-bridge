@@ -72,8 +72,8 @@ describe("Swift type member sugar", () => {
 
   test("a generic specialization's facade finds members by its declaration name", () => {
     const OptionalInt = Swift.enum("Swift.Optional<Swift.Int>")!;
-    expect(OptionalInt.none.$fields).toBe("none");
-    expect(OptionalInt.some(7).$fields).toEqual({ some: int64(7) });
+    expect(OptionalInt.none.$fields).toBeNull();
+    expect(OptionalInt.some(7).$fields).toEqual(int64(7));
     expect(OptionalInt.some(7).$type).toBe(OptionalInt.$type);
     expect("none" in OptionalInt).toBe(true);
     expect(Object.keys(OptionalInt)).toContain("some");

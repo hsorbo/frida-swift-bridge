@@ -53,15 +53,15 @@ describe("enum instances", () => {
     const storage = Memory.alloc(optionalInt.typeLayout.stride);
     storage.writeS64(42);
     injectEnumTag(optionalInt, storage, 0);
-    expect(readValue(optionalInt, storage)).toEqual({ some: int64(42) });
+    expect(readValue(optionalInt, storage)).toEqual(int64(42));
   });
 
-  test("decodes a no-payload case to its name", () => {
+  test("decodes .none to null", () => {
     requireSwift();
     const optionalInt = metadataFor("Swift.Optional", [metadataFor("Swift.Int")!])!;
     const storage = Memory.alloc(optionalInt.typeLayout.stride);
     injectEnumTag(optionalInt, storage, 1);
-    expect(readValue(optionalInt, storage)).toBe("none");
+    expect(readValue(optionalInt, storage)).toBeNull();
   });
 
   test("reads an enum field nested in a struct value", () => {
@@ -72,7 +72,7 @@ describe("enum instances", () => {
     const storage = Memory.alloc(optionalInt.typeLayout.stride);
     storage.writeS64(7);
     injectEnumTag(optionalInt, storage, 0);
-    expect(readValue(optionalInt, storage)).toEqual({ some: int64(7) });
+    expect(readValue(optionalInt, storage)).toEqual(int64(7));
   });
 
   test("discriminates a class optional via the extra-inhabitant (nil-pointer) layout", () => {
@@ -82,12 +82,11 @@ describe("enum instances", () => {
     const storage = Memory.alloc(optionalClass.typeLayout.stride);
 
     storage.writePointer(ptr(0));
-    expect(readValue(optionalClass, storage)).toBe("none");
+    expect(readValue(optionalClass, storage)).toBeNull();
 
     const obj = Memory.alloc(Process.pointerSize); // a real high heap pointer
     storage.writePointer(obj);
-    const some = readValue(optionalClass, storage) as { some: NativePointer };
-    expect(some.some.equals(obj)).toBeTruthy();
+    expect((readValue(optionalClass, storage) as NativePointer).equals(obj)).toBeTruthy();
   });
 
   test("round-trips a Bool optional whose none is an extra inhabitant", () => {
@@ -95,12 +94,12 @@ describe("enum instances", () => {
     const optionalBool = metadataFor("Swift.Optional", [metadataFor("Swift.Bool")!])!;
     const storage = Memory.alloc(optionalBool.typeLayout.stride);
 
-    writeValue(optionalBool, storage, { some: true });
-    expect(readValue(optionalBool, storage)).toEqual({ some: true });
-    writeValue(optionalBool, storage, { some: false });
-    expect(readValue(optionalBool, storage)).toEqual({ some: false });
-    writeValue(optionalBool, storage, "none");
-    expect(readValue(optionalBool, storage)).toBe("none");
+    writeValue(optionalBool, storage, true);
+    expect(readValue(optionalBool, storage)).toBe(true);
+    writeValue(optionalBool, storage, false);
+    expect(readValue(optionalBool, storage)).toBe(false);
+    writeValue(optionalBool, storage, null);
+    expect(readValue(optionalBool, storage)).toBeNull();
   });
 
   test("round-trips a nested Optional<Optional<Int>> through writeValue/readValue", () => {
@@ -110,11 +109,12 @@ describe("enum instances", () => {
     const optOptInt = metadataFor("Swift.Optional", [optInt])!;
     const storage = Memory.alloc(optOptInt.typeLayout.stride);
 
-    writeValue(optOptInt, storage, { some: { some: 5 } });
-    expect(readValue(optOptInt, storage)).toEqual({ some: { some: int64(5) } });
-    writeValue(optOptInt, storage, { some: "none" });
-    expect(readValue(optOptInt, storage)).toEqual({ some: "none" });
-    writeValue(optOptInt, storage, "none");
-    expect(readValue(optOptInt, storage)).toBe("none");
+    writeValue(optOptInt, storage, { some: 5 });
+    expect(readValue(optOptInt, storage)).toEqual({ some: int64(5) });
+    writeValue(optOptInt, storage, { some: null });
+    expect(readValue(optOptInt, storage)).toEqual({ some: null });
+    writeValue(optOptInt, storage, null);
+    expect(readValue(optOptInt, storage)).toBeNull();
+    expect(() => writeValue(optOptInt, storage, 5)).toThrow(/null or \{ some: value \}/);
   });
 });

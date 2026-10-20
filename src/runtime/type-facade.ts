@@ -1,6 +1,7 @@
 import { ValueInstance } from "../abi/value.js";
 import { ClassInstance } from "../abi/heap-object.js";
-import { SwiftValue } from "../abi/instance.js";
+import { SwiftValue, optionalSome } from "../abi/instance.js";
+import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { enumerateFields } from "../abi/field-descriptor.js";
 import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, RAW } from "./object-facade.js";
 import { makeSwiftNativeFunction } from "./calling-convention.js";
@@ -204,7 +205,16 @@ export class SwiftEnum extends SwiftValueType {
   declare readonly $type: EnumType;
 
   $case(name: string, payload?: SwiftValue): SwiftValueObject {
-    return asSwiftObject(ValueInstance.fromJS(metadataOf(this.$type), payload === undefined ? name : { [name]: payload }));
+    const metadata = metadataOf(this.$type);
+    const value =
+      metadata.kind === MetadataKind.Optional
+        ? name === "none"
+          ? null
+          : optionalSome(new Metadata(metadata.genericArguments.readPointer()), payload ?? null)
+        : payload === undefined
+          ? name
+          : { [name]: payload };
+    return asSwiftObject(ValueInstance.fromJS(metadata, value));
   }
 }
 

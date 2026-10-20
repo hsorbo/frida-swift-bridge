@@ -230,9 +230,7 @@ function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
     case MetadataKind.Enum:
     case MetadataKind.Optional: {
       const { caseName, payload } =
-        metadata.kind === MetadataKind.Optional && value === null
-          ? { caseName: "none", payload: undefined } // JS null ↔ Swift .none, the inverse of readEnum
-          : parseEnumValue(value);
+        metadata.kind === MetadataKind.Optional ? optionalCase(metadata, value) : parseEnumValue(value);
       const cases = [...enumerateFields(metadata.description)];
       const tag = cases.findIndex((c) => c.name === caseName);
       if (tag === -1) {
@@ -269,6 +267,22 @@ function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
   }
 }
 
+// The inverse of readOptional.
+function optionalCase(metadata: Metadata, value: SwiftValue): { caseName: string; payload?: SwiftValue } {
+  if (value === null) {
+    return { caseName: "none" };
+  }
+  const payloadType = new Metadata(metadata.genericArguments.readPointer());
+  if (payloadType.kind !== MetadataKind.Optional) {
+    return { caseName: "some", payload: value };
+  }
+  const keys = typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : [];
+  if (keys.length !== 1 || keys[0] !== "some") {
+    throw new Error(`writeValue: a ${typeName(metadata)} is null or { some: value }`);
+  }
+  return { caseName: "some", payload: (value as { some: SwiftValue }).some };
+}
+
 function parseEnumValue(value: SwiftValue): { caseName: string; payload?: SwiftValue } {
   if (typeof value === "string") {
     return { caseName: value };
@@ -302,8 +316,9 @@ export function readValue(metadata: Metadata, address: NativePointer): SwiftValu
       return value;
     }
     case MetadataKind.Enum:
-    case MetadataKind.Optional:
       return readEnum(metadata, address);
+    case MetadataKind.Optional:
+      return readOptional(metadata, address);
     case MetadataKind.Class:
       return address.readPointer(); // reference; decode with readObject()
     case MetadataKind.Existential:
@@ -503,6 +518,34 @@ function readEnum(metadata: Metadata, address: NativePointer): SwiftValue {
   projectEnumData(metadata, scratch);
   const payloadAddress = isIndirect ? projectBox(scratch.readPointer()) : scratch;
   return { [name]: readValue(payloadType, payloadAddress) };
+}
+
+// `.none` returns null; `.some`'s bare T sits at offset 0 (single-payload), so it decodes in place
+// and the Optional wrapper is never destroyed — destroying it faults on resilient payloads (URL).
+export function projectOptionalPayload(
+  metadata: Metadata,
+  address: NativePointer
+): { payloadType: Metadata; address: NativePointer } | null {
+  const { payloadType, isIndirect } = readEnumCase(metadata, address);
+  if (payloadType === null) {
+    return null;
+  }
+  if (!isIndirect) {
+    return { payloadType, address };
+  }
+  projectEnumData(metadata, address);
+  return { payloadType, address: projectBox(address.readPointer()) };
+}
+
+// An Optional is its payload or null; only an Optional payload keeps a `{ some }` wrapper, which
+// keeps `.some(.none)` apart from `.none`.
+export function optionalSome<T>(payloadType: Metadata, payload: T): T | { some: T } {
+  return payloadType.kind === MetadataKind.Optional ? { some: payload } : payload;
+}
+
+function readOptional(metadata: Metadata, address: NativePointer): SwiftValue {
+  const some = projectOptionalPayload(metadata, address);
+  return some === null ? null : optionalSome(some.payloadType, readValue(some.payloadType, some.address));
 }
 
 export function* enumerateInstanceFields(

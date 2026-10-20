@@ -5,8 +5,7 @@ import { readVTableChain } from "../abi/class-descriptor.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { asSwiftObject, SwiftObject, SwiftValueObject, SwiftField, RAW } from "./object-facade.js";
 import { ValueInstance } from "../abi/value.js";
-import { readValue, writeValue, embedsManagedReference, SwiftValue } from "../abi/instance.js";
-import { readEnumCase, projectEnumData, projectBox } from "../abi/enum.js";
+import { readValue, writeValue, embedsManagedReference, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
 import { enumerateTupleElements } from "../abi/tuple.js";
 import { findType, withoutTypeArguments } from "../reflection/registry.js";
 import { demangle } from "./demangle.js";
@@ -103,7 +102,7 @@ import { metadataOf, typeOf } from "./swift-type.js";
 
 export type MethodKind = "method" | "init" | "subscript";
 
-export type CallResult = SwiftValue | SwiftObject | SwiftClosureValue | CallResult[];
+export type CallResult = SwiftValue | SwiftObject | SwiftClosureValue | CallResult[] | { some: CallResult };
 
 // A closure as its two words, `function` and `context`, its captures as field views. One a call
 // returned is owned and callable, its context released on dispose or collection; a borrowed one (a
@@ -518,23 +517,6 @@ function existentialPayloadEmbedsManagedReference(metadata: Metadata, container:
   return embedsManagedReference(payload.type);
 }
 
-// `.none` returns null; `.some`'s bare T sits at offset 0 (single-payload), so it decodes in place
-// and the Optional wrapper is never destroyed — destroying it faults on resilient payloads (URL).
-function projectOptionalPayload(
-  metadata: Metadata,
-  ret: NativePointer
-): { payloadType: Metadata; address: NativePointer } | null {
-  const { payloadType, isIndirect } = readEnumCase(metadata, ret);
-  if (payloadType === null) {
-    return null;
-  }
-  if (!isIndirect) {
-    return { payloadType, address: ret };
-  }
-  projectEnumData(metadata, ret);
-  return { payloadType, address: projectBox(ret.readPointer()) };
-}
-
 export function zeroSizedStorage(type: Metadata): NativePointer {
   return Memory.alloc(type.typeLayout.stride);
 }
@@ -564,7 +546,7 @@ export function decodeReturn(returnType: Metadata | null, returned: NativePointe
   }
   if (returnType.kind === MetadataKind.Optional) {
     const some = projectOptionalPayload(returnType, ret);
-    return some === null ? null : decodeReturn(some.payloadType, some.address);
+    return some === null ? null : optionalSome(some.payloadType, decodeReturn(some.payloadType, some.address));
   }
   // A tuple decodes to an array, each element consumed by the recursion (not one facade). A pointer
   // into the tuple does not keep its allocation alive, and an adopted element outlives this call,
@@ -1777,7 +1759,7 @@ export class BoundMethod {
     const value = ret ?? zeroSizedStorage(returnType);
     if (returnType.kind === MetadataKind.Optional) {
       const some = projectOptionalPayload(returnType, value);
-      return some === null ? null : asSwiftObject(ValueInstance.adopt(some.payloadType, some.address));
+      return some === null ? null : optionalSome(some.payloadType, asSwiftObject(ValueInstance.adopt(some.payloadType, some.address)));
     }
     return asSwiftObject(ValueInstance.adopt(returnType, value));
   }

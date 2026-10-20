@@ -999,8 +999,8 @@ not itself a full facade — for owning/ABI operations on a field value, go
 through `/abi`.
 
 A `weak` stored property's slot is a weak reference, not the optional it is
-declared as: `$fields` loads it through the runtime (`{ some: handle }` while
-the referent lives, `"none"` once it is gone), and `$field` refuses it, since no
+declared as: `$fields` loads it through the runtime (the referent's handle while
+it lives, `null` once it is gone), and `$field` refuses it, since no
 borrowed view of the optional exists. `unowned` and `unowned(unsafe)` slots hold
 the object pointer and read as a plain reference.
 
@@ -1277,8 +1277,8 @@ descriptor into field views (`SwiftField`: `handle`, `type`, `read()`,
 `write()`), one per capture in declaration order, each valid as long as the
 closure is. A captured object reads as its reference, a captured metatype as
 its type's [reflection](#reflection), and a captured closure as another view. A
-`[weak x]` capture reads as an optional of its referent, `"none"` once that is
-gone; a weak or unowned capture's view refuses writes. A
+`[weak x]` capture reads as its referent, `null` once that is gone; a weak or
+unowned capture's view refuses writes. A
 closure made in a generic function types its captures by the arguments it was
 made with:
 
@@ -1490,9 +1490,15 @@ decoding preserves precision on 64-bit hosts:
 Readers always return the same representation for a given type — never a number
 for small values and a wrapper for large ones.
 
-Where Swift expects an `Optional`, JS `null` marshals to `.none`. Where it
-expects an `Array`, a JS array marshals to one, each element written as the
-element type; a variadic parameter (`Int...`) is such an array.
+An `Optional` is its payload or `null`: `.none` decodes to `null` and `.some(x)`
+to `x`, and each marshals back the same way, so a call's result passes to a
+parameter of the same type. Only an Optional whose payload is itself an
+Optional keeps a `{ some }` wrapper, which keeps `.some(.none)` apart from
+`.none`: an `Int??` reads and writes as `null`, `{ some: null }` or
+`{ some: int64(7) }`. Call results, hook arguments and results, fields and enum
+facades all use this shape. Where Swift expects an `Array`, a JS array marshals
+to one, each element written as the element type; a variadic parameter
+(`Int...`) is such an array.
 
 ```js
 addInts(20, 22);    // int64(42), not 42

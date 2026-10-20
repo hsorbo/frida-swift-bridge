@@ -336,7 +336,7 @@ describe("closure capture values (live runtime)", () => {
     loadFixture();
     const stepper = Swift.class("fixture.Stepper")!.init()!;
     const weak = stepper.weakIncrementer() as SwiftClosureValue;
-    expect(readCaptures(weak.context)).toEqual([{ some: stepper.$handle }]);
+    expect(readCaptures(weak.context)).toEqual([stepper.$handle]);
   });
 
   test("decodes a captured struct", () => {
@@ -416,10 +416,10 @@ describe("closure capture values (live runtime)", () => {
 
     const [owner, flag, tint, slot, count, last] = readCaptures(context)!;
     expect(readObject(owner as NativePointer)).toEqual({ kind: int64(3) });
-    expect(flag).toEqual({ some: true });
+    expect(flag).toBe(true);
     expect(tint).toBe("blue");
     expect((slot as { backup: NativePointer }).backup.equals(owner as NativePointer)).toBeTruthy();
-    expect(count).toEqual({ some: int64(7) });
+    expect(count).toEqual(int64(7));
     expect(last).toBe(true);
   });
 
@@ -488,7 +488,7 @@ describe("closure capture values (live runtime)", () => {
       "Swift.Optional<fixture.GenericCapturingRef<Swift.Int>>",
       "fixture.GenericCapturingRef<Swift.Int>",
     ]);
-    expect(readObject((optional.values[0] as { some: NativePointer }).some)).toEqual({ value: int64(1) });
+    expect(readObject(optional.values[0] as NativePointer)).toEqual({ value: int64(1) });
     expect(readObject(optional.values[1] as NativePointer)).toEqual({ value: int64(2) });
 
     const classBound = layoutAfter("triggerClassBoundBeforeRefCapturing");

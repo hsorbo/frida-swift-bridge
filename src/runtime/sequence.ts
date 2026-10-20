@@ -3,7 +3,7 @@ import { ValueInstance } from "../abi/value.js";
 import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js";
 import { WitnessTable } from "../abi/witness-table.js";
-import { CallResult, bindRequirementAt, decodeReturn, copyOfValue } from "./method.js";
+import { CallResult, bindRequirementAt } from "./method.js";
 import { RAW } from "./object-facade.js";
 
 // A facade's Symbol.iterator: the Swift iterator driven through the Sequence and IteratorProtocol
@@ -43,28 +43,20 @@ function* iterate(sequence: WitnessTable, self: NativePointer): Generator<CallRe
   try {
     const iteratorProtocol = findProtocol("Swift.IteratorProtocol")!;
     const table = new WitnessTable(conformsToProtocol(iterator.metadata, iteratorProtocol)!, iterator.metadata);
-    // next() returns Element?; when Element is itself optional the decoder would fold .some(nil)
-    // into the end of the sequence, so the element is adopted whole and decoded from a copy.
+    // next() returns Element?; an Optional Element keeps its { some } wrapper, so a nil element
+    // stays apart from the end of the sequence.
     const optionalElement = sequence.associatedType("Element").kind === MetadataKind.Optional;
-    const next = bindRequirementAt(table, 0, "Swift.IteratorProtocol.next() -> A.Element?", iterator.handle, {
-      adoptResult: optionalElement,
-    });
+    const next = bindRequirementAt(table, 0, "Swift.IteratorProtocol.next() -> A.Element?", iterator.handle);
     for (;;) {
       const result = next.call() as CallResult;
       if (result === null) {
         return;
       }
-      yield optionalElement ? decodeOptionalElement(rawValue(result)) : result;
+      yield optionalElement ? (result as { some: CallResult }).some : result;
     }
   } finally {
     iterator.dispose();
   }
-}
-
-function decodeOptionalElement(element: ValueInstance): CallResult {
-  const decoded = decodeReturn(element.metadata, copyOfValue(element.metadata, element.handle));
-  element.dispose();
-  return decoded;
 }
 
 function rawValue(facade: CallResult): ValueInstance {

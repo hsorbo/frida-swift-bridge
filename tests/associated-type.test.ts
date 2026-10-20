@@ -89,7 +89,7 @@ describe("associated type / associated conformance resolution", () => {
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
     const value = ValueInstance.fromJS(source, { value: 5 });
-    table.set(value.handle, "maybe", { some: 9 });
+    table.set(value.handle, "maybe", 9);
     expect((value.read() as { value: number }).value).toEqual(int64(9));
   });
 

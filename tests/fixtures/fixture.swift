@@ -71,6 +71,14 @@ public func sumBig(_ s: BigStruct) -> Int {
 
 public func unwrapOrZero(_ x: Int?) -> Int? { x ?? 0 }
 public func makeUnwrapOrZero() -> Int { unwrapOrZero(5)! }
+public func echoOptionalText(_ s: String?) -> String? { s }
+public func echoNestedOptional(_ x: Int??) -> Int?? { x }
+public func makeEchoNestedOptional() -> Int { echoNestedOptional(.some(.none)) == .some(.none) ? 1 : 0 }
+public struct OptionalFields {
+    public var single: Int?
+    public var nested: Int??
+    public init(single: Int?, nested: Int??) { self.single = single; self.nested = nested }
+}
 public func sumIntArray(_ xs: [Int]) -> [Int] { [xs.reduce(0, +)] }
 public func makeSumIntArray() -> Int { sumIntArray([1, 2, 3])[0] }
 

@@ -173,7 +173,7 @@ describe("closure captures", () => {
   test("a closure held in an Optional or a tuple reads as a closure view", () => {
     new NativeFunction(fixtureExport("storeNestedClosureCapturing"), "void", ["int64"])(5);
     const [scale, pair] = Swift.borrowClosure(fixtureContext("genericCapturingContext")).$captures();
-    expect((scale.read() as { some: SwiftClosureValue }).some.$captures().map((c) => c.read())).toEqual([int64(5)]);
+    expect((scale.read() as SwiftClosureValue).$captures().map((c) => c.read())).toEqual([int64(5)]);
     const [n, add] = pair.read() as [Int64, SwiftClosureValue];
     expect(n).toEqual(int64(5));
     expect(add.$captures().map((c) => c.read())).toEqual([int64(5)]);
@@ -182,7 +182,7 @@ describe("closure captures", () => {
   test("an optional closure captured in a generic function lays out alongside the parameter-typed capture", () => {
     new NativeFunction(fixtureExport("triggerGenericOptionalClosureCapturing"), "void", [])();
     const [make, value] = Swift.borrowClosure(fixtureContext("genericCapturingContext")).$captures();
-    expect((make.read() as { some: SwiftClosureValue }).some.$captures().map((c) => c.read())).toEqual([int64(8)]);
+    expect((make.read() as SwiftClosureValue).$captures().map((c) => c.read())).toEqual([int64(8)]);
     expect(value.read()).toEqual(int64(8));
   });
 
@@ -214,10 +214,10 @@ describe("closure captures", () => {
     }
     const [weakSelf] = weak.$captures();
     expect(weakSelf.type.name).toBe("Swift.Optional<fixture.Stepper>");
-    expect(weakSelf.read()).toEqual({ some: stepper.$handle });
+    expect(weakSelf.read()).toEqual(stepper.$handle);
     expect(() => weakSelf.write(null)).toThrow(/weak/);
     stepper.$dispose();
-    expect(weakSelf.read()).toBe("none");
+    expect(weakSelf.read()).toBeNull();
     expect(weak()).toEqual(int64(-1));
   });
 });

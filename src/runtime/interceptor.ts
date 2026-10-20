@@ -1,5 +1,5 @@
 import { Metadata, MetadataKind, genericHeaderOffset, readGenericContextHeader } from "../abi/metadata.js";
-import { readValue, embedsManagedReference, SwiftValue } from "../abi/instance.js";
+import { readValue, embedsManagedReference, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
 import { ValueInstance } from "../abi/value.js";
 import { enumerateTupleElements, getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
 import { ClassInstance } from "../abi/heap-object.js";
@@ -1077,7 +1077,7 @@ function materializeThrown(
   return decodeBorrowedValue(metadata, scratch);
 }
 
-type BorrowedValue = SwiftValue | SwiftObject;
+type BorrowedValue = SwiftValue | SwiftObject | { some: BorrowedValue };
 
 // Mirrors method.ts decodeReturn, but borrows: an interceptor only observes the caller's +1, so it
 // neither adopts nor destroys. A non-POD value embedding a managed reference can't be deep-copied
@@ -1094,6 +1094,10 @@ function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent:
   }
   if (metadata.kind === MetadataKind.ObjCClassWrapper) {
     return address.readPointer();
+  }
+  if (metadata.kind === MetadataKind.Optional) {
+    const some = projectOptionalPayload(metadata, address);
+    return some === null ? null : optionalSome(some.payloadType, decodeBorrowedValue(some.payloadType, some.address, parent));
   }
   if (!metadata.valueWitnesses.isPOD && embedsManagedReference(metadata)) {
     return asSwiftObject(ValueInstance.borrow(metadata, address, parent));
