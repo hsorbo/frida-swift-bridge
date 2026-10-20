@@ -1081,8 +1081,18 @@ ga.protocols;       // [Protocol, Protocol]
 ga.isClassOnly;     // false
 ```
 
-Requirements and witness tables are not part of the stable root; they live
-under [`/abi`](#going-lower-the-abi-entry-point). The existential type a
+`protocol.requirements()` lists what the protocol demands, one record per
+requirement in witness-table order: `{ index, kind, isStatic, isAsync,
+selector, signature }`. `index` is the witness index, the number a slot listing
+prints as `MyApp.Vocal#1`; `kind` is `"method"`, `"init"`, `"getter"`,
+`"setter"`, `"read"`, `"modify"`, `"associatedType"`, `"associatedConformance"`
+or `"baseProtocol"`. A callable requirement's `selector` and `signature` come
+from the symbol of some loaded conformance's witness, as a member's do, so they
+are `null` while no conformance in the process keeps its symbols, and an
+accessor reads as its property's getter or setter would. The scan runs on the
+call, over the conformances until every requirement is named, never earlier.
+Raw requirement records and witness tables live under
+[`/abi`](#going-lower-the-abi-entry-point). The existential type a
 composition describes is reflection, named from the root:
 `Swift.reflect("any MyApp.Greeter & MyApp.Aged")` (see
 [Finding types](#finding-types)).

@@ -1,6 +1,6 @@
 import { test, expect } from "@frida/injest/agent";
 
-import type { Protocol, ProtocolComposition } from "frida-swift-bridge2";
+import type { Protocol, ProtocolComposition, SwiftRequirement, RequirementKind } from "frida-swift-bridge2";
 import Swift, {
   SwiftCoreApi,
   SwiftType,
@@ -202,8 +202,11 @@ function protocolListingsStayNarrowAtCompileTime(t: ClassType) {
   }
   const conformed = t.protocols()["MyKit.P"];
   const conformedName: string = conformed.name;
-  // @ts-expect-error a conformed protocol is the stable view, requirements stay under /abi
-  conformed.requirements;
+  const demanded: SwiftRequirement[] = conformed.requirements();
+  const kind: RequirementKind = demanded[0].kind;
+  // @ts-expect-error a conformed protocol is the stable view, raw requirement records stay under /abi
+  conformed.requirementRecords;
+  void kind;
   // @ts-expect-error a slot binding is not a reflection member
   t.slotCall;
   void conformedName;
@@ -215,8 +218,10 @@ function protocolRawInspectionStaysUnderAbi(p: Protocol, comp: ProtocolCompositi
   void [p.name, p.fullName, p.isClassOnly, conformers, conforms];
   // @ts-expect-error raw protocol descriptor stays under /abi
   p.descriptor;
-  // @ts-expect-error raw requirements stay under /abi
-  p.requirements;
+  const requirements: SwiftRequirement[] = p.requirements();
+  // @ts-expect-error raw requirement records stay under /abi
+  p.requirementRecords;
+  void requirements;
   // @ts-expect-error witness-table lookup stays under /abi
   p.conformanceFor;
   // @ts-expect-error existential metadata stays under /abi

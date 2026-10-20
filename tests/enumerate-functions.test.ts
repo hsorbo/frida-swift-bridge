@@ -103,7 +103,7 @@ describe("Swift.enumerateFunctions with slots", () => {
   });
 
   test("a witness no symbol names is listed by type, protocol and index", () => {
-    const requirement = Protocol.find("fixture.Vocal")!.requirements.find((r) => r.kind === ProtocolRequirementKind.Method)!;
+    const requirement = Protocol.find("fixture.Vocal")!.requirementRecords.find((r) => r.kind === ProtocolRequirementKind.Method)!;
     const selector = `fixture.Vocal#${requirement.witnessIndex}`;
     const [witness] = slotsOf(module).filter((m) => m.name === `fixture.BaseSpeaker.${selector}`);
     expect(witness.address.equals(facadeSlotAddress("fixture.BaseSpeaker", selector))).toBe(true);

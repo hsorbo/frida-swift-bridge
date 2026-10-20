@@ -28,9 +28,9 @@ describe("Protocol", () => {
 
   test("requirements lists Greeter's single method requirement", () => {
     const greeter = Protocol.find("fixture.Greeter")!;
-    expect(greeter.requirements.length).toBe(greeter.numRequirements);
-    expect(greeter.requirements[0].kind).toBe(ProtocolRequirementKind.Method);
-    expect(greeter.requirements[0].isInstance).toBe(true);
+    expect(greeter.requirementRecords.length).toBe(greeter.numRequirements);
+    expect(greeter.requirementRecords[0].kind).toBe(ProtocolRequirementKind.Method);
+    expect(greeter.requirementRecords[0].isInstance).toBe(true);
   });
 
   test("conformanceFor yields a witness table for a conformer and null otherwise", () => {
@@ -57,7 +57,7 @@ describe("Swift.enumerateProtocols", () => {
 
   test("each yielded entry is a usable Protocol", () => {
     const greeter = [...Swift.enumerateProtocols()].find((p) => p.fullName === "fixture.Greeter")!;
-    expect((greeter as Protocol).requirements.length).toBeGreaterThan(0);
+    expect((greeter as Protocol).requirementRecords.length).toBeGreaterThan(0);
   });
 
   test("a glob filter matches qualified protocol names", () => {
@@ -86,6 +86,42 @@ describe("Protocol.conformingTypes", () => {
   });
 });
 
+describe("the stable protocol's requirements()", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("names a requirement with its selector and signature when a conformance's symbol recovers it", (ctx) => {
+    requireSymbolTable(ctx);
+    loadFixtureSyms();
+    const greeter = Swift.Protocol.find("fixturesyms.Greeter")!;
+    const [greet] = greeter.requirements();
+    expect([greet.kind, greet.isStatic, greet.isAsync, greet.selector]).toEqual(["method", false, false, "greet()"]);
+    expect(greet.signature).toEqual({ labels: [], argTypeNames: [], returnTypeName: "Swift.String", throws: false, thrownTypeName: null, isAsync: false, genericParams: [] });
+    expect(greet.index).toBe((greeter as Protocol).requirementRecords[0].witnessIndex);
+  });
+
+  test("an accessor requirement reads as its property's getter or setter, and an associated type has no selector", (ctx) => {
+    requireSymbolTable(ctx);
+    loadFixtureSyms();
+    const source = Swift.Protocol.find("fixturesyms.ItemSource")!;
+    const kinds = source.requirements().map((r) => r.kind);
+    expect(kinds).toContain("associatedType");
+    expect(source.requirements().filter((r) => r.kind === "associatedType").every((r) => r.selector === null && r.signature === null)).toBe(true);
+    const tagged = source.requirements().filter((r) => r.selector === "tagged");
+    expect(tagged.map((r) => r.kind).sort()).toEqual(["getter", "setter"]);
+    const getter = tagged.find((r) => r.kind === "getter")!;
+    const setter = tagged.find((r) => r.kind === "setter")!;
+    expect([getter.signature!.argTypeNames, getter.signature!.returnTypeName]).toEqual([[], setter.signature!.argTypeNames[0]]);
+    expect(setter.signature!.returnTypeName).toBeNull();
+  });
+
+  test("a requirement no loaded conformance names keeps its index and kind with a null selector", () => {
+    const greeter = Swift.Protocol.find("fixture.Greeter")!;
+    const [greet] = greeter.requirements();
+    expect([greet.kind, greet.selector, greet.signature, greet.index]).toEqual(["method", null, null, greet.index]);
+    expect(greeter.requirements()).toHaveLength(greeter.toJSON().numRequirements);
+  });
+});
+
 describe("Protocol.namedRequirements", () => {
   beforeEach(() => { loadFixture(); });
 
@@ -111,7 +147,7 @@ describe("Protocol.namedRequirements", () => {
     loadFixtureSyms();
     const greeter = Protocol.find("fixturesyms.Greeter")!;
     const named = greeter.namedRequirements().find((r) => r.name === "greet")!;
-    expect(greeter.requirements.map((r) => r.witnessIndex)).toContain(named.requirement.witnessIndex);
+    expect(greeter.requirementRecords.map((r) => r.witnessIndex)).toContain(named.requirement.witnessIndex);
   });
 
   test("a stripped conformance's witness thunk is unrecoverable, so its requirement lists unnamed", () => {

@@ -72,6 +72,8 @@ export { isSwiftSymbol, demangle } from "./runtime/demangle.js";
 export type {
   StableProtocol as Protocol,
   StableProtocolComposition as ProtocolComposition,
+  SwiftRequirement,
+  RequirementKind,
 } from "./runtime/protocol.js";
 export {
   SwiftType,

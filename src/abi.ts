@@ -270,6 +270,7 @@ export {
 export { SwiftValue } from "./abi/instance.js";
 export { typeName, mangledTypeName } from "./runtime/type-name.js";
 export { Protocol, ProtocolComposition } from "./runtime/protocol.js";
+export type { SwiftRequirement, RequirementKind } from "./runtime/protocol.js";
 export {
   FunctionType as FunctionSignature,
   FunctionParameter,

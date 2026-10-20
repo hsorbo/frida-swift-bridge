@@ -7,7 +7,7 @@ import { symbolicate } from "../src/runtime/symbolication.js";
 import { Swift } from "../src/index.js";
 
 function methodSlot(protocolName: string): string {
-  const requirement = Protocol.find(protocolName)!.requirements.find((r) => r.kind === ProtocolRequirementKind.Method)!;
+  const requirement = Protocol.find(protocolName)!.requirementRecords.find((r) => r.kind === ProtocolRequirementKind.Method)!;
   return `${protocolName}#${requirement.witnessIndex}`;
 }
 
