@@ -40,7 +40,7 @@ import {
   unboundSignature,
 } from "./method.js";
 import { findNestedType, nestedTypeNamesOf } from "../reflection/registry.js";
-import { POISON, isBridgeMember, invokeOptions, splitSubscriptArgs, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
+import { POISON, isBridgeMember, invokeOptions, bindSubscript, SwiftBoundSubscript, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 import {
   NominalType,
   ClassType,
@@ -96,14 +96,8 @@ export abstract class SwiftTypeFacade {
     return narrowBoundMethod(bindResolved(this.$type.slotCall(selector, signature, true), metadataOf(this.$type).handle));
   }
 
-  $subscript(...indicesThenOptions: unknown[]): CallResult {
-    const { indices, selector, options } = splitSubscriptArgs(indicesThenOptions);
-    return this.$typeMethod(selector, { ...options, arity: options.arity ?? indices.length, accessor: "getter" }).call(...indices) as CallResult;
-  }
-
-  $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void {
-    const { indices, selector, options } = splitSubscriptArgs(indicesThenOptions);
-    this.$typeMethod(selector, { ...options, arity: options.arity ?? indices.length, accessor: "setter" }).call(value, ...indices);
+  $subscript(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftBoundSubscript {
+    return bindSubscript(selector, options, (lookup) => this.$typeMethod("subscript", lookup));
   }
 
   abstract $initializer(

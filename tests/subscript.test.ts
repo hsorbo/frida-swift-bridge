@@ -10,31 +10,46 @@ function grid(): SwiftValueObject {
 describe("subscripts", () => {
   beforeEach(() => { loadFixture(); });
 
-  test("$subscript calls the getter named by its selector or labels, $setSubscript the setter", () => {
+  test("$subscript binds the subscript named by its selector or labels; get reads it and set writes it", () => {
     const g = grid();
-    expect(g.$subscript(1, "subscript(_:)")).toEqual(int64(2));
-    expect(g.$subscript(1, { labels: [null] })).toEqual(int64(2));
-    expect(g.$subscript(1, 0, "subscript(row:column:)")).toEqual(int64(3));
-    expect(g.$subscript(2, { labels: ["tracked"] })).toEqual(int64(3));
-    g.$setSubscript(9, 1, "subscript(_:)");
-    expect(g.$subscript(1, "subscript(_:)")).toEqual(int64(9));
-    expect(() => g.$subscript(1)).toThrow(/ambiguous/);
-    expect(() => g.$subscript(1, "greet(_:)")).toThrow(/not a subscript selector/);
+    expect(g.$subscript("subscript(_:)").get(1)).toEqual(int64(2));
+    expect(g.$subscript({ labels: [null] }).get(1)).toEqual(int64(2));
+    expect(g.$subscript("subscript(row:column:)").get(1, 0)).toEqual(int64(3));
+    expect(g.$subscript({ labels: ["tracked"] }).get(2)).toEqual(int64(3));
+    const cell = g.$subscript("subscript(_:)");
+    cell.set(1, 9);
+    expect(cell.get(1)).toEqual(int64(9));
+    expect(() => g.$subscript().get(1)).toThrow(/ambiguous/);
+    expect(() => g.$subscript("greet(_:)")).toThrow(/not a subscript selector/);
+    expect(() => cell.set()).toThrow(/indices and then the element/);
+  });
+
+  test("an index is never mistaken for a selector or lookup options", () => {
+    const g = grid();
+    expect(g.$subscript({ labels: ["key"] }).get("subscript(_:)")).toEqual(int64(13));
+    expect(g.$subscript("subscript(key:)").get("none")).toEqual(int64(4));
+    expect(g.$subscript({ labels: ["at"] }).get({ x: 1 })).toEqual(int64(2));
+    using p = (Swift.type("fixture.Point") as SwiftStruct).$new({ x: 3 });
+    expect(g.$subscript("subscript(at:)").get(p)).toEqual(int64(4));
+    expect(g.$subscript({ labels: [null], deep: false }).get(0)).toEqual(int64(1));
   });
 
   test("a generic subscript takes its type arguments, a static one lives on the type", () => {
     const Int = Swift.type("Swift.Int")!;
-    expect(grid().$subscript(3, { labels: ["scaled"], typeArguments: [Int] })).toEqual(int64(3));
-    expect((Swift.type("fixture.Grid") as SwiftStruct).$subscript(1, { labels: ["unit"] })).toEqual(int64(100));
+    expect(grid().$subscript({ labels: ["scaled"], typeArguments: [Int] }).get(3)).toEqual(int64(3));
+    expect((Swift.type("fixture.Grid") as SwiftStruct).$subscript({ labels: ["unit"] }).get(1)).toEqual(int64(100));
   });
 
-  test("a class subscript reads and writes through the object", () => {
+  test("a class subscript reads and writes through the object and refuses a disposed one", () => {
     const board = (Swift.type("fixture.Board") as SwiftClass).init(["a", "b"]) as SwiftClassObject;
-    expect(board.$subscript(1)).toBe("b");
-    board.$setSubscript("a string long enough to live on the heap", 0);
-    expect(board.$subscript(0)).toBe("a string long enough to live on the heap");
+    const cell = board.$subscript();
+    expect(cell.get(1)).toBe("b");
+    cell.set(0, "a string long enough to live on the heap");
+    expect(cell.get(0)).toBe("a string long enough to live on the heap");
     expect(board.$type.instanceMethods()).not.toContain("subscript(_:)");
     expect(board.$type.properties().map((p) => p.name)).toEqual(["cells"]);
+    board.$dispose();
+    expect(() => cell.get(0)).toThrow(/disposed/);
   });
 
   test("reflection finds a subscript accessor by selector and accessor kind", () => {

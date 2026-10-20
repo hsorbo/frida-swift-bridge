@@ -12,11 +12,11 @@ import {
   splitSelector,
   bindRequirementAt,
 } from "./method.js";
-import { SwiftType, NominalType, ClassType, StructType, EnumType, SlotSignature } from "./swift-type.js";
+import { SwiftType, NominalType, ClassType, StructType, EnumType, SlotSignature, MemberLookupOptions } from "./swift-type.js";
 import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js";
 import { WitnessTable } from "../abi/witness-table.js";
 import { typeName } from "./type-name.js";
-import { POISON, invokeOptions, splitSubscriptArgs, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
+import { POISON, invokeOptions, bindSubscript, SwiftBoundSubscript, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
 import { sequenceIterator } from "./sequence.js";
 
 const RESERVED = new Set([
@@ -34,7 +34,6 @@ const RESERVED = new Set([
   "$call",
   "$method",
   "$subscript",
-  "$setSubscript",
   "$get",
   "$set",
   "$field",
@@ -87,8 +86,7 @@ export interface SwiftClassObject extends SwiftObjectBase {
   readonly $kind: "object";
   readonly $type: ClassType;
   $method(name: string, options?: MethodResolveOptions | SlotSignature): SwiftClassBoundMethod;
-  $subscript(...indicesThenOptions: unknown[]): CallResult;
-  $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void;
+  $subscript(selector?: string | MemberLookupOptions, options?: MemberLookupOptions): SwiftBoundSubscript;
   $container?: never;
 }
 
@@ -96,8 +94,7 @@ export interface SwiftValueObject extends SwiftObjectBase {
   readonly $kind: "value";
   readonly $type: StructType | EnumType;
   $method(name: string, options?: ValueMethodResolveOptions | SlotSignature): SwiftValueBoundMethod;
-  $subscript(...indicesThenOptions: unknown[]): CallResult;
-  $setSubscript(value: CallArg, ...indicesThenOptions: unknown[]): void;
+  $subscript(selector?: string | MemberLookupOptions, options?: MemberLookupOptions): SwiftBoundSubscript;
   $container(): SwiftValue;
 }
 
@@ -154,16 +151,6 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
   };
   const invoke = (name: string, args: CallArg[]): CallResult | Promise<CallResult> =>
     method(name, invokeOptions(args)).call(...args);
-  const subscript = (accessor: "getter" | "setter", args: unknown[], stored: CallArg[]): CallResult => {
-    const { indices, selector, options } = splitSubscriptArgs(args);
-    const { name, options: split } = splitSelector(selector, { ...options, arity: options.arity ?? indices.length });
-    if (name !== "subscript") {
-      throw new Error(`${selector} is not a subscript selector`);
-    }
-    const raw = { ...lowerResolveOptions(split), accessor };
-    const bound = isValue ? value.method("subscript", raw) : object.method("subscript", raw);
-    return bound.call(...stored, ...indices) as CallResult;
-  };
 
   const members = facadeMembers(fullName, false);
 
@@ -219,11 +206,8 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
           return (name: string, options: ValueMethodResolveOptions | SlotSignature = {}) =>
             narrowBoundMethod(method(name, options), target);
         case "$subscript":
-          return (...args: unknown[]) => subscript("getter", args, []);
-        case "$setSubscript":
-          return (v: CallArg, ...args: unknown[]) => {
-            subscript("setter", args, [v]);
-          };
+          return (selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}) =>
+            bindSubscript(selector, options, (lookup) => narrowBoundMethod(method("subscript", lookup), target));
         case "$get":
           return (name: string) => readProperty(name);
         case "$set":

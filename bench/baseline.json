@@ -34,7 +34,7 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 72,
+          "min": 64,
           "median": 74
         }
       },
@@ -53,7 +53,7 @@
         },
         "wallUs": {
           "min": 154,
-          "median": 156
+          "median": 167
         }
       },
       "lookup › object method call": {
@@ -70,7 +70,7 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 160,
+          "min": 156,
           "median": 162
         }
       },
@@ -88,8 +88,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 148,
-          "median": 154
+          "min": 139,
+          "median": 158
         }
       },
       "lookup › Swift.demangle of an exported symbol": {
@@ -124,8 +124,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 865,
-          "median": 904
+          "min": 912,
+          "median": 1118
         }
       },
       "listing › instanceMethods on a struct": {
@@ -142,8 +142,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 795,
-          "median": 812
+          "min": 858,
+          "median": 1008
         }
       },
       "listing › instanceMethods on Swift.Int, shallow": {
@@ -160,8 +160,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 4177,
-          "median": 4348
+          "min": 4070,
+          "median": 4246
         }
       },
       "listing › instanceMethods on Swift.Int, deep": {
@@ -178,8 +178,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 34002,
-          "median": 34632
+          "min": 34336,
+          "median": 35320
         }
       },
       "listing › properties on a class": {
@@ -196,8 +196,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 13,
-          "median": 17
+          "min": 14,
+          "median": 16
         }
       },
       "listing › Object.keys on a type facade": {
@@ -214,8 +214,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 771,
-          "median": 798
+          "min": 812,
+          "median": 822
         }
       },
       "listing › Object.keys on an object facade": {
@@ -250,8 +250,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 84797,
-          "median": 86792
+          "min": 70204,
+          "median": 71640
         }
       },
       "scan › specializations of a generic struct": {
@@ -286,8 +286,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 6563,
-          "median": 6630
+          "min": 7222,
+          "median": 7311
         }
       },
       "scan › enumerateTypes over one module": {
@@ -304,8 +304,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 861,
-          "median": 936
+          "min": 928,
+          "median": 945
         }
       },
       "scan › protocols of a type": {
@@ -322,8 +322,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 735,
-          "median": 765
+          "min": 829,
+          "median": 855
         }
       },
       "first Swift.type lookup in a fresh process": {
@@ -388,8 +388,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 85451,
-          "median": 88040
+          "min": 72156,
+          "median": 72549
         }
       },
       "scan › Swift.choose over a generic class named without arguments": {
@@ -406,8 +406,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 87269,
-          "median": 87875
+          "min": 72774,
+          "median": 73044
         }
       },
       "function listing › enumerateFunctions over a module": {
@@ -424,8 +424,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 61496,
-          "median": 61943
+          "min": 64285,
+          "median": 66338
         }
       },
       "function listing › enumerateFunctions with slots over a module": {
@@ -442,8 +442,8 @@
           "swiftSections": 3
         },
         "wallUs": {
-          "min": 65533,
-          "median": 66994
+          "min": 67586,
+          "median": 69128
         }
       },
       "function listing › enumerateFunctions over swiftCore": {
@@ -460,8 +460,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 573486,
-          "median": 579326
+          "min": 566088,
+          "median": 586549
         }
       },
       "function listing › enumerateFunctions with slots over swiftCore": {
@@ -478,8 +478,8 @@
           "swiftSections": 3
         },
         "wallUs": {
-          "min": 600253,
-          "median": 607755
+          "min": 589799,
+          "median": 590258
         }
       },
       "function listing › enumerateFunctions with slots by a type glob": {
@@ -496,8 +496,8 @@
           "swiftSections": 465
         },
         "wallUs": {
-          "min": 397699,
-          "median": 412443
+          "min": 410709,
+          "median": 417035
         }
       },
       "function lookup › findFunctionByAddress inside an exported function": {
@@ -514,8 +514,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 971,
-          "median": 993
+          "min": 934,
+          "median": 988
         }
       },
       "function lookup › findFunctionByAddress inside an unnamed slot": {
@@ -532,8 +532,8 @@
           "swiftSections": 1
         },
         "wallUs": {
-          "min": 1499,
-          "median": 1519
+          "min": 1551,
+          "median": 1568
         }
       },
       "function lookup › findFunctionByAddress of a swiftCore witness": {
@@ -550,8 +550,44 @@
           "swiftSections": 3
         },
         "wallUs": {
-          "min": 10195,
-          "median": 10328
+          "min": 10691,
+          "median": 11218
+        }
+      },
+      "lookup › Array element through a subscript bound once": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
+        },
+        "wallUs": {
+          "min": 33,
+          "median": 34
+        }
+      },
+      "lookup › Array element through a subscript bound per read": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 10,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
+        },
+        "wallUs": {
+          "min": 210,
+          "median": 217
         }
       }
     }

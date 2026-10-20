@@ -1,4 +1,5 @@
 import {
+  AccessorKind,
   CallArg,
   CallResult,
   MemberOrigin,
@@ -9,8 +10,10 @@ import {
   enumerateProperties,
   hookTargetOf,
   memberKindsInOtherModules,
+  splitSelector,
   withHookTarget,
 } from "./method.js";
+import type { MemberLookupOptions } from "./swift-type.js";
 import { ClosureSpec, isSwiftClosureValue } from "./closure.js";
 
 // A synthesized `then` would make a facade thenable and silently break `await`; never a member.
@@ -21,27 +24,42 @@ export function isBridgeMember(key: string, reserved: Set<string>): boolean {
   return key.startsWith("$") || reserved.has(key);
 }
 
-const SUBSCRIPT_OPTION_KEYS = new Set(["arity", "labels", "argTypes", "returnType", "typeArguments", "self"]);
+// A subscript picked by selector ("subscript(row:column:)") or lookup options, its indices kept
+// apart from both; the getter and the setter each resolve on first use, by the index count that
+// use supplies unless the lookup names an arity.
+export interface SwiftBoundSubscript {
+  get(...indices: CallArg[]): CallResult;
+  set(...indicesThenValue: CallArg[]): void;
+}
 
-// $subscript(...indices, options?): the options are a selector ("subscript(row:column:)") or the
-// $method object; an index is never a string or a plain object made only of option keys.
-export function splitSubscriptArgs(args: unknown[]): { indices: CallArg[]; selector: string; options: ValueMethodResolveOptions } {
-  const last = args[args.length - 1];
-  if (typeof last === "string") {
-    return { indices: args.slice(0, -1) as CallArg[], selector: last, options: {} };
+export function bindSubscript(
+  selector: string | MemberLookupOptions | undefined,
+  options: MemberLookupOptions,
+  resolve: (options: MemberLookupOptions) => SwiftBoundMethod
+): SwiftBoundSubscript {
+  const lookup = typeof selector === "string" ? splitSelector(selector, options) : { name: "subscript", options: selector ?? options };
+  if (lookup.name !== "subscript") {
+    throw new Error(`${selector} is not a subscript selector`);
   }
-  const isOptions =
-    typeof last === "object" &&
-    last !== null &&
-    !Array.isArray(last) &&
-    !(last instanceof NativePointer) &&
-    !(last instanceof ClosureSpec) &&
-    Object.getPrototypeOf(last) === Object.prototype &&
-    Object.keys(last).length > 0 &&
-    Object.keys(last).every((k) => SUBSCRIPT_OPTION_KEYS.has(k));
-  return isOptions
-    ? { indices: args.slice(0, -1) as CallArg[], selector: "subscript", options: last as ValueMethodResolveOptions }
-    : { indices: args as CallArg[], selector: "subscript", options: {} };
+  const accessor = (kind: AccessorKind, indexCount: number): SwiftBoundMethod =>
+    resolve({ ...lookup.options, arity: lookup.options.arity ?? indexCount, accessor: kind });
+  let getter: SwiftBoundMethod | null = null;
+  let setter: SwiftBoundMethod | null = null;
+  return {
+    get(...indices) {
+      getter ??= accessor("getter", indices.length);
+      return getter.call(...indices) as CallResult;
+    },
+    set(...indicesThenValue) {
+      if (indicesThenValue.length === 0) {
+        throw new Error("set takes the indices and then the element to store");
+      }
+      const value = indicesThenValue[indicesThenValue.length - 1];
+      const indices = indicesThenValue.slice(0, -1);
+      setter ??= accessor("setter", indices.length);
+      setter.call(value, ...indices);
+    },
+  };
 }
 
 export function invokeOptions(args: CallArg[]): ValueMethodResolveOptions {

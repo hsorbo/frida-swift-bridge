@@ -963,18 +963,22 @@ its parent's indices, and a custom collection may leave gaps between them.
 Establishing that a key is valid therefore means walking the indices, and
 even the bounds alone cost a dozen conformance lookups per read, in exactly
 the place callers loop. Rather than guess, the bridge leaves element access
-to `$subscript` and to [iteration](#iterating-a-sequence). `$subscript(...indices)`
-calls the getter and `$setSubscript(value, ...indices)` the setter, each taking
-as a last argument the selector or the `$method` options that pick one
-subscript when the indices alone are ambiguous; a static subscript lives on the
-type facade:
+to `$subscript` and to [iteration](#iterating-a-sequence).
+`$subscript(selector?, options?)` binds one subscript, picked like a `$method`
+by its selector or lookup options when the type declares several, and never by
+its indices: `.get(...indices)` calls the getter and `.set(...indices, value)`
+the setter, so an index may be a string, an object or anything else the
+subscript takes. Each accessor resolves on its first use and is then reused, so
+bind once outside a loop. A static subscript lives on the type facade:
 
 ```js
-grid.$subscript(1, "subscript(_:)");                     // the getter of subscript(_ i: Int)
-grid.$setSubscript(9, 1, "subscript(_:)");               // its setter
-grid.$subscript(1, 0, { labels: ["row", "column"] });    // subscript(row:column:)
-grid.$subscript(3, { labels: ["scaled"], typeArguments: [Int] });   // subscript<T>(scaled:)
-Swift.type("MyApp.Grid").$subscript(1, { labels: ["unit"] });       // static subscript(unit:)
+const cell = grid.$subscript("subscript(_:)");           // subscript(_ i: Int)
+cell.get(1);                                             // its getter
+cell.set(1, 9);                                          // its setter
+grid.$subscript({ labels: ["row", "column"] }).get(1, 0);           // subscript(row:column:)
+grid.$subscript({ labels: ["scaled"], typeArguments: [Int] }).get(3);   // subscript<T>(scaled:)
+grid.$subscript({ labels: ["key"] }).get("subscript(_:)");          // subscript(key: String), a String index
+Swift.type("MyApp.Grid").$subscript({ labels: ["unit"] }).get(1);  // static subscript(unit:)
 ```
 
 `$type.subscript(selector?, options?)` and `$type.typeSubscript(...)` find an
@@ -1725,7 +1729,7 @@ corrupts memory instead of failing cleanly.
   and another mapped at the same address, the old wrapper is stale.
 - **Which integer indices a `Collection` holds.** Only its own `indices` walk
   knows, so a facade answers no integer key: `array[0]` is `undefined`, and an
-  element is read with `$subscript(i)` or by iterating (see
+  element is read with `$subscript().get(i)` or by iterating (see
   [Properties](#properties)).
 
 **Things the bridge refuses**

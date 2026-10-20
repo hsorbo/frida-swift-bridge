@@ -131,7 +131,7 @@ export {
   HookableTarget,
 } from "./runtime/interceptor.js";
 export { isSwiftObject } from "./runtime/method.js";
-export type { FacadeCallable } from "./runtime/facade-members.js";
+export type { FacadeCallable, SwiftBoundSubscript } from "./runtime/facade-members.js";
 export type { SwiftMemberFunction } from "./runtime/qualified-function.js";
 export type { SwiftFunctionMatch, SwiftFunctionSlot, FunctionListingOptions };
 export type { ModuleRegistry, ModuleNamespace, ModuleMember } from "./runtime/module-namespace.js";

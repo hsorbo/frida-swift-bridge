@@ -42,12 +42,12 @@ describe("a hook's arguments by label", () => {
     const Grid = Swift.type("fixture.Grid") as SwiftStruct;
     const g = Grid.init([1, 2, 3, 4]) as SwiftValueObject;
     const args = hookArgs(Grid.$type.subscript("subscript(row:column:)", { accessor: "setter" }), () => {
-      g.$setSubscript(7, 1, 0, "subscript(row:column:)");
+      g.$subscript("subscript(row:column:)").set(1, 0, 7);
     });
     expect(args).toEqual([int64(7), int64(1), int64(0)]);
     expect(args.row).toEqual(int64(1));
     expect(args.column).toEqual(int64(0));
-    expect(g.$subscript(1, 0, "subscript(row:column:)")).toEqual(int64(7));
+    expect(g.$subscript("subscript(row:column:)").get(1, 0)).toEqual(int64(7));
   });
 
   test("a label an Array already owns stays positional", () => {

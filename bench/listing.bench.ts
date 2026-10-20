@@ -23,6 +23,17 @@ describe("lookup", () => {
     measure(() => robot.greet("Alice"));
   });
 
+  bench("Array element through a subscript bound once", ({ measure }) => {
+    const ints = Swift.struct("Swift.Array<Swift.Int>")!.$new([1, 2, 3]);
+    const element = ints.$subscript({ argTypes: ["Swift.Int"] });
+    measure(() => element.get(1));
+  });
+
+  bench("Array element through a subscript bound per read", ({ measure }) => {
+    const ints = Swift.struct("Swift.Array<Swift.Int>")!.$new([1, 2, 3]);
+    measure(() => ints.$subscript({ argTypes: ["Swift.Int"] }).get(1));
+  });
+
   bench("Swift.Interceptor attach and detach on a facade method", ({ measure }) => {
     const robot = Swift.class("fixture.Robot")!.init("R2");
     measure(() => Swift.Interceptor.attach(robot.greet, { onEnter() {} }).detach());

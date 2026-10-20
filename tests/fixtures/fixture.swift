@@ -2293,6 +2293,8 @@ public struct Grid {
     }
     public subscript(read i: Int) -> Int { _read { yield cells[i] } }
     public subscript<T>(echo t: T) -> T { _read { yield t } }
+    public subscript(key key: String) -> Int { key.count }
+    public subscript(at p: Point) -> Int { cells[p.x] }
 }
 public final class Board {
     public var cells: [String]
