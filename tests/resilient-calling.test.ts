@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadResilient } from "./fixtures/load.js";
-import { requireResilientStdlib } from "./swift.js";
+import { requireResilientStdlib , fieldsOf } from "./swift.js";
 
 import { indirect, isResilientValueType, makeSwiftNativeFunction, metadataFor } from "../src/abi.js";
 
@@ -94,7 +94,7 @@ describe("resilient calling convention (local library-evolution fixture)", () =>
     expect(modeIndex(Mode.$case("second"))).toEqual(int64(2));
 
     const flipMode = Swift.NativeFunction(resilientFn(mod, "resilient.flipMode("), Mode, [Mode]);
-    expect(flipMode(Mode.$case("first"))).toBe("second");
+    expect(fieldsOf(flipMode(Mode.$case("first")))).toBe("second");
   });
 });
 
@@ -120,6 +120,6 @@ describe("the stdlib's non-frozen types", () => {
     const rule = Swift.enum("Swift.FloatingPointRoundingRule")!;
     expect(boundary.$call("isRoundingUp", rule.$case("up"))).toBe(true);
     expect(boundary.$call("isRoundingUp", rule.$case("down"))).toBe(false);
-    expect(boundary.$call("roundingDown")).toBe("down");
+    expect(fieldsOf(boundary.$call("roundingDown"))).toBe("down");
   });
 });

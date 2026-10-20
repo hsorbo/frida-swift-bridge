@@ -3,6 +3,9 @@ import { Swift, SwiftClass } from "../src/index.js";
 import { FIXTURE_MODULE } from "../tests/fixtures/load.js";
 import "./counters.js";
 
+const MAKE_LOADABLE_STRUCT = "$s7fixture18makeLoadableStructAA0cD0VyF";
+const SUM_LOADABLE = "$s7fixture11sumLoadableySiAA0C6StructVF";
+
 describe("lookup", () => {
   bench("Swift.type by qualified name", ({ measure }) => {
     measure(() => Swift.type("fixture.Robot"));
@@ -32,6 +35,22 @@ describe("lookup", () => {
   bench("Array element through a subscript bound per read", ({ measure }) => {
     const ints = Swift.struct("Swift.Array<Swift.Int>")!.$new([1, 2, 3]);
     measure(() => ints.$subscript({ argTypes: ["Swift.Int"] }).get(1));
+  });
+
+  bench("free function call returning a struct", ({ measure }) => {
+    const make = Swift.function(Process.getModuleByName(FIXTURE_MODULE), MAKE_LOADABLE_STRUCT);
+    measure(() => make.call());
+  });
+
+  bench("hooked call with a struct argument", async ({ measure }) => {
+    const sum = Swift.function(Process.getModuleByName(FIXTURE_MODULE), SUM_LOADABLE);
+    const arg = Swift.struct("fixture.LoadableStruct")!.$new({ a: 1, b: 2, c: 3, d: 4 });
+    const listener = Swift.Interceptor.attach(sum, { onEnter(args) { void args[0]; } });
+    try {
+      await measure(() => sum.call(arg));
+    } finally {
+      listener.detach();
+    }
   });
 
   bench("Swift.Interceptor attach and detach on a facade method", ({ measure }) => {

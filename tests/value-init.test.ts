@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
-import { requireLinux, requireSymbolTable } from "./swift.js";
+import { requireLinux, requireSymbolTable , fieldsOf } from "./swift.js";
 
 import { Swift, SwiftStruct } from "../src/index.js";
 
@@ -98,15 +98,15 @@ describe("zero-sized values", () => {
   });
 
   test("a zero-sized result decodes as its value, not as Void", () => {
-    expect(Swift.function(loadFixture(), MAKE_ZERO_SIZED).call()).toEqual({});
-    expect(Swift.function(loadFixture(), MAKE_SOLE_CASE).call(1)).toBe("only");
+    expect(fieldsOf(Swift.function(loadFixture(), MAKE_ZERO_SIZED).call())).toEqual({});
+    expect(fieldsOf(Swift.function(loadFixture(), MAKE_SOLE_CASE).call(1))).toBe("only");
     expect(Swift.function(loadFixture(), TRIGGER_GENERIC_CLOSURE_CAPTURING).call()).toBeNull();
   });
 
   test("a hook observes a zero-sized result as its value", () => {
     let seen: unknown = undefined;
     const listener = Swift.Interceptor.attach(loadFixture().getExportByName(MAKE_SOLE_CASE), {
-      onLeave(ret) { seen = ret; },
+      onLeave(ret) { seen = fieldsOf(ret); },
     });
     try {
       Swift.function(loadFixture(), MAKE_SOLE_CASE).call(1);

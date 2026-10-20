@@ -1,4 +1,4 @@
-import { Swift } from "../src/index.js";
+import { Swift, isSwiftObject, type CallResult } from "../src/index.js";
 import { runtimeLibraryName } from "../src/runtime/platform.js";
 
 const LIBSWIFT_CORE_NAME = runtimeLibraryName("swiftCore");
@@ -8,6 +8,18 @@ export const NON_SWIFT_MODULE =
   Process.platform === "darwin" ? "libsystem_kernel.dylib" : Process.platform === "windows" ? "kernel32.dll" : "libc.so.6";
 
 export const ONONE_SUPPORT_MODULE = runtimeLibraryName("swiftSwiftOnoneSupport");
+
+// A value as its fields: what a facade shows while it is live, so a hook snapshots it inside the
+// callback and a test compares a result by value.
+export function fieldsOf(value: unknown): CallResult | undefined {
+  if (Array.isArray(value)) {
+    return value.map((v) => fieldsOf(v) as CallResult);
+  }
+  const result = value as CallResult | undefined;
+  return isSwiftObject(result as CallResult) && (result as { $kind: string }).$kind === "value"
+    ? (result as { $fields: CallResult }).$fields
+    : result;
+}
 
 export function requireDarwin(ctx: { skip: (reason?: string) => never }): void {
   if (Process.platform !== "darwin") {

@@ -5,7 +5,7 @@ import { readVTableChain } from "../abi/class-descriptor.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { asSwiftObject, SwiftObject, SwiftValueObject, SwiftField, RAW } from "./object-facade.js";
 import { ValueInstance } from "../abi/value.js";
-import { readValue, writeValue, embedsManagedReference, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
+import { readValue, writeValue, embedsManagedReference, isFacadeValueType, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
 import { enumerateTupleElements } from "../abi/tuple.js";
 import { findType, withoutTypeArguments } from "../reflection/registry.js";
 import { demangle } from "./demangle.js";
@@ -67,6 +67,7 @@ import {
   existentialRepresentation,
   projectErrorExistential,
   projectOpaqueExistential,
+  OpaqueExistential,
   protocolClassConstraint,
   compareProtocolDescriptors,
   getExistentialTypeMetadata,
@@ -512,12 +513,10 @@ function marshalArg(metadata: Metadata, value: CallArg): NativePointer {
   return buffer;
 }
 
-function existentialPayloadEmbedsManagedReference(metadata: Metadata, container: NativePointer): boolean {
-  const payload =
-    existentialRepresentation(metadata) === "error"
-      ? projectErrorExistential(container)
-      : projectOpaqueExistential(container);
-  return embedsManagedReference(payload.type);
+function projectExistentialPayload(metadata: Metadata, container: NativePointer): OpaqueExistential {
+  return existentialRepresentation(metadata) === "error"
+    ? projectErrorExistential(container)
+    : projectOpaqueExistential(container);
 }
 
 export function zeroSizedStorage(type: Metadata): NativePointer {
@@ -525,7 +524,7 @@ export function zeroSizedStorage(type: Metadata): NativePointer {
 }
 
 function takeElement(type: Metadata, address: NativePointer): NativePointer {
-  if (type.valueWitnesses.isPOD) {
+  if (type.valueWitnesses.isPOD && !isFacadeValueType(type)) {
     return address;
   }
   const own = Memory.alloc(Math.max(type.typeLayout.stride, 1));
@@ -553,7 +552,7 @@ export function decodeReturn(returnType: Metadata | null, returned: NativePointe
   }
   // A tuple decodes to an array, each element consumed by the recursion (not one facade). A pointer
   // into the tuple does not keep its allocation alive, and an adopted element outlives this call,
-  // so a non-POD element is taken into storage of its own first.
+  // so an element that becomes a facade is taken into storage of its own first.
   if (returnType.kind === MetadataKind.Tuple) {
     return [...enumerateTupleElements(returnType)].map((e) => decodeReturn(e.type, takeElement(e.type, ret.add(e.offset))));
   }
@@ -565,10 +564,21 @@ export function decodeReturn(returnType: Metadata | null, returned: NativePointe
   if (isExistential && isClassExistential(returnType)) {
     return asSwiftObject(ClassInstance.adopt(ret.readPointer()));
   }
-  if (returnType.kind === MetadataKind.Existential && existentialPayloadEmbedsManagedReference(returnType, ret)) {
-    return asSwiftObject(ValueInstance.adopt(returnType, ret));
+  // A class payload stays in its container, which keeps the box alive; a value payload is copied
+  // out into a facade of its own type, and the container destroyed.
+  if (returnType.kind === MetadataKind.Existential) {
+    const payload = projectExistentialPayload(returnType, ret);
+    if (payload.type.kind === MetadataKind.Class || payload.type.kind === MetadataKind.ObjCClassWrapper) {
+      return asSwiftObject(ValueInstance.adopt(returnType, ret));
+    }
+    if (isFacadeValueType(payload.type) || embedsManagedReference(payload.type)) {
+      const own = Memory.alloc(Math.max(payload.type.typeLayout.stride, 1));
+      payload.type.valueWitnesses.initializeWithCopy(own, payload.value);
+      returnType.valueWitnesses.destroy(ret);
+      return asSwiftObject(ValueInstance.adopt(payload.type, own));
+    }
   }
-  if (!returnType.valueWitnesses.isPOD && embedsManagedReference(returnType)) {
+  if (isFacadeValueType(returnType) || (!returnType.valueWitnesses.isPOD && embedsManagedReference(returnType))) {
     return asSwiftObject(ValueInstance.adopt(returnType, ret));
   }
   const value = readValue(returnType, ret);

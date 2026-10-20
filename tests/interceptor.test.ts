@@ -3,7 +3,7 @@ import { fixtureExport, loadFixture, loadFixtureSyms } from "./fixtures/load.js"
 
 import { Swift, SwiftClass, SwiftStruct, isSwiftObject, type CallArg, type SwiftValue, type SwiftObject, type CallResult, type SwiftInvocationContext } from "../src/index.js";
 import { makeSwiftNativeFunction } from "../src/runtime/calling-convention.js";
-import { requireSymbolTable } from "./swift.js";
+import { requireSymbolTable , fieldsOf } from "./swift.js";
 
 import { metadataFor, metadataOf, typeOf, type ClassType, ClassInstance, ClassMetadata, readVTableChain, asSwiftObject, ValueInstance } from "../src/abi.js";
 
@@ -30,10 +30,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(addr, Int, [Int, Int])(intValue(20), intValue(22));
@@ -56,10 +56,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(hidden.address, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     const result = dispatcher.vtableMethod(slot.metadataOffset, { returnType: Int, argTypes: [Int] }).call(10);
@@ -76,7 +76,7 @@ describe("Swift.Interceptor.attach", () => {
     let seen: CallResult[] | null = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seen = args;
+        seen = fieldsOf(args) as CallResult[];
       },
     });
     makeSwiftNativeFunction(addr, Int, [Loadable])(structValue(Loadable, [1, 2, 3, 4]));
@@ -91,7 +91,7 @@ describe("Swift.Interceptor.attach", () => {
     let seen: CallResult[] | null = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seen = args;
+        seen = fieldsOf(args) as CallResult[];
       },
     });
     makeSwiftNativeFunction(addr, Int, [Big])(structValue(Big, [1, 2, 3, 4, 5]));
@@ -105,7 +105,7 @@ describe("Swift.Interceptor.attach", () => {
     let seen: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onLeave(ret) {
-        seen = ret;
+        seen = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(addr, Big, [])();
@@ -119,7 +119,7 @@ describe("Swift.Interceptor.attach", () => {
     let seen: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onLeave(ret) {
-        seen = ret;
+        seen = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(addr, Loadable, [])();
@@ -134,10 +134,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(fixtureExport("fixture.makeUnwrapOrZero"), Int, [])();
@@ -194,11 +194,11 @@ describe("Swift.Interceptor.attach", () => {
     const listener = Swift.Interceptor.attach(fixtureExport("fixture.Point.tracked.modify"), {
       onEnter(args) {
         seenArgs = args;
-        selves.push(this.self!);
+        selves.push(fieldsOf(this.self!)!);
       },
       onLeave(ret) {
         resumed = ret;
-        selves.push(this.self!);
+        selves.push(fieldsOf(this.self!)!);
       },
     });
     const result = makeSwiftNativeFunction(fixtureExport("fixture.bumpTracked"), Int, [])() as NativePointer;
@@ -234,10 +234,10 @@ describe("Swift.Interceptor.attach", () => {
       Swift.Interceptor.attach(fixtureExport(`fixture.Reading.${name}.read`), {
         onEnter(args) {
           expect(args).toEqual([]);
-          selves.push(this.self!);
+          selves.push(fieldsOf(this.self!)!);
         },
         onLeave(ret) {
-          yields[name] = ret;
+          yields[name] = fieldsOf(ret)!;
         },
       })
     );
@@ -263,10 +263,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(identity, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(driver, Int, [])();
@@ -283,10 +283,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(identity, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(driver, Loadable, [])();
@@ -303,10 +303,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(first, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(driver, Int, [])();
@@ -344,8 +344,8 @@ describe("Swift.Interceptor.attach", () => {
     let returned: NativePointer | null = null;
     const listener = Swift.Interceptor.attach(identity, {
       onEnter(args) {
-        cell = args[0] as NativePointer;
-        seenValue = asSwiftObject(new ClassInstance(cell)).$field("value").read();
+        cell = (args[0] as SwiftObject).$handle;
+        seenValue = (args[0] as SwiftObject).$field("value").read();
       },
       onLeave(ret) {
         returned = (ret as SwiftObject).$handle;
@@ -365,10 +365,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(identity, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(driver, Int, [])();
@@ -385,10 +385,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(scaleGeneric, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(driver, Int, [])();
@@ -404,10 +404,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     const arg = Memory.alloc(8);
@@ -425,10 +425,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     const driven = makeSwiftNativeFunction(fixtureExport("fixture.driveScaleMixedPair"), Int, [])()!;
@@ -445,10 +445,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(fixtureExport("fixture.driveSpillInts("), Int, [])();
@@ -471,10 +471,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(fixtureExport("fixture.driveSpillDoubles"), Double_, [])();
@@ -501,10 +501,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(fixtureExport("fixture.driveSpillInt128("), Int, [])();
@@ -526,7 +526,7 @@ describe("Swift.Interceptor.attach", () => {
     let seenArgs: CallResult[] | null = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
     });
     const driven = makeSwiftNativeFunction(fixtureExport("fixture.driveSpillWrapped("), Int, [])()!;
@@ -550,10 +550,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     const driven = makeSwiftNativeFunction(fixtureExport("fixture.driveFlipFramedInt128("), Int, [])()!;
@@ -609,10 +609,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(addr, String_, [Greeter])(g);
@@ -630,10 +630,10 @@ describe("Swift.Interceptor.attach", () => {
     let seenRet: CallResult = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
-        seenArgs = args;
+        seenArgs = fieldsOf(args) as CallResult[];
       },
       onLeave(ret) {
-        seenRet = ret;
+        seenRet = fieldsOf(ret)!;
       },
     });
     makeSwiftNativeFunction(addr, String_, [GreeterAged])(v);
@@ -713,7 +713,7 @@ describe("Swift.Interceptor.attach on closure-taking methods", () => {
     let left: CallResult = null;
     const listener = Swift.Interceptor.attach(produce.address, {
       onEnter(args) {
-        seen = { args, count: (this.self as { count: unknown }).count, typeArguments: this.typeArguments! };
+        seen = { args, count: ((this.self as SwiftObject).$fields as { count: unknown }).count, typeArguments: this.typeArguments! };
       },
       onLeave(retval) {
         left = retval;
@@ -740,10 +740,10 @@ describe("Swift.Interceptor.attach on members of generic types", () => {
     let args: CallResult[] = [];
     const listener = Swift.Interceptor.attach(fixtureExport(symbol), {
       onEnter(a) {
-        args = a;
+        args = fieldsOf(a) as CallResult[];
       },
       onLeave(ret) {
-        calls.push({ args, ret });
+        calls.push({ args, ret: fieldsOf(ret)! });
       },
     });
     makeSwiftNativeFunction(fixtureExport("fixture.driveKeyed"), metadataFor("Swift.Int")!, [])();
@@ -788,7 +788,7 @@ describe("Swift.Interceptor.attach on members of generic types", () => {
     let left: CallResult = null;
     const listener = Swift.Interceptor.attach(scaled.address, {
       onEnter(args) {
-        seen = { args, self: this.self!, typeArguments: this.typeArguments! };
+        seen = { args, self: fieldsOf(this.self!)!, typeArguments: this.typeArguments! };
       },
       onLeave(retval) {
         left = retval;
@@ -810,10 +810,10 @@ describe("Swift.Interceptor.attach on members of generic types", () => {
     const seen: CallResult[] = [];
     const listener = Swift.Interceptor.attach(bump.address, {
       onEnter() {
-        seen.push(this.self!, this.typeArguments!);
+        seen.push(fieldsOf(this.self!)!, this.typeArguments!);
       },
       onLeave() {
-        seen.push(this.self!);
+        seen.push(fieldsOf(this.self!)!);
       },
     });
     try {
@@ -872,11 +872,11 @@ function hookDuring(
   let ret: CallResult = null;
   const listener = Swift.Interceptor.attach(target, {
     onEnter(a) {
-      args = [...a];
+      args = fieldsOf([...a]) as CallResult[];
       context?.(this);
     },
     onLeave(r) {
-      ret = r;
+      ret = fieldsOf(r)!;
     },
   });
   let called: unknown;
@@ -979,7 +979,7 @@ describe("Swift.Interceptor.attach on protocol-extension members", () => {
     const source = intSource();
     let seen: { self: CallResult; typeArguments: string[] } | null = null;
     const record = (invocation: SwiftInvocationContext): void => {
-      seen = { self: invocation.self!, typeArguments: invocation.typeArguments! };
+      seen = { self: fieldsOf(invocation.self!)!, typeArguments: invocation.typeArguments! };
     };
     expect(hookDuring(fixtureExport("fixture.ItemSource.echo"), () => source.echo(3), record)).toEqual({ args: [int64(3)], ret: int64(3), called: int64(3) });
     expect(seen).toEqual({ self: { value: int64(5) }, typeArguments: ["fixture.IntSource"] });
@@ -1030,7 +1030,7 @@ describe("Swift.Interceptor.attach on protocol-extension members", () => {
     for (const [nest, name, egg] of [[nightjarNest, "objectEcho", nightjar], [nightjarNest, "nocturnalEcho", nightjar], [rookNest, "rookeryEcho", rook]] as const) {
       const method = nest.$method(name);
       const { args, ret } = hookDuring(method, () => method.call(egg));
-      expect([name, (args[0] as NativePointer).equals(egg.$handle), (ret as SwiftObject).$handle.equals(egg.$handle)]).toEqual([name, true, true]);
+      expect([name, (args[0] as SwiftObject).$handle.equals(egg.$handle), (ret as SwiftObject).$handle.equals(egg.$handle)]).toEqual([name, true, true]);
     }
   });
 
@@ -1054,7 +1054,7 @@ describe("Swift.Interceptor.attach on protocol-extension members", () => {
     const clutch = (Swift.type("fixture.IntClutch") as SwiftStruct).$new({ egg: 5 }) as SwiftObject;
     let self: CallResult = null;
     const { ret } = hookDuring(fixtureExport("fixture.Clutch.firstEgg.getter"), () => clutch.firstEgg, (invocation) => {
-      self = invocation.self!;
+      self = fieldsOf(invocation.self!)!;
     });
     expect([ret, self]).toEqual([int64(5), { egg: int64(5) }]);
   });

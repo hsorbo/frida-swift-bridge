@@ -1,5 +1,6 @@
 import { Metadata, MetadataKind, genericHeaderOffset, readGenericContextHeader } from "../abi/metadata.js";
-import { readValue, embedsManagedReference, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
+import { readValue, embedsManagedReference, isFacadeValueType, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
+import { existentialRepresentation, projectErrorExistential, projectOpaqueExistential } from "../abi/existential.js";
 import { ValueInstance } from "../abi/value.js";
 import { enumerateTupleElements, getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
 import { ClassInstance } from "../abi/heap-object.js";
@@ -1032,9 +1033,7 @@ function materializeArgs(
     if (plan.kind === "inout") {
       return decodeInoutArgument(metadata, address);
     }
-    return metadata.kind === MetadataKind.Class
-      ? readValue(metadata, address)
-      : decodeBorrowedValue(metadata, address);
+    return decodeBorrowedValue(metadata, address);
   };
   const values = (): SwiftHookArgs => nameArgs(slots.map(decode), labels);
   return { values, generics, trailingSelf, selfMetadata, thrownSlot };
@@ -1099,7 +1098,14 @@ function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent:
     const some = projectOptionalPayload(metadata, address);
     return some === null ? null : optionalSome(some.payloadType, decodeBorrowedValue(some.payloadType, some.address, parent));
   }
-  if (!metadata.valueWitnesses.isPOD && embedsManagedReference(metadata)) {
+  if (metadata.kind === MetadataKind.Existential && existentialRepresentation(metadata) !== "class") {
+    const payload =
+      existentialRepresentation(metadata) === "error" ? projectErrorExistential(address) : projectOpaqueExistential(address);
+    if (isFacadeValueType(payload.type) || embedsManagedReference(payload.type)) {
+      return decodeBorrowedValue(payload.type, payload.value, parent);
+    }
+  }
+  if (isFacadeValueType(metadata) || (!metadata.valueWitnesses.isPOD && embedsManagedReference(metadata))) {
     return asSwiftObject(ValueInstance.borrow(metadata, address, parent));
   }
   return readValue(metadata, address);

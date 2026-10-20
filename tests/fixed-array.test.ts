@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
-import { loadSwiftCore } from "./swift.js";
+import { loadSwiftCore , fieldsOf } from "./swift.js";
 
 import { Swift, FixedArrayType, StructType } from "../src/index.js";
 import { Metadata, MetadataKind, metadataFor, readValue, writeValue, typeOf } from "../src/abi.js";
@@ -80,9 +80,9 @@ describe("fixed array metadata", () => {
     expect((storage.type as FixedArrayType).count).toBe(3);
 
     const makeVoxel = Swift.NativeFunction(fixtureExport("fixture.makeVoxel("), Voxel, []);
-    expect(makeVoxel()).toEqual({ cells: { _storage: [int64(1), int64(2), int64(3)] } });
+    expect(fieldsOf(makeVoxel())).toEqual({ cells: { _storage: [int64(1), int64(2), int64(3)] } });
     const scaleVoxel = Swift.NativeFunction(fixtureExport("fixture.scaleVoxel("), Voxel, [Voxel, Swift.type("Swift.Int")!]);
     const voxel = Voxel.$new({ cells: { _storage: [1, 2, 3] } });
-    expect(scaleVoxel(voxel, 10)).toEqual({ cells: { _storage: [int64(10), int64(20), int64(30)] } });
+    expect(fieldsOf(scaleVoxel(voxel, 10))).toEqual({ cells: { _storage: [int64(10), int64(20), int64(30)] } });
   });
 });

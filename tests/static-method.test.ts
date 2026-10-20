@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, SwiftStruct } from "../src/index.js";
+import { fieldsOf } from "./swift.js";
 
 function structType(name: string): SwiftStruct {
   return Swift.struct(name)!;
@@ -15,7 +16,7 @@ describe("Static value-type method invocation", () => {
   });
 
   test("static factory returns the value type", () => {
-    expect(structType("fixture.Accumulator").$call("zero")).toEqual({ total: int64(0) });
+    expect(fieldsOf(structType("fixture.Accumulator").$call("zero"))).toEqual({ total: int64(0) });
   });
 
   test("static method on an enum passes no self", () => {

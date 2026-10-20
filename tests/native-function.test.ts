@@ -3,6 +3,7 @@ import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftObject, SwiftError, SwiftStruct } from "../src/index.js";
 import { ClassInstance } from "../src/abi.js";
+import { fieldsOf } from "./swift.js";
 
 // A jump to target from memory outside any module, so no symbol states its parameter conventions.
 function symbolless(target: NativePointer): NativePointer {
@@ -28,7 +29,7 @@ describe("Swift.NativeFunction (marshalled)", () => {
     const String_ = Swift.type("Swift.String")!;
     const Greeter = Swift.reflect("any fixture.Greeter")!;
     const make = Swift.NativeFunction(fixtureExport("fixture.makeGreeterExistential"), Greeter, []);
-    expect(make()).toEqual({ name: "Ada" });
+    expect(fieldsOf(make())).toEqual({ name: "Ada" });
     const greet = Swift.NativeFunction(fixtureExport("fixture.greetExistential"), String_, [Greeter]);
     expect(greet(Swift.struct("fixture.PoliteGreeter")!.$new({ name: "Bea" }))).toBe("Hello, Bea");
     const loud = Swift.class("fixture.LoudGreeter")!.init("Cy")!;

@@ -16,7 +16,7 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 1,
+          "min": 2,
           "median": 2
         }
       },
@@ -34,8 +34,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 64,
-          "median": 74
+          "min": 53,
+          "median": 59
         }
       },
       "lookup › class init": {
@@ -52,8 +52,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 154,
-          "median": 167
+          "min": 151,
+          "median": 164
         }
       },
       "lookup › object method call": {
@@ -70,8 +70,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 156,
-          "median": 162
+          "min": 132,
+          "median": 140
         }
       },
       "lookup › Swift.Interceptor attach and detach on a facade method": {
@@ -88,8 +88,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 139,
-          "median": 158
+          "min": 127,
+          "median": 135
         }
       },
       "lookup › Swift.demangle of an exported symbol": {
@@ -124,8 +124,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 912,
-          "median": 1118
+          "min": 948,
+          "median": 993
         }
       },
       "listing › instanceMethods on a struct": {
@@ -142,8 +142,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 858,
-          "median": 1008
+          "min": 887,
+          "median": 904
         }
       },
       "listing › instanceMethods on Swift.Int, shallow": {
@@ -160,8 +160,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 4070,
-          "median": 4246
+          "min": 3364,
+          "median": 3586
         }
       },
       "listing › instanceMethods on Swift.Int, deep": {
@@ -178,8 +178,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 34336,
-          "median": 35320
+          "min": 35168,
+          "median": 35422
         }
       },
       "listing › properties on a class": {
@@ -196,8 +196,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 14,
-          "median": 16
+          "min": 15,
+          "median": 17
         }
       },
       "listing › Object.keys on a type facade": {
@@ -214,8 +214,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 812,
-          "median": 822
+          "min": 752,
+          "median": 790
         }
       },
       "listing › Object.keys on an object facade": {
@@ -568,8 +568,8 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 33,
-          "median": 34
+          "min": 43,
+          "median": 49
         }
       },
       "lookup › Array element through a subscript bound per read": {
@@ -586,8 +586,44 @@
           "swiftSections": 0
         },
         "wallUs": {
-          "min": 210,
-          "median": 217
+          "min": 217,
+          "median": 233
+        }
+      },
+      "lookup › free function call returning a struct": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
+        },
+        "wallUs": {
+          "min": 33,
+          "median": 39
+        }
+      },
+      "lookup › hooked call with a struct argument": {
+        "counters": {
+          "symbolTables": 0,
+          "exportTables": 0,
+          "resolverQueries": 0,
+          "moduleLists": 0,
+          "pointerScans": 0,
+          "conformsToProtocol": 0,
+          "demangle": 0,
+          "typeByMangledName": 0,
+          "functionRanges": 0,
+          "swiftSections": 0
+        },
+        "wallUs": {
+          "min": 75,
+          "median": 80
         }
       }
     }

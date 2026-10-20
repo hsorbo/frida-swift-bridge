@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport, compiledType } from "./fixtures/load.js";
 
 import { Swift, TupleType, EnumType, StructType, MetatypeType, SwiftType } from "../src/index.js";
+import { fieldsOf } from "./swift.js";
 
 const GENERIC_IDENTITY = "$s7fixture15genericIdentityyxxlF";
 
@@ -82,7 +83,7 @@ describe("Swift.reflect", () => {
     const module = loadFixture();
     const greeter: SwiftType = Swift.reflect("any fixture.Greeter")!;
     const ada = Swift.struct("fixture.PoliteGreeter")!.$new({ name: "Ada" });
-    expect(Swift.function(module, GENERIC_IDENTITY, { typeArguments: [greeter] }).call(ada)).toEqual({ name: "Ada" });
+    expect(fieldsOf(Swift.function(module, GENERIC_IDENTITY, { typeArguments: [greeter] }).call(ada))).toEqual({ name: "Ada" });
     expect(Swift.function(module, GENERIC_IDENTITY, { typeArguments: [Swift.reflect("Swift.Int?")!] }).call(null)).toBeNull();
   });
 });

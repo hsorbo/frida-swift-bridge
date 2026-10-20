@@ -109,8 +109,10 @@ describe("opaque existential return", () => {
     expect(view.retainCount).toBe(before);
   });
 
-  test("a value payload still reads out as a plain value", () => {
-    const person = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).facade.$call("wrapPerson", "Cy", 9);
-    expect(person).toEqual({ name: "Cy", age: int64(9) });
+  test("a value payload comes out as a facade of its own type", () => {
+    const person = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).facade.$call("wrapPerson", "Cy", 9) as SwiftObject;
+    expect([person.$kind, person.$owned, person.$type.name]).toEqual(["value", true, "fixture.Person"]);
+    expect(person.$fields).toEqual({ name: "Cy", age: int64(9) });
+    expect(person.greet()).toBe("Hi, Cy");
   });
 });

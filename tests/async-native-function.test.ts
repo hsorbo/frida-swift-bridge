@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
 import { Swift, SwiftError } from "../src/index.js";
+import { fieldsOf } from "./swift.js";
 
 const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
 const DIVIDE_ASYNC = "$s7fixture11divideAsyncyS2i_SitYaKF";
@@ -43,12 +44,12 @@ describe("Swift.function on async symbols", () => {
 
   test("decodes a struct return: makePairAsync(3, 4) ⇒ { a: 3, b: 4 }", async () => {
     const makePairAsync = Swift.function(module, MAKE_PAIR_ASYNC);
-    expect(await makePairAsync.call(3, 4)).toEqual({ a: int64(3), b: int64(4) });
+    expect(fieldsOf(await makePairAsync.call(3, 4))).toEqual({ a: int64(3), b: int64(4) });
   });
 
   test("passes and returns a mixed Double/Int struct in FP and GP registers", async () => {
     const scaleMixedPairAsync = Swift.function(module, SCALE_MIXED_PAIR_ASYNC);
-    expect(await scaleMixedPairAsync.call({ d: 1.5, i: 2 }, 3)).toEqual({ d: 4.5, i: int64(6) });
+    expect(fieldsOf(await scaleMixedPairAsync.call({ d: 1.5, i: 2 }, 3))).toEqual({ d: 4.5, i: int64(6) });
   });
 
   test("passes arguments past the registers on the stack: weighIntsAsync(1...8, 9, 1) ⇒ 1987654321", async () => {
@@ -77,7 +78,7 @@ describe("Swift.function on async symbols", () => {
     framed.add(24).writeU64(2);
     framed.add(32).writeU64(4);
     const flipFramedInt128Async = Swift.function(module, FLIP_FRAMED_INT128_ASYNC);
-    expect(await flipFramedInt128Async.call(Framed!.$borrow(framed))).toEqual({
+    expect(fieldsOf(await flipFramedInt128Async.call(Framed!.$borrow(framed)))).toEqual({
       head: int64(4),
       wide: (2n << 64n) | 4n,
       tail: int64(1),

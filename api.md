@@ -1321,11 +1321,14 @@ not writable through its view.
 ## Intercepting
 
 `Swift.Interceptor.attach(target, callbacks)` hooks a Swift function and hands
-your callbacks the **decoded** Swift arguments and return value — structs
-exploded to objects, strings as JS strings, class returns and values holding
-references (an Array, say) as live facades, existentials projected to their
-dynamic value. A closure argument is a borrowed closure view: its two words
-`function` and `context`, with `$captures()` (see [Closures](#closures)).
+your callbacks the **decoded** Swift arguments and return value — scalars and
+strings as JS values, structs, enums and objects as borrowed facades over the
+storage the call is using, existentials projected to their dynamic value. A
+borrowed facade is valid while the callback runs: read `$fields` or call
+`$retained()` to keep what it shows past the hook, since afterwards it points
+at storage the call has given up. A closure argument is a borrowed closure
+view: its two words `function` and `context`, with `$captures()` (see
+[Closures](#closures)).
 
 `target` is an address, a member found through a type's reflection, a bound
 method or a facade's bare-name method (hooked as its member; the receiver it
@@ -1486,9 +1489,10 @@ the initial suspend. See `tests/async-interceptor.test.ts`.
 
 ## Values and marshalling
 
-Swift values cross the boundary as a `SwiftValue`: JS numbers, booleans,
-`NativePointer`s, strings, arrays, and plain objects for aggregates. Integer
-decoding preserves precision on 64-bit hosts:
+A Swift value crosses the boundary by one rule, whatever the type's layout: a
+struct or enum arrives as a value facade, and the stdlib scalars, `String` and
+the raw pointer types arrive as plain values. Integer decoding preserves
+precision on 64-bit hosts:
 
 - `Int` / `Int64` decode as Frida `Int64`.
 - `UInt` / `UInt64` decode as Frida `UInt64`.
@@ -1511,14 +1515,21 @@ to one, each element written as the element type; a variadic parameter
 addInts(20, 22);    // int64(42), not 42
 ```
 
-A struct decodes to an object keyed by field name; a bridged `Array`, `Set`, or
-`Dictionary` decodes to the corresponding JS value. An `InlineArray` is a struct
+A struct or enum result is a value facade: a call result or a thrown error
+owns its storage; a hook argument, result or `this.self` borrows the storage
+the call is using and is valid only while the callback runs. `$fields` reads a
+facade as data (a struct as an object keyed by field name, an enum as its case
+name or `{ case: payload }`), its members answer to their names, and it passes
+back where Swift takes its type. The same goes for a struct inside a tuple, an
+Optional or an existential, projected to its own type. `$fields` and
+`$field(name).read()` themselves read nested aggregates as data, so a field of
+struct type reads as an object, not another facade. An `InlineArray` is a struct
 whose `_storage` field reads and writes as an array of its elements; a
 `Builtin.Borrow` reads as the value it refers to. A closure-typed value decodes
 to a borrowed closure view (see [Closures](#closures)), and a metatype to its
 type's [reflection](#reflection), the object `Swift.reflect` returns. A
-container returned from a call arrives as a value facade;
-`$container()` projects it:
+bridged `Array`, `Set` or `Dictionary` is a facade like any struct;
+`$container()` projects it to the corresponding JS value:
 
 ```js
 const ints = Swift.type("MyApp.Bag").$call("ints");   // a value facade

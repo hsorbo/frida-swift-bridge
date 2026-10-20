@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadResilient } from "./fixtures/load.js";
-import { SWIFTCORE_MODULE } from "./swift.js";
+import { SWIFTCORE_MODULE , fieldsOf } from "./swift.js";
 
 import { Swift, SwiftError, SwiftObject, SwiftStruct, SwiftType } from "../src/index.js";
 
@@ -52,7 +52,7 @@ describe("Swift.function", () => {
 
   test("marshals a struct argument and decodes a struct return", () => {
     expect(Swift.function(module, SUM_LOADABLE).call({ a: 1, b: 2, c: 3, d: 4 })).toEqual(int64(10));
-    expect(Swift.function(module, MAKE_LOADABLE_STRUCT).call()).toEqual({
+    expect(fieldsOf(Swift.function(module, MAKE_LOADABLE_STRUCT).call())).toEqual({
       a: int64(1),
       b: int64(2),
       c: int64(3),

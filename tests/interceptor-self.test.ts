@@ -2,6 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms, loadOptimized, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftObject, type CallResult, SwiftClass, SwiftStruct } from "../src/index.js";
+import { fieldsOf } from "./swift.js";
 
 function robot(name: string): SwiftObject {
   return (Swift.type("fixture.Robot") as SwiftClass).init(name)!;
@@ -33,7 +34,7 @@ describe("Interceptor self", () => {
     let seen: CallResult = null;
     const listener = Swift.Interceptor.attach(acc.$method("peek").address, {
       onEnter() {
-        seen = this.self!;
+        seen = fieldsOf(this.self!)!;
       },
     });
     acc.peek(10);
@@ -46,10 +47,10 @@ describe("Interceptor self", () => {
     const seen: CallResult[] = [];
     const listener = Swift.Interceptor.attach(acc.$method("add").address, {
       onEnter() {
-        seen.push(this.self!);
+        seen.push(fieldsOf(this.self!)!);
       },
       onLeave() {
-        seen.push(this.self!);
+        seen.push(fieldsOf(this.self!)!);
       },
     });
     acc.add(3);
@@ -62,12 +63,12 @@ describe("Interceptor self", () => {
     const seen: CallResult[] = [];
     const setter = Swift.Interceptor.attach(fixtureExport("fixture.Gauge.level.setter"), {
       onLeave() {
-        seen.push(this.self!);
+        seen.push(fieldsOf(this.self!)!);
       },
     });
     const getter = Swift.Interceptor.attach(fixtureExport("fixture.Gauge.level.getter"), {
       onLeave() {
-        seen.push(this.self!);
+        seen.push(fieldsOf(this.self!)!);
       },
     });
     gauge.level = 5;
@@ -82,7 +83,7 @@ describe("Interceptor self", () => {
     let seen: CallResult = null;
     const listener = Swift.Interceptor.attach(big.$method("total").address, {
       onEnter() {
-        seen = this.self!;
+        seen = fieldsOf(this.self!)!;
       },
     });
     expect(big.total()).toEqual(int64(15));
@@ -97,7 +98,7 @@ describe("Interceptor self", () => {
     let seen: { self: CallResult; args: unknown[] } | null = null;
     const listener = Swift.Interceptor.attach(method.address, {
       onEnter(args) {
-        seen = { self: this.self!, args };
+        seen = { self: fieldsOf(this.self!)!, args };
       },
     });
     expect(method.call(3, 7)).toEqual(int64(31));
@@ -111,10 +112,10 @@ describe("Interceptor self", () => {
     const seen: CallResult[] = [];
     const listener = Swift.Interceptor.attach(method.address, {
       onEnter() {
-        seen.push(this.self!);
+        seen.push(fieldsOf(this.self!)!);
       },
       onLeave() {
-        seen.push(this.self!);
+        seen.push(fieldsOf(this.self!)!);
       },
     });
     expect(method.call()).toEqual(int64(21));
@@ -129,7 +130,7 @@ describe("Interceptor self", () => {
     let seen: CallResult = null;
     const listener = Swift.Interceptor.attach(method.address, {
       onLeave() {
-        seen = this.self!;
+        seen = fieldsOf(this.self!)!;
       },
     });
     expect(method.call()).toEqual(int64(8));
@@ -189,7 +190,7 @@ describe("Interceptor self", () => {
       method.address,
       {
         onEnter(args) {
-          seen = { self: this.self!, args };
+          seen = { self: fieldsOf(this.self!)!, args };
         },
       },
       { self: "borrowing" }

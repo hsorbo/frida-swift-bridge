@@ -412,6 +412,15 @@ const managedRefCache = new Map<string, boolean>();
 
 // Mirrors readValue: a reference it can't deep-copy out — a class ref, or the non-POD Opaque leaf
 // (Builtin.BridgeObject) backing Array/Set/Dictionary. Excludes primitives (String) and existentials.
+// A struct or enum crosses the boundary as a facade; the stdlib scalars, String and the raw
+// pointers read as plain values. The same rule on every route, whatever the type's layout.
+export function isFacadeValueType(metadata: Metadata): boolean {
+  if (metadata.kind === MetadataKind.Struct) {
+    return PRIMITIVE_READERS[metadata.description.fullTypeName ?? ""] === undefined;
+  }
+  return metadata.kind === MetadataKind.Enum;
+}
+
 export function embedsManagedReference(metadata: Metadata): boolean {
   if (metadata.kind === MetadataKind.Class) {
     return true;

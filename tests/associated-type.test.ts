@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
-import { requireSymbolTable } from "./swift.js";
+import { requireSymbolTable , fieldsOf } from "./swift.js";
 
 import { Protocol, ProtocolConformance, BoundMethod, ProtocolRequirementKind, readProtocolRequirements, readAssociatedTypeNames, ValueInstance, metadataFor, typeName } from "../src/abi.js";
 
@@ -108,7 +108,7 @@ describe("associated type / associated conformance resolution", () => {
     const source = metadataFor("fixturesyms.IntSource")!;
     const table = Protocol.find("fixturesyms.ItemSource")!.conformanceFor(source)!;
     const value = ValueInstance.fromJS(source, { value: 5 });
-    expect(table.method(value.handle, "merged").call({ value: 7 })).toEqual({ value: int64(12) });
+    expect(fieldsOf(table.method(value.handle, "merged").call({ value: 7 }))).toEqual({ value: int64(12) });
   });
 
   test("a requirement passes and returns an associated type indirectly for a loadable conformer", (ctx) => {

@@ -1,5 +1,5 @@
 import { test, expect, describe } from "@frida/injest/agent";
-import { requireDarwin, requireSwift } from "./swift.js";
+import { requireDarwin, requireSwift , fieldsOf } from "./swift.js";
 import { loadFixture } from "./fixtures/load.js";
 
 import { AsyncFunctionPointer, driveAsyncCall, metadataFor, typeOf, ValueInstance, type ClassType } from "../src/abi.js";
@@ -219,7 +219,7 @@ describe("async interceptor", () => {
     let result: unknown;
     const listener = Swift.Interceptor.attachAsync(module.getExportByName(FLIP_FRAMED_INT128_ASYNC), {
       onComplete(retval) {
-        result = retval;
+        result = fieldsOf(retval);
       },
     });
     try {

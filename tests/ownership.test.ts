@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
-import { Swift, SwiftClass } from "../src/index.js";
+import { Swift, SwiftClass, type SwiftClassObject } from "../src/index.js";
 import { ClassType, ClassInstance, SwiftObject, metadataFor, typeOf } from "../src/abi.js";
 
 function robotType(): SwiftClass {
@@ -92,7 +92,7 @@ describe("ownership", () => {
     let kept: SwiftObject | null = null;
     const listener = Swift.Interceptor.attach(r.merged, {
       onEnter(args) {
-        kept = Swift.borrowObject(args[0] as NativePointer).$retained();
+        kept = (args[0] as SwiftClassObject).$retained();
       },
     });
     try {
