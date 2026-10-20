@@ -1,9 +1,17 @@
 {
   "name": "frida-swift-bridge2",
   "version": "1.0.0",
-  "description": "A TypeScript library for Frida's GumJS runtime.",
-  "license": "ISC",
-  "author": "",
+  "description": "Swift runtime interop for Frida: look up types, call methods, read values and intercept Swift functions through the metadata a process carries",
+  "license": "MIT",
+  "author": "Håvard Sørbø",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hsorbo/frida-swift-bridge.git"
+  },
+  "homepage": "https://github.com/hsorbo/frida-swift-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/hsorbo/frida-swift-bridge/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -18,9 +26,11 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "api.md"
   ],
   "scripts": {
+    "prebuild": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc",
     "watch": "tsc --watch",
     "pretest": "sh tests/fixtures/build.sh",
@@ -39,16 +49,15 @@
     "bench:update": "injest --bench --baseline bench/baseline.json --update",
     "prebench:cold": "ARCH=arm64e sh tests/fixtures/build.sh",
     "bench:cold": "injest --bench --baseline bench/baseline.json --target macos-arm64e cold",
-    "prepublishOnly": "npm run build"
-  },
-  "dependencies": {
-    "frida": "^17.24.3",
-    "typescript": "^6.0.3"
+    "prepublishOnly": "npm run build && node tools/pack-check.mjs",
+    "pack:check": "node tools/pack-check.mjs"
   },
   "devDependencies": {
     "@frida/injest": "^0.2.1",
     "@types/frida-gum": "^19.12.0",
-    "@types/node": "^26.1.0"
+    "@types/node": "^26.1.0",
+    "frida": "^17.24.3",
+    "typescript": "^6.0.3"
   },
   "allowScripts": {
     "frida@17.24.3": true
