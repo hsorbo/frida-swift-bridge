@@ -206,8 +206,11 @@ export class SwiftType {
     return null;
   }
 
+  // A structural type (tuple, function, existential, metatype) belongs to no module.
   get moduleName(): string | null {
-    return descriptorOf(this).moduleName;
+    return backingDescriptorOf(this) === null && !hasDescriptor(metadataOf(this).kind)
+      ? null
+      : descriptorOf(this).moduleName;
   }
 
   get layout(): TypeLayout {
@@ -215,7 +218,7 @@ export class SwiftType {
   }
 
   toJSON(): { kind: string; name: string; module: string | null } {
-    return { kind: this.kind, name: this.name, module: this.jsonModule() };
+    return { kind: this.kind, name: this.name, module: this.moduleName };
   }
 
   get kind(): TypeKind {
@@ -230,21 +233,17 @@ export class SwiftType {
         return typeKindName(metadataOf(this));
     }
   }
+}
 
-  private jsonModule(): string | null {
-    if (backingDescriptorOf(this) === null) {
-      const kind = metadataOf(this).kind;
-      if (
-        kind !== MetadataKind.Class &&
-        kind !== MetadataKind.Struct &&
-        kind !== MetadataKind.Enum &&
-        kind !== MetadataKind.Optional
-      ) {
-        return null;
-      }
-    }
-    return this.moduleName;
-  }
+function hasDescriptor(kind: MetadataKind): boolean {
+  return (
+    kind === MetadataKind.Class ||
+    kind === MetadataKind.Struct ||
+    kind === MetadataKind.Enum ||
+    kind === MetadataKind.Optional ||
+    kind === MetadataKind.ForeignClass ||
+    kind === MetadataKind.ForeignReferenceType
+  );
 }
 
 // A class, struct or enum: the types with Swift members, and the ones that have a facade.

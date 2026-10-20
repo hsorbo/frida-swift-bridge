@@ -36,6 +36,16 @@ describe("Swift.reflect", () => {
     expect(any.name).toBe("Any");
   });
 
+  test("a structural type belongs to no module, in moduleName as in toJSON", () => {
+    for (const structural of [Swift.reflect("(Swift.Int, Swift.String)")!, Swift.reflect("any fixture.Greeter")!, Swift.reflect("Any")!]) {
+      expect(structural.moduleName).toBeNull();
+      expect(structural.toJSON().module).toBeNull();
+    }
+    const optional = Swift.reflect("Swift.Int?")!;
+    expect(optional.moduleName).toBe("Swift");
+    expect(optional.toJSON().module).toBe("Swift");
+  });
+
   test("a nominal name meets Swift.type's reflection and a protocol name its existential", () => {
     expect(Swift.reflect("fixture.Robot")).toBe(Swift.type("fixture.Robot")!.$type);
     expect(Swift.reflect("fixture.Keyed")).toBe(Swift.type("fixture.Keyed")!.$type);

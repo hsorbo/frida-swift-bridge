@@ -81,8 +81,8 @@ function lazyNamespace<T>(
     ownKeys() {
       return [...new Set(keys())];
     },
-    getOwnPropertyDescriptor() {
-      return ENUMERABLE;
+    getOwnPropertyDescriptor(_, key) {
+      return typeof key === "string" && !POISON.has(key) && find(key) !== null ? ENUMERABLE : undefined;
     },
   });
 }

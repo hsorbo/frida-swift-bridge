@@ -53,7 +53,11 @@ describe("Swift.modules", () => {
   test("an unknown member reads as undefined", () => {
     expect(Swift.modules.fixture.NoSuchTypeQX).toBeUndefined();
     expect("NoSuchTypeQX" in Swift.modules.fixture).toBeFalsy();
+    expect(Object.hasOwn(Swift.modules.fixture, "NoSuchTypeQX")).toBe(false);
+    expect(Object.getOwnPropertyDescriptor(Swift.modules.fixture, "NoSuchTypeQX")).toBeUndefined();
     expect("Robot" in Swift.modules.fixture).toBeTruthy();
+    expect(Object.hasOwn(Swift.modules.fixture, "Robot")).toBe(true);
+    expect(Object.hasOwn(Swift.modules, "noSuchModuleQX")).toBe(false);
   });
 
   test("lists the module's top-level types and protocols only", () => {
