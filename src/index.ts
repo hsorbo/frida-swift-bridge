@@ -94,6 +94,7 @@ export {
   MemberLookupOptions,
   SlotSignature,
   SwiftMember,
+  SwiftMemberRecord,
   SwiftInstanceMethod,
   NativeFunctionType,
   MarshalledFunctionOptions,

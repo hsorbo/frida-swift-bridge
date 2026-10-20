@@ -7,7 +7,7 @@ import { conformancesOf, conformsToProtocol, witnessTableOf } from "../abi/proto
 import { ProtocolRequirement, ProtocolRequirementKind, readProtocolRequirements } from "../abi/protocol-descriptor.js";
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { WitnessTable } from "../abi/witness-table.js";
-import { parseTypeExpr, type SwiftFunctionSignature } from "./type-expr.js";
+import { parseTypeExpr, type SubscriptAccessor, type SwiftFunctionSignature } from "./type-expr.js";
 import { SwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
@@ -26,8 +26,10 @@ import {
   PropertyInfo,
   callMarshalled,
   checkedReceiver,
-  enumerateMethods,
+  enumerateMemberCandidates,
   enumerateProperties,
+  memberOrigin,
+  MethodKind,
   lowerResolveOptions,
   splitSelector,
   initializerLookup,
@@ -77,6 +79,14 @@ export interface SwiftMember {
   readonly isGeneric: boolean;
   readonly origin: MemberOrigin;
   readonly signature: SwiftMemberSignature | null;
+}
+
+// A member as a listing describes it, one record per overload: its signature carries the labels and
+// type names that select it, and it hooks as a found member does. A slot no symbol names has none.
+export interface SwiftMemberRecord extends SwiftMember {
+  readonly kind: MethodKind;
+  readonly accessor: SubscriptAccessor | null;
+  readonly isStatic: boolean;
 }
 
 // The signature text of a slot lookup: `(x: Swift.Int) throws -> Swift.String` as a listing prints
@@ -252,6 +262,46 @@ export let slotCall: (type: NominalType, selector: string, signature: SlotSignat
 export abstract class NominalType extends SwiftType {
   abstract get facade(): SwiftTypeFacade;
 
+  members({ inherited = true, deep = false }: MethodQuery = {}): SwiftMemberRecord[] {
+    const named = enumerateMemberCandidates(this.name, deep ? "allLoadedModules" : "definingModule", inherited ? "withSuperclasses" : "thisType");
+    const namedAddresses = new Set(named.map((c) => c.address.strip().toString()));
+    const slots = this.unnamedSlots(inherited, deep).filter((s) => !namedAddresses.has(s.address.toString()));
+    return [
+      ...named
+        .filter((c) => c.kind !== "init" || c.name === this.initializerSymbolName())
+        .map((c) => {
+          const address = c.address.strip();
+          let origin: MemberOrigin | null = null;
+          return withHookTarget(
+            {
+              address,
+              // A class's initializer symbol is its allocating entry; the selector names the initializer.
+              selector: c.kind === "init" ? c.signature.selector.replace(/^__allocating_init/, "init") : c.signature.selector,
+              isGeneric: c.signature.genericParams.length > 0,
+              get origin(): MemberOrigin {
+                return (origin ??= memberOrigin(address, c.owner));
+              },
+              signature: memberSignature(c.signature),
+              kind: c.kind,
+              accessor: c.accessor,
+              isStatic: c.isStatic,
+            },
+            { address, signature: c.signature, witnessDispatched: false }
+          );
+        }),
+      ...slots.map((s) => ({
+        address: s.address,
+        selector: s.selector,
+        isGeneric: false,
+        origin: s.origin,
+        signature: null,
+        kind: "method" as const,
+        accessor: null,
+        isStatic: s.isStatic,
+      })),
+    ];
+  }
+
   typeMethods(options: MethodQuery = {}): string[] {
     return this.selectors(true, options);
   }
@@ -357,14 +407,10 @@ export abstract class NominalType extends SwiftType {
     );
   }
 
-  private selectors(isStatic: boolean, { inherited = true, deep = false }: MethodQuery): string[] {
-    const named = enumerateMethods(this.name, deep ? "allLoadedModules" : "definingModule", inherited ? "withSuperclasses" : "thisType");
-    const namedAddresses = new Set(named.map((m) => m.address.strip().toString()));
-    const unnamedSlots = this.unnamedSlots(inherited, deep).filter((s) => s.isStatic === isStatic && !namedAddresses.has(s.address.toString()));
-    return [
-      ...named.filter((m) => m.kind === "method" && m.isStatic === isStatic).map((m) => m.selector),
-      ...unnamedSlots.map((s) => s.selector),
-    ];
+  private selectors(isStatic: boolean, options: MethodQuery): string[] {
+    return this.members(options)
+      .filter((m) => m.kind === "method" && m.isStatic === isStatic)
+      .map((m) => m.selector);
   }
 
   private unnamedSlots(inherited: boolean, deep: boolean): UnnamedSlot[] {

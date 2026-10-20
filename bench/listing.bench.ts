@@ -77,6 +77,11 @@ describe("listing", () => {
     measure(() => Accumulator.instanceMethods());
   });
 
+  bench("members on a struct", ({ measure }) => {
+    const Accumulator = Swift.struct("fixture.Accumulator")!.$type;
+    measure(() => Accumulator.members());
+  });
+
   bench("instanceMethods on Swift.Int, shallow", ({ measure }) => {
     const Int = Swift.struct("Swift.Int")!.$type;
     measure(() => Int.instanceMethods());

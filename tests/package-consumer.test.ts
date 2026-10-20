@@ -15,6 +15,7 @@ import Swift, {
   SwiftStruct,
   SwiftEnum,
   SwiftMember,
+  SwiftMemberRecord,
   SwiftInstanceMethod,
   SwiftValue,
   SwiftObject,
@@ -59,7 +60,7 @@ import {
 
 type _rootTypesAreImportable = [
   SwiftCoreApi, SwiftType, NominalType, StructType, EnumType, ClassType, TupleType,
-  SwiftTypeFacade, SwiftClass, SwiftValueType, SwiftStruct, SwiftEnum, SwiftMember, SwiftInstanceMethod,
+  SwiftTypeFacade, SwiftClass, SwiftValueType, SwiftStruct, SwiftEnum, SwiftMember, SwiftMemberRecord, SwiftInstanceMethod,
   Protocol, ProtocolComposition, SwiftValue, SwiftObject, SwiftClassObject,
   SwiftValueObject, SwiftField, SwiftBoundMethod, MethodResolveOptions,
   ValueMethodResolveOptions, CallArg, CallResult, ClosureSpec,
@@ -134,6 +135,10 @@ function reflectionIsStrictAtCompileTime(cls: SwiftClass, st: SwiftStruct, o: Sw
   const valueInfo: StructType | EnumType = v.$type;
   const name: string = t.name;
   const selectors: string[] = classInfo.instanceMethods();
+  const records: SwiftMemberRecord[] = classInfo.members({ deep: true });
+  const kind: "method" | "init" | "subscript" = records[0].kind;
+  const hookable: Parameters<typeof Swift.Interceptor.attach>[0] = records[0];
+  void [kind, hookable];
   const found: SwiftInstanceMethod = classInfo.instanceMethod("greet");
   const typeMethod: SwiftMember = structInfo.typeMethod("make");
   const initializer: SwiftMember = classInfo.initializer("init(name:)");

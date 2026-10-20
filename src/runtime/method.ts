@@ -61,6 +61,7 @@ import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-dis
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName, objcClassConformsToProtocol } from "./objc.js";
 import { getSwiftCoreApi } from "./api.js";
+import type { SubscriptAccessor } from "./type-expr.js";
 import { readString, createString } from "../abi/string.js";
 import {
   isClassExistential,
@@ -764,7 +765,7 @@ function describeOverloads(candidates: MethodCandidate[]): string {
 }
 
 // A type imported from C declares no Swift members: every one is an extension member.
-function memberOrigin(address: NativePointer, owner: MemberOwner): MemberOrigin {
+export function memberOrigin(address: NativePointer, owner: MemberOwner): MemberOrigin {
   const module = imageName(address);
   const declaring = owner.kind === "swift" ? imageName(owner.descriptor.handle) : null;
   return { kind: module === declaring ? "own" : "extension", type: owner.fullName, module };
@@ -1262,33 +1263,43 @@ function memberSource(modules: ModuleScope): MemberSource {
   return modules === "definingModule" ? definingModuleMembers : allLoadedModuleMembers;
 }
 
-export function enumerateMethods(
+// A named member a listing shows, once per overload, with its parsed signature; memberOrigin(address,
+// owner) says where it comes from, on demand since the image lookup costs more than the listing.
+export interface MemberCandidate {
+  name: string;
+  kind: MethodKind;
+  accessor: SubscriptAccessor | null;
+  isStatic: boolean;
+  address: NativePointer;
+  mangled: string;
+  signature: SwiftFunctionSignature;
+  owner: MemberOwner;
+}
+
+export function enumerateMemberCandidates(
   typeName: string,
   modules: ModuleScope = "allLoadedModules",
   types: TypeScope = "withSuperclasses"
-): MethodInfo[] {
+): MemberCandidate[] {
   const members = memberSource(modules);
   const seen = new Set<string>();
-  const methods: MethodInfo[] = [];
+  const found: MemberCandidate[] = [];
   const owner = resolveMemberOwner(typeName);
   const add = (c: MethodCandidate): void => {
-    const key = `${c.isStatic ? "s" : "i"}:${c.signature.selector}:${c.signature.argTypeNames.join(",")}->${c.signature.returnTypeName}`;
+    const key = `${c.isStatic ? "s" : "i"}:${c.signature.accessor ?? ""}:${c.signature.selector}:${c.signature.argTypeNames.join(",")}->${c.signature.returnTypeName}`;
     if (seen.has(key)) {
       return;
     }
     seen.add(key);
-    methods.push({
+    found.push({
       name: c.name,
       kind: c.signature.accessor === undefined ? methodKind(c.name) : "subscript",
+      accessor: c.signature.accessor ?? null,
       isStatic: c.isStatic,
       address: c.address,
-      argTypeNames: c.signature.argTypeNames,
-      argLabels: c.signature.argLabels,
-      returnTypeName: c.signature.returnTypeName,
-      selector: c.signature.selector,
-      genericParams: c.signature.genericParams,
-      throws: c.signature.throws,
       mangled: c.mangled,
+      signature: c.signature,
+      owner,
     });
   };
   for (const level of types === "withSuperclasses" ? classChain(owner) : [owner]) {
@@ -1300,7 +1311,27 @@ export function enumerateMethods(
       conformance.members.methods.filter(isConformanceMethod).forEach(add);
     }
   }
-  return methods;
+  return found;
+}
+
+export function enumerateMethods(
+  typeName: string,
+  modules: ModuleScope = "allLoadedModules",
+  types: TypeScope = "withSuperclasses"
+): MethodInfo[] {
+  return enumerateMemberCandidates(typeName, modules, types).map((c) => ({
+    name: c.name,
+    kind: c.kind,
+    isStatic: c.isStatic,
+    address: c.address,
+    argTypeNames: c.signature.argTypeNames,
+    argLabels: c.signature.argLabels,
+    returnTypeName: c.signature.returnTypeName,
+    selector: c.signature.selector,
+    genericParams: c.signature.genericParams,
+    throws: c.signature.throws,
+    mangled: c.mangled,
+  }));
 }
 
 export interface PropertyInfo {

@@ -400,7 +400,17 @@ A class, struct or enum is a `NominalType` (`ClassType`, `StructType`,
 - `info.facade`: the type facade.
 - `info.instanceMethods(query?)` / `info.typeMethods(query?)`: the selectors
   of its instance methods and of its type methods, e.g. `["greet(_:)", …]`.
-  `query` is `{ inherited?, deep? }`.
+  `query` is `{ inherited?, deep? }`. An overloaded selector is listed once per
+  overload.
+- `info.members(query?)`: the same members as records, one per overload, with
+  initializers and subscript accessors: `{ selector, kind, accessor, isStatic,
+  address, origin, isGeneric, signature }`. `kind` is `"method"`, `"init"` or
+  `"subscript"`; `accessor` is a subscript's `"getter"` or `"setter"`, else
+  `null`. The `signature` carries what selects that overload, so
+  `info.instanceMethod(m.selector, { argTypes: m.signature.argTypeNames,
+  returnType: m.signature.returnTypeName })` finds it again, and a record is a
+  hook target like a found member. A slot no symbol names (below) is a record
+  whose `signature` is `null`.
 - `info.instanceMethod(name, options?)`, `info.typeMethod(name, options?)`,
   `info.initializer(options?)`: find one member of that kind by name, without
   an instance or type arguments. See [Calling methods](#calling-methods). A

@@ -248,6 +248,7 @@ export {
   MethodQuery,
   MemberLookupOptions,
   SwiftMember,
+  SwiftMemberRecord,
   SwiftInstanceMethod,
   TupleTypeElement,
   ParameterConvention,
