@@ -52,16 +52,16 @@ describe("generic global-actor async calling", () => {
   });
 });
 
-// Known limitation: @MainActor hops to the main dispatch queue, which only the target's main thread can
-// drain. The facade uses the non-blocking callAsync, so this resolves in a live app whose main thread pumps
-// its runloop — but not in the headless test host (main thread never enters a runloop), so it is skipped.
-// Un-skip on a device / live-app run. Blocking driveAsyncCall can never support @MainActor.
-describe("@MainActor async calling (needs a pumping main runloop)", () => {
+// @MainActor hops to the main dispatch queue, which only the target's main thread can drain. The
+// facade uses the non-blocking callAsync, so this resolves where the main thread drains that queue:
+// a live app, or the spawn host, whose main thread sits in dispatch_main. The shared test process
+// never drains it, so the test runs isolated. Blocking driveAsyncCall can never support @MainActor.
+describe("@MainActor async calling (needs a main thread draining the main queue)", () => {
   beforeEach(() => {
     loadFixture();
   });
 
-  test.skip("resolves a @MainActor method via the facade: mainMethodAsync(1) ⇒ 11", async () => {
+  test.isolated("resolves a @MainActor method via the facade: mainMethodAsync(1) ⇒ 11", async () => {
     const h = (typeOf(metadataFor("fixture.MainHolder")!) as ClassType).facade.init(10)!;
     expect(await h.mainMethodAsync(1)).toEqual(int64(11));
   });

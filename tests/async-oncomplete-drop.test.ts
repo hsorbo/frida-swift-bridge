@@ -12,8 +12,10 @@ function afp(module: Module, symbol: string): AsyncFunctionPointer {
   return new AsyncFunctionPointer(module.getExportByName(symbol).strip());
 }
 
+// A stress run of the completion hook in a process of its own: a dropped completion is a race the
+// shared process would make harder to blame.
 describe("async onComplete completion drop (regression capture)", () => {
-  test.skip("onComplete fires for every async completion (no dropped hooks)", () => {
+  test.isolated("onComplete fires for every async completion (no dropped hooks)", () => {
     requireSwift();
     const module = loadFixture();
     const target = module.getExportByName(DIVIDE_ASYNC);
@@ -39,5 +41,5 @@ describe("async onComplete completion drop (regression capture)", () => {
         throw new Error(`onComplete was dropped on call ${i} of ${CALLS} (cross-core hook race)`);
       }
     }
-  });
+  }, { timeout: 120000 });
 });
