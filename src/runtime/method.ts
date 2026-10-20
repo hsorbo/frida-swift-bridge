@@ -495,6 +495,10 @@ function projectOptionalPayload(
   return { payloadType, address: projectBox(ret.readPointer()) };
 }
 
+export function zeroSizedStorage(type: Metadata): NativePointer {
+  return Memory.alloc(type.typeLayout.stride);
+}
+
 function takeElement(type: Metadata, address: NativePointer): NativePointer {
   if (type.valueWitnesses.isPOD) {
     return address;
@@ -506,10 +510,11 @@ function takeElement(type: Metadata, address: NativePointer): NativePointer {
 
 // Returns are +1: adopt a class; destroy a read non-POD temp; POD owns nothing. A value embedding a
 // managed reference would dangle on that destroy, so hand it back as an owned ValueInstance instead.
-export function decodeReturn(returnType: Metadata | null, ret: NativePointer | null): CallResult {
-  if (returnType === null || ret === null) {
+export function decodeReturn(returnType: Metadata | null, returned: NativePointer | null): CallResult {
+  if (returnType === null) {
     return null;
   }
+  const ret = returned ?? zeroSizedStorage(returnType);
   if (returnType.kind === MetadataKind.Class) {
     return asSwiftObject(ClassInstance.adopt(ret.readPointer()));
   }
@@ -1726,14 +1731,15 @@ export class BoundMethod {
     if (!this.adoptResult) {
       return decodeReturn(returnType, ret);
     }
-    if (returnType === null || ret === null) {
+    if (returnType === null) {
       throw new Error(`${this.selector} returned no value`);
     }
+    const value = ret ?? zeroSizedStorage(returnType);
     if (returnType.kind === MetadataKind.Optional) {
-      const some = projectOptionalPayload(returnType, ret);
+      const some = projectOptionalPayload(returnType, value);
       return some === null ? null : asSwiftObject(ValueInstance.adopt(some.payloadType, some.address));
     }
-    return asSwiftObject(ValueInstance.adopt(returnType, ret));
+    return asSwiftObject(ValueInstance.adopt(returnType, value));
   }
 
   private invokeAsync(marshalled: PlannedArgs, self: NativePointer | null): Promise<CallResult> {

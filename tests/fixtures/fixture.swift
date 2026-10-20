@@ -2377,3 +2377,11 @@ public func storeNestedClosureCapturing(_ n: Int) {
 }
 public func storeGenericOptionalClosureCapturing<T>(_ value: T, _ make: ((T) -> T)?) { genericCapturingBody = { _ = make?(value) } }
 public func triggerGenericOptionalClosureCapturing() { let n = 8; storeGenericOptionalClosureCapturing(n, { $0 + n }) }
+public struct ZeroSized {
+    public init() {}
+    public init?(_ ok: Bool) { if !ok { return nil } }
+}
+public enum SoleCase { case only; public init() { self = .only } }
+public func makeZeroSized() -> ZeroSized { ZeroSized() }
+public var soleCaseRequests = 0
+public func makeSoleCase(_ n: Int) -> SoleCase { soleCaseRequests += n; return .only }

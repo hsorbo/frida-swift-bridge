@@ -4,6 +4,10 @@ import { requireLinux, requireSymbolTable } from "./swift.js";
 
 import { Swift, SwiftStruct } from "../src/index.js";
 
+const MAKE_ZERO_SIZED = "$s7fixture13makeZeroSizedAA0cD0VyF";
+const MAKE_SOLE_CASE = "$s7fixture12makeSoleCaseyAA0cD0OSiF";
+const TRIGGER_GENERIC_CLOSURE_CAPTURING = "$s7fixture30triggerGenericClosureCapturingyyF";
+
 function structType(name: string): SwiftStruct {
   return Swift.struct(name)!;
 }
@@ -73,5 +77,42 @@ describe("value-type initializers (without symtab)", () => {
     for (const name of ["fixture.Point", "fixture.Person", "fixture.BigStruct"]) {
       expect(() => structType(name).$initializer()).toThrow(/no method init/);
     }
+  });
+});
+
+describe("zero-sized values", () => {
+  beforeEach(() => { loadFixture(); });
+
+  test("init of a zero-sized struct returns an owned value facade", () => {
+    const v = structType("fixture.ZeroSized").init()!;
+    expect(v.$owned).toBe(true);
+    expect(v.$type.name).toBe("fixture.ZeroSized");
+    expect(v.$fields).toEqual({});
+    v.$dispose();
+  });
+
+  test("a failable init of a zero-sized struct tells its value from nil", () => {
+    const make = structType("fixture.ZeroSized").$initializer("init(_:)");
+    expect(make.call(true)!.$fields).toEqual({});
+    expect(make.call(false)).toBeNull();
+  });
+
+  test("a zero-sized result decodes as its value, not as Void", () => {
+    expect(Swift.function(loadFixture(), MAKE_ZERO_SIZED).call()).toEqual({});
+    expect(Swift.function(loadFixture(), MAKE_SOLE_CASE).call(1)).toBe("only");
+    expect(Swift.function(loadFixture(), TRIGGER_GENERIC_CLOSURE_CAPTURING).call()).toBeNull();
+  });
+
+  test("a hook observes a zero-sized result as its value", () => {
+    let seen: unknown = undefined;
+    const listener = Swift.Interceptor.attach(loadFixture().getExportByName(MAKE_SOLE_CASE), {
+      onLeave(ret) { seen = ret; },
+    });
+    try {
+      Swift.function(loadFixture(), MAKE_SOLE_CASE).call(1);
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toBe("only");
   });
 });

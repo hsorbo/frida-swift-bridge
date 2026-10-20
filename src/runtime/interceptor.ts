@@ -58,6 +58,7 @@ import {
   resolveProtocolSelfType,
   SwiftBoundMethod,
   SwiftFunction,
+  zeroSizedStorage,
 } from "./method.js";
 import { typeOf, type SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
@@ -1143,7 +1144,7 @@ function materializeReturn(
 
   const returnType = ret.metadata;
   if (returnType.valueWitnesses.size === 0) {
-    return null;
+    return decodeBorrowedValue(returnType, zeroSizedStorage(returnType));
   }
   if (returnType.kind === MetadataKind.Class) {
     return asSwiftObject(new ClassInstance(gpResult(context, 0)));
