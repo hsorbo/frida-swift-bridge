@@ -1077,7 +1077,7 @@ function materializeThrown(
   return decodeBorrowedValue(metadata, scratch);
 }
 
-type BorrowedValue = SwiftValue | SwiftObject | { some: BorrowedValue };
+type BorrowedValue = SwiftValue | SwiftObject | BorrowedValue[] | { some: BorrowedValue };
 
 // Mirrors method.ts decodeReturn, but borrows: an interceptor only observes the caller's +1, so it
 // neither adopts nor destroys. A non-POD value embedding a managed reference can't be deep-copied

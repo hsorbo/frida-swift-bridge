@@ -103,6 +103,7 @@ describe("Swift object intrinsics", () => {
     expect(o.$type.instanceMethods()).not.toContain("make(name:)");
     expect(o.$type.typeMethods()).toContain("make(name:)");
     expect(o.$type.typeMethods()).not.toContain("greet(_:)");
+    // @ts-expect-error an undeclared $ name is a compile error; the runtime answer is checked here
     expect(o.$methods).toBeUndefined();
   });
 
@@ -232,8 +233,10 @@ describe("Swift object bridge namespace", () => {
 
   test("any $-prefixed name is the bridge's: unknown ones read as undefined and reject assignment", () => {
     const o = robot("R2");
+    // @ts-expect-error an undeclared $ name is a compile error; the runtime answer is checked here
     expect(o.$noSuchQX).toBeUndefined();
     expect("$noSuchQX" in o).toBe(false);
+    // @ts-expect-error same
     expect(() => { o.$noSuchQX = 1; }).toThrow("no property $noSuchQX on fixture.Robot");
   });
 
@@ -244,6 +247,7 @@ describe("Swift object bridge namespace", () => {
   test("a property wrapper's projected value is read through $get", () => {
     const o = (Swift.type("fixture.Projecting") as SwiftClass).init();
     expect(o.n).toEqual(int64(3));
+    // @ts-expect-error a projected value's $ name is not a declared control; $get reads it
     expect(o.$n).toBeUndefined();
     expect(o.$get("$n")).toEqual(int64(6));
   });

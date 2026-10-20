@@ -14,7 +14,7 @@ import {
   readVTable,
 } from "../src/abi.js";
 
-import { Swift, SwiftClass, SwiftStruct, SwiftError, type CallResult, type SwiftValue } from "../src/index.js";
+import { Swift, SwiftClass, SwiftStruct, SwiftError, type CallResult } from "../src/index.js";
 
 function host(): SwiftClass {
   return Swift.class("fixture.SlotHost")!;
@@ -132,7 +132,7 @@ describe("calling a vtable slot with a supplied signature", () => {
   test("a typed hook on a slot sees typed args and the result", () => {
     const { plain } = slots();
     const member = host().$type.instanceMethod(plain, INT_TO_INT);
-    let seen: SwiftValue[] = [];
+    let seen: CallResult[] = [];
     let left: CallResult = null;
     const listener = Swift.Interceptor.attach(member, {
       onEnter(args) {

@@ -241,7 +241,7 @@ describe("a generic type named with its type arguments", () => {
 
   test("the type's witness tables trail its arguments", () => {
     expect(Swift.struct("fixture.ConstrainedBox<Swift.Int>")!.scale(3, 7)).toEqual(int64(21));
-    const wide = Swift.type("fixture.WideScalar")!.$new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
+    const wide = Swift.struct("fixture.WideScalar")!.$new({ a: 1, b: 2, c: 3, d: 4, e: 5 });
     expect(Swift.struct("fixture.ConstrainedBox<fixture.WideScalar>")!.scale(wide, 7)).toEqual(int64(105));
   });
 

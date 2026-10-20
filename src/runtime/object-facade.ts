@@ -43,6 +43,17 @@ const RESERVED = new Set([
 
 export const RAW: unique symbol = Symbol("swift.raw");
 
+type SwiftNameStart =
+  | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
+  | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z"
+  | "_"
+  | "/" | "=" | "-" | "+" | "!" | "*" | "%" | "<" | ">" | "&" | "|" | "^" | "~" | "?" | ".";
+
+// A Swift member (an identifier or an operator) answers to its bare name through the index
+// signature; a `$` name is the bridge's and must be declared, so a misspelled or stale control is
+// a compile error rather than `any`.
+export type SwiftMemberKey = `${SwiftNameStart}${string}`;
+
 export type SwiftClassBoundMethod = SwiftBoundMethod;
 export type SwiftValueBoundMethod = SwiftBoundMethod;
 
@@ -72,14 +83,7 @@ export interface SwiftObjectBase {
   equals(other: SwiftObject | NativePointer): boolean;
   toString(): string;
   [Symbol.dispose](): void;
-  // Raw ClassInstance ops live under /abi; never a member the index sugar can launder into `any`.
-  $retain?: never;
-  $release?: never;
-  $retainCount?: never;
-  $isUniquelyReferenced?: never;
-  $vtable?: never;
-  $vtableMethod?: never;
-  [key: string]: any;
+  [key: SwiftMemberKey]: any;
 }
 
 export interface SwiftClassObject extends SwiftObjectBase {

@@ -349,7 +349,10 @@ member another module or a protocol extension adds resolves by name and joins
 the listing once read, while `$type.typeMethods()` and
 `$type.instanceMethods()` always span every loaded module. A Swift member
 named like a reserved JS method (`toString`, `toJSON`, `valueOf`,
-`hasOwnProperty`, `constructor`) stays reachable through `$call` and `$get`.
+`hasOwnProperty`, `constructor`) stays reachable through `$call` and `$get`, as
+is one named by a string only known at runtime. In TypeScript a bare name or
+an operator is `any`, while a `$` name must be one the bridge declares, so a
+misspelled control is a compile error.
 
 The facade's own members:
 

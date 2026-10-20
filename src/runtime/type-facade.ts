@@ -3,7 +3,7 @@ import { ClassInstance } from "../abi/heap-object.js";
 import { SwiftValue, optionalSome } from "../abi/instance.js";
 import { Metadata, MetadataKind } from "../abi/metadata.js";
 import { enumerateFields } from "../abi/field-descriptor.js";
-import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, RAW } from "./object-facade.js";
+import { asSwiftObject, SwiftClassObject, SwiftValueObject, SwiftObject, SwiftMemberKey, RAW } from "./object-facade.js";
 import { makeSwiftNativeFunction } from "./calling-convention.js";
 import { resolveTypeExpr, parseTypeExpr } from "./symbolication.js";
 import type { SwiftFunctionSignature } from "./type-expr.js";
@@ -64,7 +64,7 @@ export interface SwiftClassBoundInitializer {
 // A nominal type's facade: its type methods, static properties, enum cases and nested types under
 // their Swift names, the bridge's own members under $, and reflection on the type through $type.
 export abstract class SwiftTypeFacade {
-  [key: string]: any;
+  [key: SwiftMemberKey]: any;
 
   /** @internal Reached through a NominalType's `facade`, `Swift.type` and `Swift.modules`. */
   constructor(readonly $type: NominalType) {}

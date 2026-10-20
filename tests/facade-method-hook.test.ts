@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture } from "./fixtures/load.js";
 
-import { Swift, SwiftClass, type SwiftObject, type SwiftValue } from "../src/index.js";
+import { Swift, SwiftClass, type SwiftObject, type CallResult } from "../src/index.js";
 
 function robotType(): SwiftClass {
   return Swift.type("fixture.Robot") as SwiftClass;
@@ -25,7 +25,7 @@ describe("a facade's method as a hook target", () => {
   });
 
   test("hooks through Swift.Interceptor.attach like the bound method", () => {
-    const seen: SwiftValue[] = [];
+    const seen: CallResult[] = [];
     const listener = Swift.Interceptor.attach(robot("Ada").greet, {
       onEnter(args) {
         seen.push(args[0]);

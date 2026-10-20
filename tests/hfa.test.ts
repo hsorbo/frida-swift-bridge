@@ -1,7 +1,7 @@
 import { test, expect, describe } from "@frida/injest/agent";
 import { fixtureExport } from "./fixtures/load.js";
 
-import { Swift, type SwiftStruct, type SwiftValue, type SwiftValueObject, type CallResult } from "../src/index.js";
+import { Swift, type SwiftStruct, type SwiftValueObject, type CallResult } from "../src/index.js";
 
 function doubles(type: SwiftStruct, values: number[]): SwiftValueObject {
   const p = Memory.alloc(type.$type.layout.stride);
@@ -51,7 +51,7 @@ describe("homogeneous float aggregates (HFA)", () => {
     const Double_ = Swift.struct("Swift.Double")!;
     const DoublePair = Swift.struct("fixture.DoublePair")!;
     const addr = fixtureExport("fixture.sumDoublePair");
-    let seenArgs: SwiftValue[] | null = null;
+    let seenArgs: CallResult[] | null = null;
     const listener = Swift.Interceptor.attach(addr, {
       onEnter(args) {
         seenArgs = args;

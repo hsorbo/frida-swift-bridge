@@ -83,7 +83,7 @@ describe("generic stdlib method with an associated-type constraint", () => {
   // A's metadata and its Sequence witness are passed like any simple generic.
   test("String.append(contentsOf:) binds with a Sequence type argument", () => {
     requireSwift();
-    const Str = Swift.type("Swift.String")!;
+    const Str = Swift.struct("Swift.String")!;
     const s = Str.$new("ab");
     s.$method("append(contentsOf:)", { typeArguments: [Str], self: "mutating" }).call("cd");
     expect(s.$fields).toBe("abcd");

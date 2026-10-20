@@ -122,7 +122,7 @@ export function isSwiftObject(value: CallResult): value is SwiftObject {
 }
 
 // A SwiftField ($field view) is a borrowed ValueInstance at runtime, which marshalArg accepts.
-export type CallArg = SwiftValue | SwiftObject | SwiftField | ClosureSpec | SwiftClosureValue;
+export type CallArg = SwiftValue | SwiftObject | SwiftField | ClosureSpec | SwiftClosureValue | { [label: string]: CallArg };
 
 // Resolution order is own, then extension in another module, then protocol extension.
 export type MemberOrigin =

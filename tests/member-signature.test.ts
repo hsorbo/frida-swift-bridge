@@ -64,7 +64,7 @@ describe("hooking a member", () => {
   beforeEach(() => { loadFixture(); });
 
   test("a bound method and a reflected member hook the same code with their own signature", () => {
-    const seen: { labels: (string | null)[]; args: SwiftValue[] }[] = [];
+    const seen: { labels: (string | null)[]; args: CallResult[] }[] = [];
     const greet = robot("R2").$method("greet");
     const listener = Swift.Interceptor.attach(greet, {
       onEnter(args) {

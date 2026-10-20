@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
-import { Swift, SwiftClass, SwiftStruct, type SwiftValueObject, type SwiftClassObject, type CallResult, type SwiftValue } from "../src/index.js";
+import { Swift, SwiftClass, SwiftStruct, type SwiftValueObject, type SwiftClassObject, type CallResult } from "../src/index.js";
 
 function grid(): SwiftValueObject {
   return (Swift.type("fixture.Grid") as SwiftStruct).init([1, 2, 3, 4]) as SwiftValueObject;
@@ -66,9 +66,9 @@ describe("subscripts", () => {
 
   test("hooks on a getter, a setter, a modify and a read see the indices, the stored element and the yield", () => {
     const Grid = Swift.type("fixture.Grid") as SwiftStruct;
-    const seen: { kind: string; args: SwiftValue[]; ret: CallResult }[] = [];
+    const seen: { kind: string; args: CallResult[]; ret: CallResult }[] = [];
     const record = (kind: string) => ({
-      onEnter(args: SwiftValue[]) { seen.push({ kind, args, ret: null }); },
+      onEnter(args: CallResult[]) { seen.push({ kind, args, ret: null }); },
       onLeave(ret: CallResult) { seen[seen.length - 1].ret = ret; },
     });
     const listeners = [

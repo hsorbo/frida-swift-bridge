@@ -120,8 +120,9 @@ function acquisitionPreservesFacadeKindAtCompileTime(cls: SwiftClass, st: SwiftS
   void [borrowed, adopted, constructed, value, made, kase, captures];
 }
 
-// A facade answers any Swift member name, so only its $type is checked: a misspelled reflection
-// member is a compile-time error, a misspelled facade member is not.
+// A facade answers any Swift member name, so of its own members only the $-prefixed controls and
+// $type are checked: a misspelled reflection member or control is a compile-time error, a
+// misspelled Swift member is not.
 function reflectionIsStrictAtCompileTime(cls: SwiftClass, st: SwiftStruct, o: SwiftClassObject, v: SwiftValueObject, t: SwiftType) {
   const classInfo: ClassType = cls.$type;
   const structInfo: StructType = st.$type;
@@ -195,6 +196,28 @@ function protocolRawInspectionStaysUnderAbi(p: Protocol, comp: ProtocolCompositi
   p.conformanceFor;
   // @ts-expect-error existential metadata stays under /abi
   comp.metadata;
+}
+
+function bridgeControlsAreStrictAtCompileTime(o: SwiftClassObject, v: SwiftValueObject, t: SwiftClass, k: string) {
+  o.greet("x");
+  o["greet"]("x");
+  t["=="](o, o);
+  v.count;
+  o.$dispose();
+  t.$type;
+  // @ts-expect-error a misspelled control is not a Swift member
+  o.$disopse();
+  // @ts-expect-error a misspelled control is not a Swift member
+  v.$feilds;
+  // @ts-expect-error a misspelled control is not a Swift member
+  t.$tpye;
+  // @ts-expect-error a runtime-string key goes through $get or $call
+  o[k];
+  interface Generated extends SwiftClassObject { greet(name: string): string }
+  const g = o as Generated;
+  g.greet("x");
+  // @ts-expect-error a generated interface inherits the strict controls
+  g.$nope();
 }
 
 function rawOpsStayOffTheFacadeAtCompileTime(o: SwiftObject) {
@@ -317,6 +340,7 @@ void typesAreAcceptedAsReflectionOrFacadeAtCompileTime;
 void rawMetadataStaysUnderAbi;
 void protocolRawInspectionStaysUnderAbi;
 void rawOpsStayOffTheFacadeAtCompileTime;
+void bridgeControlsAreStrictAtCompileTime;
 void makeSwiftNativeFunction;
 
 test("published entry points resolve as runtime values", () => {
