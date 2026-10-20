@@ -247,6 +247,8 @@ function hasDescriptor(kind: MetadataKind): boolean {
 }
 
 // A class, struct or enum: the types with Swift members, and the ones that have a facade.
+// slotCall is the facades' and instances' route to a slot binding, not a reflection member.
+export let slotCall: (type: NominalType, selector: string, signature: SlotSignature, isStatic: boolean) => ResolvedMethod;
 export abstract class NominalType extends SwiftType {
   abstract get facade(): SwiftTypeFacade;
 
@@ -287,11 +289,13 @@ export abstract class NominalType extends SwiftType {
     return this.namedMember(...subscriptLookup(selector, options, true), "type subscript");
   }
 
-  /**
-   * @internal The call a facade binds for a slot named with a signature: the facade supplies the
-   * receiver, the slot's kind the dispatch and async-ness, the text everything else.
-   */
-  slotCall(selector: string, signature: SlotSignature, isStatic: boolean): ResolvedMethod {
+  static {
+    slotCall = (type, selector, signature, isStatic) => type.slotCall(selector, signature, isStatic);
+  }
+
+  // The call a facade binds for a slot named with a signature: the facade supplies the receiver,
+  // the slot's kind the dispatch and async-ness, the text everything else.
+  private slotCall(selector: string, signature: SlotSignature, isStatic: boolean): ResolvedMethod {
     const slot = this.slot(selector, isStatic, `${isStatic ? "type" : "instance"} method ${selector}`);
     const parsed = parseSlotSignature(this.name, slot, signature);
     if (slot.witness !== null) {
@@ -413,7 +417,7 @@ export abstract class NominalType extends SwiftType {
     return slots;
   }
 
-  protocols(): { [name: string]: Protocol } {
+  protocols(): { [name: string]: StableProtocol } {
     return protocolsForType(descriptorOf(this).handle);
   }
 
@@ -544,7 +548,7 @@ export class ObjCClassWrapperType extends NominalType {
     return "__C";
   }
 
-  protocols(): { [name: string]: Protocol } {
+  protocols(): { [name: string]: StableProtocol } {
     throw new Error(`${this.name} is an Objective-C class; its conformances are not listed`);
   }
 }

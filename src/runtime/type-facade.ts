@@ -53,6 +53,7 @@ import {
   metadataOf,
   descriptorOf,
   isUnboundGeneric,
+  slotCall,
   typeFromDescriptor,
 } from "./swift-type.js";
 
@@ -93,7 +94,7 @@ export abstract class SwiftTypeFacade {
 
   // A type's slot takes the metatype as self, as a named type method does.
   protected slotTypeMethod(selector: string, signature: SlotSignature): SwiftBoundMethod {
-    return narrowBoundMethod(bindResolved(this.$type.slotCall(selector, signature, true), metadataOf(this.$type).handle));
+    return narrowBoundMethod(bindResolved(slotCall(this.$type, selector, signature, true), metadataOf(this.$type).handle));
   }
 
   $subscript(selector?: string | MemberLookupOptions, options: MemberLookupOptions = {}): SwiftBoundSubscript {

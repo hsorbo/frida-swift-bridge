@@ -57,7 +57,7 @@ describe("Swift.enumerateProtocols", () => {
 
   test("each yielded entry is a usable Protocol", () => {
     const greeter = [...Swift.enumerateProtocols()].find((p) => p.fullName === "fixture.Greeter")!;
-    expect(greeter.requirements.length).toBeGreaterThan(0);
+    expect((greeter as Protocol).requirements.length).toBeGreaterThan(0);
   });
 
   test("a glob filter matches qualified protocol names", () => {

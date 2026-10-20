@@ -5,7 +5,7 @@ import { enumerateClassInstanceFields, readObject, SwiftValue } from "./instance
 import { ValueInstance } from "./value.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import { objcRetainCount, objcClassName } from "../runtime/objc.js";
-import { NominalType, SlotSignature, SwiftType, typeOf } from "../runtime/swift-type.js";
+import { NominalType, SlotSignature, SwiftType, slotCall, typeOf } from "../runtime/swift-type.js";
 import { typeName } from "../runtime/type-name.js";
 import {
   BoundMethod,
@@ -169,7 +169,7 @@ export class ClassInstance implements RawInstance {
   // A vtable or witness slot called with the caller's signature: the former takes the object as a
   // method does, the latter as the requirement's thunk does.
   slot(selector: string, signature: SlotSignature): BoundMethod {
-    const resolved = (this.type as NominalType).slotCall(selector, signature, false);
+    const resolved = slotCall(this.type as NominalType, selector, signature, false);
     const table = resolved.witnessSelf;
     return this.bind(resolved, table === undefined ? this.handle : witnessRequirementReceiver(table, this.handle));
   }

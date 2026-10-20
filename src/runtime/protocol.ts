@@ -107,7 +107,7 @@ export class Protocol implements StableProtocol {
   }
 }
 
-export function swiftProtocols(filter?: NameFilter): Generator<Protocol> {
+export function swiftProtocols(filter?: NameFilter): Generator<StableProtocol> {
   return protocolsOf(protocolDescriptors(filter));
 }
 
@@ -119,7 +119,7 @@ function* protocolsOf(descriptors: Generator<ContextDescriptor>): Generator<Prot
   }
 }
 
-export function protocolsForType(typeDescriptor: NativePointer): { [name: string]: Protocol } {
+export function protocolsForType(typeDescriptor: NativePointer): { [name: string]: StableProtocol } {
   const map: { [name: string]: Protocol } = {};
   for (const descriptor of conformingProtocols(typeDescriptor)) {
     const name = descriptor.fullTypeName;

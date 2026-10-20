@@ -184,6 +184,22 @@ function rawMetadataStaysUnderAbi(type: SwiftType) {
   void [rawMetadata, rawDescriptor];
 }
 
+function protocolListingsStayNarrowAtCompileTime(t: ClassType) {
+  for (const listed of Swift.enumerateProtocols()) {
+    const name: string = listed.fullName;
+    // @ts-expect-error a listed protocol is the stable view, the descriptor stays under /abi
+    listed.descriptor;
+    void name;
+  }
+  const conformed = t.protocols()["MyKit.P"];
+  const conformedName: string = conformed.name;
+  // @ts-expect-error a conformed protocol is the stable view, requirements stay under /abi
+  conformed.requirements;
+  // @ts-expect-error a slot binding is not a reflection member
+  t.slotCall;
+  void conformedName;
+}
+
 function protocolRawInspectionStaysUnderAbi(p: Protocol, comp: ProtocolComposition) {
   const conformers: NominalType[] = p.conformingTypes();
   const conforms: boolean = conformers[0].conformsTo(p);
@@ -340,6 +356,7 @@ void typesAreAcceptedAsReflectionOrFacadeAtCompileTime;
 void rawMetadataStaysUnderAbi;
 void protocolRawInspectionStaysUnderAbi;
 void rawOpsStayOffTheFacadeAtCompileTime;
+void protocolListingsStayNarrowAtCompileTime;
 void bridgeControlsAreStrictAtCompileTime;
 void makeSwiftNativeFunction;
 
