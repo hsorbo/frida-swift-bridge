@@ -68,7 +68,7 @@ describe("Swift extension members of an imported ObjC class", () => {
     expect(NSObject.$get("swiftVersion")).toEqual(int64(3));
     expect(NSObject.swiftVersion).toEqual(int64(3));
     expect("swiftBanner" in NSObject).toBe(true);
-    expect(() => NSObject.init()).toThrow("__C.NSObject is an Objective-C class");
+    expect(() => NSObject.init()!).toThrow("__C.NSObject is an Objective-C class");
   });
 
   test("Swift.function resolves the qualified selector", (ctx) => {
@@ -97,7 +97,7 @@ describe("Swift extension members of an imported ObjC class", () => {
     expect(Starling.$type.typeMethods()).toContain("swiftBanner()");
     expect(Starling.swiftBanner()).toBe("banner");
     expect(Starling.swiftVersion).toEqual(int64(3));
-    const starling = Starling.init();
+    const starling = Starling.init()!;
     expect(starling.swiftTag()).toEqual(int64(7));
     expect(starling.swiftTag(3)).toEqual(int64(21));
     expect(starling.chirp()).toBe("whistle");

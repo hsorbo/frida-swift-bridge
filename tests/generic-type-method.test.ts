@@ -266,10 +266,10 @@ describe("a generic type named with its type arguments", () => {
 
   test("a class's initializer allocates through the specialization's metadata", () => {
     const HolderInt = Swift.class("fixture.KeyedHolder<Swift.Int>")!;
-    const holder = HolderInt.init(7);
+    const holder = HolderInt.init(7)!;
     expect(holder.$type).toBe(HolderInt.$type);
     expect(holder.$fields).toEqual({ value: int64(7) });
-    expect(Swift.class("fixture.KeyedHolder<Swift.String>")!.init("e").$fields).toEqual({ value: "e" });
+    expect(Swift.class("fixture.KeyedHolder<Swift.String>")!.init("e")!.$fields).toEqual({ value: "e" });
   });
 
   test("a method-level generic static stays hookable but not callable, at the shared address", () => {

@@ -18,7 +18,7 @@ describe("ownership", () => {
   beforeEach(() => { loadFixture(); });
 
   test("$dispose drops the strong count once; double dispose is a no-op", () => {
-    const owned = robotType().init("R2");
+    const owned = robotType().init("R2")!;
     expect(owned.$owned).toBe(true);
     const view = new ClassInstance(owned.$handle);
     view.retain(); // outlive the dispose so view can observe the drop
@@ -47,7 +47,7 @@ describe("ownership", () => {
   // No GC-release test: bindWeak finalizers fire on a later pass, not synchronously with gc().
 
   test("a String getter return destroys its +1 temp, leaking no __StringStorage ref", () => {
-    const r = robotType().init("a deliberately long, heap-allocated robot name");
+    const r = robotType().init("a deliberately long, heap-allocated robot name")!;
     const storage = stringStorage(r.$field("name").handle);
     const before = storage.retainCount;
     for (let i = 0; i < 20; i++) {
@@ -58,14 +58,14 @@ describe("ownership", () => {
 
   // rename retains the +0/guaranteed arg into the field; a leaked temp would leave rc 2, not 1.
   test("a regular method's String arg +1 temp is destroyed, not leaked alongside the stored field", () => {
-    const r = robotType().init("short");
+    const r = robotType().init("short")!;
     r.$call("rename", "a deliberately long, heap-allocated robot name");
     const storage = stringStorage(r.$field("name").handle);
     expect(storage.retainCount).toBe(1);
   });
 
   test("a field write releases the previous value instead of leaking it", () => {
-    const r = robotType().init("short");
+    const r = robotType().init("short")!;
     r.$field("name").write("the first deliberately long, heap-allocated name");
     const old = stringStorage(r.$field("name").handle);
     old.retain();
@@ -76,8 +76,8 @@ describe("ownership", () => {
   });
 
   test("a class argument to a method is borrowed: retain count unchanged across the call", () => {
-    const r = robotType().init("A");
-    const other = robotType().init("B");
+    const r = robotType().init("A")!;
+    const other = robotType().init("B")!;
     const view = new ClassInstance(other.$handle);
     const before = view.retainCount;
     expect(r.$call("merged", other)).toBe("A+B");
@@ -103,7 +103,7 @@ describe("ownership", () => {
     const Robot = typeOf(metadataFor("fixture.Robot")!);
     const String_ = typeOf(metadataFor("Swift.String")!);
     const rename = Swift.NativeFunction(fixtureExport("fixture.renameRobot"), null, [Robot, String_]);
-    const r = robotType().init("short");
+    const r = robotType().init("short")!;
     const view = new ClassInstance(r.$handle);
     const before = view.retainCount;
     rename(r, "a deliberately long, heap-allocated robot name");

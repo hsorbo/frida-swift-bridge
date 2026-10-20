@@ -6,7 +6,7 @@ import { Swift, SwiftError } from "../src/index.js";
 declare function gc(): void;
 
 function ticker() {
-  return Swift.class("fixture.Ticker")!.init();
+  return Swift.class("fixture.Ticker")!.init()!;
 }
 
 describe("actor-isolated async calling", () => {
@@ -67,7 +67,7 @@ describe("actor-isolated async calling", () => {
 });
 
 function customTicker() {
-  return Swift.class("fixture.CustomExecutorTicker")!.init();
+  return Swift.class("fixture.CustomExecutorTicker")!.init()!;
 }
 
 describe("custom-executor actor async calling", () => {

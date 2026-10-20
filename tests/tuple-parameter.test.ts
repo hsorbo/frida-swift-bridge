@@ -19,7 +19,7 @@ describe("a tuple parameter the signature spells is passed element by element", 
 
   test("a generic method lowers a concrete tuple beside its type parameter", () => {
     const Int = metadataFor("Swift.Int")!;
-    const box = (typeOf(metadataFor("fixture.Box")!) as ClassType).facade.init();
+    const box = (typeOf(metadataFor("fixture.Box")!) as ClassType).facade.init()!;
     expect(box.$method("packedPlus", { typeArguments: [typeOf(Int)] }).call([1, 2], 5)).toEqual(int64(20));
   });
 
@@ -36,7 +36,7 @@ describe("a tuple parameter the signature spells is passed element by element", 
   });
 
   test("a setter takes its tuple new value per element", () => {
-    const box = (Swift.type("fixture.PackedBox") as SwiftClass).init();
+    const box = (Swift.type("fixture.PackedBox") as SwiftClass).init()!;
     box.$set("packed", [1, 2]);
     expect(box.$field("v").read()).toEqual(int64(12));
     expect(box.$get("packed")).toEqual([1, 2]);

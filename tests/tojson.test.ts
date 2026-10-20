@@ -65,7 +65,7 @@ describe("toJSON", () => {
   });
 
   test("a class instance serializes to kind/type/handle without a field dump", () => {
-    const counter = (typeOf(metadataFor("fixture.Counter")!) as ClassType).facade.init(5);
+    const counter = (typeOf(metadataFor("fixture.Counter")!) as ClassType).facade.init(5)!;
     const j = json(counter);
     expect(Object.keys(j).sort()).toEqual(["handle", "kind", "type"]);
     expect(j.kind).toBe("object");

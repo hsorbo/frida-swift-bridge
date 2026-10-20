@@ -4,7 +4,7 @@ import { loadFixture } from "./fixtures/load.js";
 import { Swift, SwiftError } from "../src/index.js";
 
 function calc(base: number) {
-  return Swift.class("fixture.AsyncCalc")!.init(base);
+  return Swift.class("fixture.AsyncCalc")!.init(base)!;
 }
 
 describe("async method", () => {

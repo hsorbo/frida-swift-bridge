@@ -19,11 +19,11 @@ describe("member listing depth and lookup scope", () => {
     expect(Describer.instanceMethods({ deep: true })).toContain("shout()");
     expect(Describer.properties().map((p) => p.name)).toEqual(["displayName"]);
     expect(Describer.properties({ deep: true }).map((p) => p.name)).toContain("initial");
-    expect(Object.keys((Swift.type("fixture.Robot") as SwiftClass).init("R2"))).not.toContain("fly");
+    expect(Object.keys((Swift.type("fixture.Robot") as SwiftClass).init("R2")!)).not.toContain("fly");
   });
 
   test("lookup by name reaches other modules unless deep is false", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.$method("fly").origin.kind).toBe("extension");
     expect(() => robot.$method("fly", { deep: false })).toThrow(/no method fly/);
     expect(robot.$method("greet", { deep: false }).call("X")).toBe("Hello X, I am R2");

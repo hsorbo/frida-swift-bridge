@@ -13,7 +13,7 @@ describe("a module loaded after the search has already run", () => {
   test("its members are missing until it loads, then resolve without a flush", () => {
     loadFixture();
     const Robot = Swift.type("fixture.Robot") as SwiftClass;
-    const robot = Robot.init("R2");
+    const robot = Robot.init("R2")!;
     expect(() => resolveMethod("fixture.Robot", "fly")).toThrow();
     expect(enumerateMethods("fixture.Robot").some((m) => m.name === "fly")).toBeFalsy();
     expect(robot.fly).toBeUndefined();
@@ -25,7 +25,7 @@ describe("a module loaded after the search has already run", () => {
     loadNoMetadata();
 
     expect(resolveMethod("fixture.Robot", "fly").selector).toBe("fly()");
-    expect(Robot.init("R2").fly()).toBe("fly R2");
+    expect(Robot.init("R2")!.fly()).toBe("fly R2");
     expect(robot.fly()).toBe("fly R2");
     expect("fly" in robot).toBe(true);
     expect(robot.$call("fly")).toBe("fly R2");
@@ -33,8 +33,8 @@ describe("a module loaded after the search has already run", () => {
     expect(Robot.factoryName()).toBe("factory");
     expect("factoryName" in Robot).toBe(true);
     expect(Robot.$call("factoryName")).toBe("factory");
-    expect(Robot.$initializer("init(badge:)").call("7").name).toBe("R-7");
-    expect(Robot.init({ badge: "7" }).name).toBe("R-7");
+    expect(Robot.$initializer("init(badge:)").call("7")!.name).toBe("R-7");
+    expect(Robot.init({ badge: "7" })!.name).toBe("R-7");
   });
 
   test("its conformances are missing until it loads, then reported without a flush", (ctx) => {
@@ -68,7 +68,7 @@ describe("a type extended from another module", () => {
   });
 
   test("an initializer added to a class is selected by its labels", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init({ badge: "7" });
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init({ badge: "7" })!;
     expect(robot.name).toBe("R-7");
   });
 
@@ -79,24 +79,24 @@ describe("a type extended from another module", () => {
   });
 
   test("they are callable and readable through the facade", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.fly()).toBe("fly R2");
     expect(Number(robot.wingspan)).toBe(2);
   });
 
   test("a name whose words the symbol substitutes is still reached through the facade", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.flyRobot()).toBe("fly robot R2");
     expect(Number(robot.robotWingspan)).toBe(4);
   });
 
   test("a misspelled name suggests a member another module declares", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(() => robot.$call("flyy")).toThrow("no method flyy on fixture.Robot (did you mean fly?)");
   });
 
   test("a name no module declares reads as undefined through the facade", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.flyAway).toBeUndefined();
   });
 });

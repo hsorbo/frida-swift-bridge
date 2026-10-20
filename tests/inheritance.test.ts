@@ -19,7 +19,7 @@ describe("inherited methods (symbol route)", () => {
   beforeEach(() => { loadFixture(); });
 
   test("calls a method inherited from the superclass", () => {
-    expect(catType().init().$call("legs")).toEqual(int64(4)); // Cat has no legs symbol; declared on Animal
+    expect(catType().init()!.$call("legs")).toEqual(int64(4)); // Cat has no legs symbol; declared on Animal
   });
 
   test("resolveMethod finds the inherited impl declared on the superclass", () => {
@@ -36,7 +36,7 @@ describe("inherited methods (symbol route)", () => {
   });
 
   test("the facade exposes inherited methods", () => {
-    const cat = catType().init();
+    const cat = catType().init()!;
     expect(cat.$type.instanceMethods()).toContain("legs()");
     expect(cat.legs()).toEqual(int64(4));
   });
@@ -55,8 +55,8 @@ describe("live polymorphic dispatch (metadata vtable)", () => {
 
   test("a base slot reaches the most-derived override", () => {
     const slot = speakSlot();
-    const cat = catType().init();
-    const animal = animalType().init();
+    const cat = catType().init()!;
+    const animal = animalType().init()!;
     expect(new ClassInstance(cat.$handle).vtableMethod(slot, { returnType: Int(), argTypes: [] }).call()).toEqual(int64(9)); // Cat.speak
     expect(new ClassInstance(animal.$handle).vtableMethod(slot, { returnType: Int(), argTypes: [] }).call()).toEqual(int64(1)); // Animal.speak
   });
@@ -65,14 +65,14 @@ describe("live polymorphic dispatch (metadata vtable)", () => {
     const declared = resolveMethod("fixture.Animal", "speak", { static: false }).address;
     const overridden = resolveMethod("fixture.Cat", "speak", { static: false }).address;
     const slot = speakSlot();
-    const cat = catType().init();
+    const cat = catType().init()!;
     const live = new ClassInstance(cat.$handle).vtableMethod(slot, { returnType: Int(), argTypes: [] }).address;
     expect(live.equals(overridden)).toBe(true);
     expect(live.equals(declared)).toBe(false);
   });
 
   test("the subclass vtable surfaces inherited slots", () => {
-    const cat = catType().init();
+    const cat = catType().init()!;
     const instanceMethods = new ClassInstance(cat.$handle).vtable.filter(
       (e: VTableEntry) => e.kind === MethodDescriptorKind.Method && e.isInstance
     );

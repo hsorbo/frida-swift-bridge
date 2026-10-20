@@ -31,13 +31,13 @@ describe("Swift.NativeFunction (marshalled)", () => {
     expect(make()).toEqual({ name: "Ada" });
     const greet = Swift.NativeFunction(fixtureExport("fixture.greetExistential"), String_, [Greeter]);
     expect(greet(Swift.struct("fixture.PoliteGreeter")!.$new({ name: "Bea" }))).toBe("Hello, Bea");
-    const loud = Swift.class("fixture.LoudGreeter")!.init("Cy");
+    const loud = Swift.class("fixture.LoudGreeter")!.init("Cy")!;
     const view = new ClassInstance(loud.$handle);
     const before = view.retainCount;
     expect(greet(loud)).toBe("HEY Cy");
     // The container's reference is released with the argument temp.
     expect(view.retainCount).toBe(before);
-    expect(() => greet(Swift.class("fixture.Robot")!.init("R2"))).toThrow(/value, expected .*fixture\.Greeter/);
+    expect(() => greet(Swift.class("fixture.Robot")!.init("R2")!)).toThrow(/value, expected .*fixture\.Greeter/);
     expect(() => greet({ name: "Dee" } as never)).toThrow(/takes a value or object facade/);
   });
 
@@ -57,7 +57,7 @@ describe("Swift.NativeFunction (marshalled)", () => {
     const String_ = Swift.type("Swift.String")!;
     const Named = Swift.reflect("any fixture.Named")!;
     const label = Swift.NativeFunction(fixtureExport("fixture.labelOfNamed"), String_, [Named]);
-    expect(label(Swift.class("fixture.Widget")!.init("Bee"))).toBe("Bee");
+    expect(label(Swift.class("fixture.Widget")!.init("Bee")!)).toBe("Bee");
   });
 
   test("marshals JS ints through an add, returning a JS number", () => {
@@ -111,9 +111,9 @@ describe("Swift.NativeFunction (marshalled)", () => {
     const Int = Swift.type("Swift.Int")!;
     const Animal = Swift.class("fixture.Animal")!;
     const describe = Swift.NativeFunction(fixtureExport("fixture.describeAnimal"), Int, [Animal]);
-    const cat = Swift.class("fixture.Cat")!.init();
+    const cat = Swift.class("fixture.Cat")!.init()!;
     expect(describe(cat)).toEqual(int64(4));
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     expect(() => describe(robot)).toThrow(/expected fixture\.Animal/);
     expect(() => describe(cat.$handle)).toThrow(/raw pointer is only accepted via \/abi/);
   });

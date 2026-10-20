@@ -17,12 +17,12 @@ describe("a bound method's origin", () => {
   });
 
   test("a method the type declares is its own", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.$method("greet").origin).toEqual({ kind: "own", type: "fixture.Robot", module: FIXTURE_MODULE });
   });
 
   test("a method added from another module is an extension in that module", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.$method("fly").origin).toEqual({ kind: "extension", type: "fixture.Robot", module: NOMETADATA_MODULE });
   });
 

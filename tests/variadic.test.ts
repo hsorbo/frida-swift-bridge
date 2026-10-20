@@ -18,19 +18,19 @@ describe("variadic parameters", () => {
   });
 
   test("a method lists and takes its variadic parameter", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.$type.instanceMethod("greetAll").selector).toBe("greetAll(_:)");
     expect(robot.greetAll(["X", "Y"])).toBe("Hello X, I am R2; Hello Y, I am R2");
   });
 
   test("a generic variadic parameter is the Array of the type argument", () => {
-    const box = (Swift.type("fixture.Box") as SwiftClass).init();
+    const box = (Swift.type("fixture.Box") as SwiftClass).init()!;
     expect(box.$method("lastOf", { typeArguments: [Swift.type("Swift.Int")!] }).call([4, 5, 6])).toEqual(int64(6));
     expect(box.$method("lastOf", { typeArguments: [Swift.type("Swift.String")!] }).call(["x", "y"])).toBe("y");
   });
 
   test("a plain Array parameter and $new take a JS array too", () => {
-    const box = (Swift.type("fixture.Box") as SwiftClass).init();
+    const box = (Swift.type("fixture.Box") as SwiftClass).init()!;
     expect(box.sumInts([10, 20, 30])).toEqual(int64(60));
     const ints = (Swift.type("Swift.Array<Swift.Int>") as SwiftStruct).$new([7, 8]) as SwiftValueObject;
     expect(ints.$container()).toEqual([int64(7), int64(8)]);

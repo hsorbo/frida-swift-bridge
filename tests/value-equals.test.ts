@@ -36,8 +36,8 @@ describe("facade equals", () => {
 
   test("a class facade compares identity", () => {
     const Robot = Swift.class("fixture.Robot")!;
-    const robot = Robot.init("R2");
+    const robot = Robot.init("R2")!;
     expect(robot.equals(Swift.borrowObject(robot.$handle))).toBe(true);
-    expect(robot.equals(Robot.init("R2"))).toBe(false);
+    expect(robot.equals(Robot.init("R2")!)).toBe(false);
   });
 });

@@ -8,7 +8,7 @@ function robotType(): SwiftClass {
 }
 
 function robot(name: string): SwiftObject {
-  return robotType().init(name);
+  return robotType().init(name)!;
 }
 
 describe("a facade's method as a hook target", () => {

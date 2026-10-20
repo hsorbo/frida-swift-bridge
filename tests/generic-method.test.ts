@@ -5,11 +5,11 @@ import { requireDarwin, requireSwift } from "./swift.js";
 import { Swift, SwiftObject } from "../src/index.js";
 
 function box(): SwiftObject {
-  return Swift.class("fixture.Box")!.init();
+  return Swift.class("fixture.Box")!.init()!;
 }
 
 function robot(name: string): SwiftObject {
-  return Swift.class("fixture.Robot")!.init(name);
+  return Swift.class("fixture.Robot")!.init(name)!;
 }
 
 describe("generic method invocation", () => {
@@ -38,7 +38,7 @@ describe("generic method invocation", () => {
 
   test("passes a class-bound generic argument directly", () => {
     const Widget = Swift.class("fixture.Widget")!;
-    const widget = Widget.init("Bee");
+    const widget = Widget.init("Bee")!;
     expect(box().$method("labelOf", { typeArguments: [Widget] }).call(widget)).toBe("Bee");
     widget.$dispose();
   });
@@ -47,7 +47,7 @@ describe("generic method invocation", () => {
     requireDarwin(ctx);
     const Conformer = Swift.class("fixture.ObjCConformer")!;
     const Int = Swift.type("Swift.Int")!;
-    const conformer = Conformer.init();
+    const conformer = Conformer.init()!;
     const method = box().$method("scaledIfObject", { typeArguments: [Conformer, Int] });
     expect(method.call(conformer, 6, 7)).toEqual(int64(42));
     conformer.$dispose();

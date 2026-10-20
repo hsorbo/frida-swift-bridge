@@ -111,9 +111,9 @@ function facadeKindContractsHoldAtCompileTime(
 function acquisitionPreservesFacadeKindAtCompileTime(cls: SwiftClass, st: SwiftStruct, en: SwiftEnum) {
   const borrowed: SwiftClassObject = Swift.borrowObject(NULL);
   const adopted: SwiftClassObject = Swift.adoptObject(NULL);
-  const constructed: SwiftClassObject = cls.init();
+  const constructed: SwiftClassObject = cls.init()!;
   const value: SwiftValueObject = st.$new(0);
-  const made: SwiftValueObject | null = en.init();
+  const made: SwiftValueObject | null = en.init()!;
   const kase: SwiftValueObject = en.$case("none");
   const closure: SwiftClosureValue = Swift.borrowClosure(NULL);
   const captures: SwiftField[] = closure.$captures();
@@ -141,7 +141,7 @@ function reflectionIsStrictAtCompileTime(cls: SwiftClass, st: SwiftStruct, o: Sw
   // @ts-expect-error reflection has no index signature
   o.$type.noSuchMember;
   // @ts-expect-error a receiver operation is not a reflection member
-  classInfo.init();
+  classInfo.init()!;
   // @ts-expect-error a receiver operation is not a reflection member
   structInfo.$new(0);
   // @ts-expect-error a reflection member keeps its bare name

@@ -28,7 +28,7 @@ describe("marshalling-failure cleanup across call paths", () => {
   test("sync generic: a failed later arg does not leak the non-POD prefix temp", () => {
     const Int = Swift.type("Swift.Int")!;
     const { wrapper, view } = wrapperOverToken("fixture");
-    const mix = boxType().init().$method("mix", { typeArguments: [Int] });
+    const mix = boxType().init()!.$method("mix", { typeArguments: [Int] });
     const before = view.retainCount;
     expect(() => mix.call(wrapper, "bad" as never)).toThrow();
     expect(view.retainCount).toBe(before);
@@ -36,7 +36,7 @@ describe("marshalling-failure cleanup across call paths", () => {
 
   test("plain async: a failed later arg does not leak the non-POD prefix temp", () => {
     const { wrapper, view } = wrapperOverToken("fixture");
-    const combine = boxType().init().$method("combineAsync");
+    const combine = boxType().init()!.$method("combineAsync");
     const before = view.retainCount;
     expect(() => combine.call(wrapper, "bad" as never)).toThrow();
     expect(view.retainCount).toBe(before);
@@ -45,7 +45,7 @@ describe("marshalling-failure cleanup across call paths", () => {
   test("generic async: a failed later arg does not leak the non-POD prefix temp", () => {
     const Int = Swift.type("Swift.Int")!;
     const { wrapper, view } = wrapperOverToken("fixture");
-    const mix = boxType().init().$method("mixAsync", { typeArguments: [Int] });
+    const mix = boxType().init()!.$method("mixAsync", { typeArguments: [Int] });
     const before = view.retainCount;
     expect(() => mix.call(wrapper, "bad" as never)).toThrow();
     expect(view.retainCount).toBe(before);
@@ -91,7 +91,7 @@ describe("class-boundary ownership (init and property setter)", () => {
     return Swift.class("fixture.Kennel")!;
   }
   function token(id: number): { facade: SwiftObject; view: ClassInstance } {
-    const facade = Swift.class("fixture.Token")!.init(id);
+    const facade = Swift.class("fixture.Token")!.init(id)!;
     return { facade, view: new ClassInstance(facade.$handle) };
   }
 
@@ -99,7 +99,7 @@ describe("class-boundary ownership (init and property setter)", () => {
     const { wrapper } = wrapperOverToken("fixture");
     const occupant = token(1);
     const before = occupant.view.retainCount;
-    const kennel = kennelType().init(wrapper, occupant.facade);
+    const kennel = kennelType().init(wrapper, occupant.facade)!;
     expect(occupant.view.retainCount).toBe(before + 1);
     expect(kennel.occupant.id).toEqual(int64(1));
   });
@@ -107,14 +107,14 @@ describe("class-boundary ownership (init and property setter)", () => {
   test("class init failure destroys the non-POD prefix temp", () => {
     const { wrapper, view } = wrapperOverToken("fixture");
     const before = view.retainCount;
-    expect(() => kennelType().init(wrapper, "bad" as never)).toThrow();
+    expect(() => kennelType().init(wrapper, "bad" as never)!).toThrow();
     expect(view.retainCount).toBe(before);
   });
 
   test("a class-valued setter consumes its own +1, not the caller's reference", () => {
     const { wrapper } = wrapperOverToken("fixture");
     const first = token(1);
-    const kennel = kennelType().init(wrapper, first.facade);
+    const kennel = kennelType().init(wrapper, first.facade)!;
     const next = token(2);
     const beforeNext = next.view.retainCount;
     const beforeFirst = first.view.retainCount;

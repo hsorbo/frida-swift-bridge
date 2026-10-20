@@ -66,7 +66,7 @@ describe("ClassInstance", () => {
   test("reads a stored property of a Swift subclass of an ObjC class and retains it through ObjC", (ctx) => {
     requireDarwin(ctx);
     loadFixture();
-    const starling = (Swift.type("fixture.Starling") as SwiftClass).init();
+    const starling = (Swift.type("fixture.Starling") as SwiftClass).init()!;
     const object = new ClassInstance(starling.$handle);
     expect(object.metadata.isTypeMetadata).toBe(true);
     expect(object.field("pitch").read()).toEqual(int64(5));
@@ -81,7 +81,7 @@ describe("ClassInstance", () => {
   test("counts retains of a Swift subclass of an ObjC class through ObjC", (ctx) => {
     requireDarwin(ctx);
     loadFixture();
-    const starling = (Swift.type("fixture.Starling") as SwiftClass).init();
+    const starling = (Swift.type("fixture.Starling") as SwiftClass).init()!;
     const object = new ClassInstance(starling.$handle);
     const before = object.retainCount;
     object.retain();

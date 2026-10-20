@@ -49,7 +49,7 @@ describe("value-type initializers (with symtab)", () => {
   });
 
   test("throws on an argument-count mismatch", () => {
-    expect(() => structType("fixturesyms.Person").init("Ada")).toThrow();
+    expect(() => structType("fixturesyms.Person").init("Ada")!).toThrow();
   });
 
   test("init selects an overload by its argument count", () => {

@@ -92,7 +92,7 @@ describe("typed throws", () => {
   test("a method's typed error reaches its facade call", (ctx) => {
     requireTypedThrows(ctx);
     loadFixture();
-    const thrower = Swift.type("fixture.TypedThrower")!.init(10) as SwiftClassObject;
+    const thrower = Swift.type("fixture.TypedThrower")!.init(10)! as SwiftClassObject;
     expect(thrower.scaled(0)).toEqual(int64(20));
     expect(thrownBy(() => thrower.scaled(2)).value).toEqual({ code: int64(12), flag: false });
     expect(thrownBy(() => thrower.$method("scaled").call(2)).message).toBe("Swift function threw fixture.CodedFailure");
@@ -117,7 +117,7 @@ describe("typed throws", () => {
     const wide = Swift.function<Promise<CallResult>>(loadFixture(), THROWS_WIDE_ASYNC);
     expect(await wide.call(0)).toEqual(int64(8));
     expect((await rejectedWith(wide.call(2))).value).toEqual({ a: int64(2), b: int64(3), c: int64(4), d: int64(5), e: int64(6) });
-    const thrower = Swift.type("fixture.TypedThrower")!.init(5) as SwiftClassObject;
+    const thrower = Swift.type("fixture.TypedThrower")!.init(5)! as SwiftClassObject;
     expect(await thrower.scaledAsync(0)).toEqual(int64(15));
     expect((await rejectedWith(thrower.scaledAsync(1) as Promise<CallResult>)).value).toEqual({ code: int64(6), flag: true });
   });

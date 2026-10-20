@@ -39,7 +39,7 @@ describe("vtable route", () => {
 
   test("invokes each slot by offset, reaching the non-exported impl", () => {
     const type = dispatcherType();
-    const obj = type.init();
+    const obj = type.init()!;
     const inst = new ClassInstance(obj.$handle);
     const results = instanceMethods(type.$type)
       .map((e) => inst.vtableMethod(e.metadataOffset, { returnType: Int(), argTypes: [Int()] }).call(10) as number)
@@ -49,7 +49,7 @@ describe("vtable route", () => {
 
   test("the exported slot's impl matches the symbol route", () => {
     const type = dispatcherType();
-    const obj = type.init();
+    const obj = type.init()!;
     const inst = new ClassInstance(obj.$handle);
     const pub = instanceMethods(type.$type).find(
       (e) => (inst.vtableMethod(e.metadataOffset, { returnType: Int(), argTypes: [Int()] }).call(10) as Int64).equals(11)
@@ -85,7 +85,7 @@ describe("unnamed vtable slots on the reflection", () => {
     expect(member.selector).toBe(`vtable#${slot.metadataOffset}`);
     expect(member.signature).toBeNull();
     expect(member.origin).toEqual({ kind: "own", type: "fixture.Dispatcher", module: FIXTURE_MODULE });
-    expect(() => member.bind(dispatcherType().init())).toThrow(/no symbol/);
+    expect(() => member.bind(dispatcherType().init()!)).toThrow(/no symbol/);
   });
 
   test("a slot is not a type method, and a struct has none", () => {

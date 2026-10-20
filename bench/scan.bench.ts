@@ -8,7 +8,7 @@ describe("scan", () => {
     "Swift.choose over a class with live instances",
     ({ measure }) => {
       const Cat = Swift.class("fixture.Cat")!;
-      const alive = [Cat.init(), Cat.init()];
+      const alive = [Cat.init()!, Cat.init()!];
       measure(() => Swift.choose(Cat));
       alive.length = 0;
     },
@@ -19,7 +19,7 @@ describe("scan", () => {
     "Swift.choose over a base class with a static subclass",
     ({ measure }) => {
       const Base = Swift.class("fixture.Base")!;
-      const alive = [Base.init(1), Swift.class("fixture.Derived")!.init()];
+      const alive = [Base.init(1)!, Swift.class("fixture.Derived")!.init()!];
       measure(() => Swift.choose(Base));
       alive.length = 0;
     },
@@ -30,7 +30,7 @@ describe("scan", () => {
     "Swift.choose over a generic class named without arguments",
     ({ measure }) => {
       const Coop = Swift.class("fixture.Coop")!;
-      const alive = [Swift.class("fixture.HenCoop")!.init()];
+      const alive = [Swift.class("fixture.HenCoop")!.init()!];
       measure(() => Swift.choose(Coop));
       alive.length = 0;
     },

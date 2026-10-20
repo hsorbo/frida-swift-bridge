@@ -56,7 +56,7 @@ describe("iterating a Sequence facade", () => {
   });
 
   test("a class conformer passes self through a cell", () => {
-    using playlist = Swift.class("fixture.Playlist")!.init({ names: ["x", "y"] });
+    using playlist = Swift.class("fixture.Playlist")!.init({ names: ["x", "y"] })!;
     expect([...playlist]).toEqual(["x", "y"]);
   });
 

@@ -28,7 +28,7 @@ describe("value return embedding a class ref", () => {
   });
 
   test("a returned aggregate owns its embedded class ref and releases it on dispose", () => {
-    const token = (typeOf(metadataFor("fixture.Token")) as ClassType).facade.init(7);
+    const token = (typeOf(metadataFor("fixture.Token")) as ClassType).facade.init(7)!;
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
 
@@ -48,7 +48,7 @@ describe("value return embedding a class ref", () => {
   });
 
   test("a tuple element owns its storage once the tuple's buffer is gone", () => {
-    const token = (typeOf(metadataFor("fixture.Token")) as ClassType).facade.init(7);
+    const token = (typeOf(metadataFor("fixture.Token")) as ClassType).facade.init(7)!;
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
     const Wrapper = metadataFor("fixture.Wrapper");
@@ -86,7 +86,7 @@ describe("bridge-object container return", () => {
 
     // +1 buffer survived a premature destroy: it sums back through a [Int] param.
     const box = (typeOf(metadataFor("fixture.Box")) as ClassType).facade;
-    expect(box.init().$method("sumInts").call(owned)).toEqual(int64(60));
+    expect(box.init()!.$method("sumInts").call(owned)).toEqual(int64(60));
 
     owned.$dispose();
   });
@@ -96,7 +96,7 @@ describe("opaque existential return", () => {
   beforeEach(() => { loadFixture(); });
 
   test("a class payload stays boxed and alive until the facade is disposed", () => {
-    const greeter = (typeOf(metadataFor("fixture.LoudGreeter")) as ClassType).facade.init("Ada");
+    const greeter = (typeOf(metadataFor("fixture.LoudGreeter")) as ClassType).facade.init("Ada")!;
     const view = new ClassInstance(greeter.$handle);
     const before = view.retainCount;
 

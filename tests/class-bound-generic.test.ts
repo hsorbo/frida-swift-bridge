@@ -8,7 +8,7 @@ import { resolveType } from "../src/runtime/symbolication.js";
 import { lookUpObjCClass } from "../src/runtime/objc.js";
 
 function box(): SwiftObject {
-  return (Swift.type("fixture.Box") as SwiftClass).init();
+  return (Swift.type("fixture.Box") as SwiftClass).init()!;
 }
 
 function classType(name: string): SwiftClass {
@@ -27,14 +27,14 @@ describe("generic method requirements that take no witness table", () => {
 
   test("an AnyObject bound passes and returns a bare reference", () => {
     const Robot = classType("fixture.Robot");
-    const robot = Robot.init("R2");
+    const robot = Robot.init("R2")!;
     const back = box().$method("anyIdentity", { typeArguments: [Robot] }).call(robot) as SwiftObject;
     expect(back.$handle.equals(robot.$handle)).toBe(true);
   });
 
   test("a superclass bound passes a subclass instance as a bare reference", () => {
     const SubSpeaker = classType("fixture.SubSpeaker");
-    const speaker = SubSpeaker.init();
+    const speaker = SubSpeaker.init()!;
     expect(box().$method("speakerOf", { typeArguments: [SubSpeaker] }).call(speaker)).toBe("sub");
   });
 
@@ -45,14 +45,14 @@ describe("generic method requirements that take no witness table", () => {
 
   test("an Optional of a class-bound parameter is a nullable reference", () => {
     const Robot = classType("fixture.Robot");
-    const robot = Robot.init("R2");
+    const robot = Robot.init("R2")!;
     const optionalObject = box().$method("optionalObject", { typeArguments: [Robot] });
     expect(optionalObject.call(null)).toBe(null);
     expect((optionalObject.call(robot) as SwiftObject).$handle.equals(robot.$handle)).toBe(true);
   });
 
   test("an object passed as an Optional argument is neither leaked nor over-released", () => {
-    const robot = classType("fixture.Robot").init("R2");
+    const robot = classType("fixture.Robot").init("R2")!;
     const view = new ClassInstance(robot.$handle);
     const optionalObject = box().$method("optionalObject", { typeArguments: [classType("fixture.Robot")] });
     const before = view.retainCount;
@@ -62,7 +62,7 @@ describe("generic method requirements that take no witness table", () => {
 
   test("a closure returning a class-bound parameter returns a bare reference", () => {
     const Robot = classType("fixture.Robot");
-    const robot = Robot.init("R2");
+    const robot = Robot.init("R2")!;
     const made = box()
       .$method("madeObject", { typeArguments: [Robot], arity: 1 })
       .call(Swift.closure(() => robot)) as SwiftObject;
@@ -74,7 +74,7 @@ describe("generic method requirements that take no witness table", () => {
     const Robot = classType("fixture.Robot");
     const made = box()
       .$method("madeObject", { typeArguments: [Robot], arity: 2 })
-      .call(3, Swift.closure((n: Int64) => Robot.init(`R${n}`))) as SwiftObject;
+      .call(3, Swift.closure((n: Int64) => Robot.init(`R${n}`)!)) as SwiftObject;
     expect(made.name).toBe("R3");
   });
 });
@@ -85,12 +85,12 @@ describe("class-bound generic parameters of Objective-C types", () => {
   test("a Swift-declared @objc protocol bound takes no witness table", (ctx) => {
     requireDarwin(ctx);
     const Bat = classType("fixture.Bat");
-    expect(box().$method("flaps", { typeArguments: [Bat] }).call(Bat.init())).toEqual(int64(2));
+    expect(box().$method("flaps", { typeArguments: [Bat] }).call(Bat.init()!)).toEqual(int64(2));
   });
 
   test("a method of a generic type passes its class-bound parameter as a bare reference", (ctx) => {
     requireDarwin(ctx);
-    const conformer = classType("fixture.ObjCConformer").init();
+    const conformer = classType("fixture.ObjCConformer").init()!;
     const holder = (Swift.type("fixture.ObjCBoxes") as SwiftEnum).$call("conformerRefBox", conformer) as SwiftObject;
     expect(holder.holds(conformer)).toBe(true);
     expect((holder.held() as SwiftObject).$handle.equals(conformer.$handle)).toBe(true);
@@ -98,8 +98,8 @@ describe("class-bound generic parameters of Objective-C types", () => {
 
   test("a method of a generic struct whose only field is class-bound passes self directly", (ctx) => {
     requireDarwin(ctx);
-    const conformer = classType("fixture.ObjCConformer").init();
-    const other = classType("fixture.ObjCConformer").init();
+    const conformer = classType("fixture.ObjCConformer").init()!;
+    const other = classType("fixture.ObjCConformer").init()!;
     const valueBox = (Swift.type("fixture.ObjCBoxes") as SwiftEnum).$call("conformerValueBox", conformer) as SwiftObject;
     expect(valueBox.$method("holds", { self: "borrowing" }).call(conformer)).toBe(true);
     expect(valueBox.$method("holds", { self: "borrowing" }).call(other)).toBe(false);

@@ -5,7 +5,7 @@ import { Swift, SwiftObject, SwiftClass, SwiftStruct } from "../src/index.js";
 import { ClassInstance } from "../src/abi.js";
 
 function robot(name: string): SwiftObject {
-  return (Swift.type("fixture.Robot") as SwiftClass).init(name);
+  return (Swift.type("fixture.Robot") as SwiftClass).init(name)!;
 }
 
 function int(n: number): SwiftObject {
@@ -13,7 +13,7 @@ function int(n: number): SwiftObject {
 }
 
 function box(): SwiftObject {
-  return (Swift.type("fixture.Box") as SwiftClass).init();
+  return (Swift.type("fixture.Box") as SwiftClass).init()!;
 }
 
 describe("__owned parameters", () => {
@@ -31,7 +31,7 @@ describe("__owned parameters", () => {
     const Int = Swift.type("Swift.Int");
     const Token = Swift.type("fixture.Token") as SwiftClass;
     const Wrapper = Swift.type("fixture.Wrapper") as SwiftStruct;
-    const token = Token.init(5);
+    const token = Token.init(5)!;
     const wrapper = Wrapper.$call("make", token) as SwiftObject;
     const view = new ClassInstance(token.$handle);
     const before = view.retainCount;
@@ -89,7 +89,7 @@ describe("inout parameters", () => {
 
   test("an async method writes back before it settles", async () => {
     const n = int(5);
-    await (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100).accumulateAsync(n);
+    await (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100)!.accumulateAsync(n);
     expect(n.$fields).toEqual(int64(105));
   });
 

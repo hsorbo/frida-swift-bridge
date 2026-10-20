@@ -58,7 +58,7 @@ import {
 
 export interface SwiftClassBoundInitializer {
   readonly address: NativePointer;
-  call(...args: CallArg[]): SwiftClassObject;
+  call(...args: CallArg[]): SwiftClassObject | null;
 }
 
 // A nominal type's facade: its type methods, static properties, enum cases and nested types under
@@ -287,7 +287,7 @@ export class SwiftClass extends SwiftTypeFacade {
   private initializers = new Map<ModuleScope, ClassInitializer[]>();
   private initializersAmongModules = 0;
 
-  init(...args: CallArg[]): SwiftClassObject {
+  init(...args: CallArg[]): SwiftClassObject | null {
     const lookup = this.initLookup(args);
     return this.$initializer(lookup.options).call(...lookup.args);
   }
@@ -332,7 +332,7 @@ export class SwiftClass extends SwiftTypeFacade {
         const argPtrs = marshalConsumedArgs(argTypes, args);
         const instance = call(metadata.handle, ...argPtrs)!.readPointer();
         if (chosen.failable && instance.isNull()) {
-          throw new Error(`${fullName}.init returned nil`);
+          return null;
         }
         return asSwiftObject(ClassInstance.adopt(instance));
       },

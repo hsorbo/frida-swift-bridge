@@ -51,7 +51,7 @@ describe("calling a vtable slot with a supplied signature", () => {
   });
 
   test("a slot is called through $method as the /abi route calls it", () => {
-    const obj = host().init(10);
+    const obj = host().init(10)!;
     const bound = obj.$method(slots().plain, INT_TO_INT);
     expect(bound.call(5)).toEqual(int64(15));
     const Int = metadataFor("Swift.Int")!;
@@ -79,19 +79,19 @@ describe("calling a vtable slot with a supplied signature", () => {
     expect(named.selector).toBe("plain(_:)");
     expect(named.signature!.labels).toEqual([null]);
     expect(named.address.equals(nameless.address)).toBe(true);
-    expect(named.bind(host().init(1)).call(2)).toEqual(int64(3));
+    expect(named.bind(host().init(1)!).call(2)).toEqual(int64(3));
   });
 
   test("a subclass finds the inherited slot with its own override, through bind and $method", () => {
     const { plain } = slots();
-    const sub = Swift.class("fixture.SlotSubHost")!.init(10);
+    const sub = Swift.class("fixture.SlotSubHost")!.init(10)!;
     expect(sub.$method(plain, INT_TO_INT).call(4)).toEqual(int64(6));
     expect(host().$type.instanceMethod(plain, INT_TO_INT).bind(sub).call(4)).toEqual(int64(6));
-    expect(host().init(10).$method(plain, INT_TO_INT).call(4)).toEqual(int64(14));
+    expect(host().init(10)!.$method(plain, INT_TO_INT).call(4)).toEqual(int64(14));
   });
 
   test("a throwing slot raises SwiftError", () => {
-    const bound = host().init(10).$method(slots().checked, "(x: Swift.Int) throws -> Swift.Int");
+    const bound = host().init(10)!.$method(slots().checked, "(x: Swift.Int) throws -> Swift.Int");
     expect(bound.signature.throws).toBe(true);
     expect(bound.call(5)).toEqual(int64(15));
     expect(() => bound.call(-1)).toThrow(SwiftError);
@@ -101,7 +101,7 @@ describe("calling a vtable slot with a supplied signature", () => {
     const { later } = slots();
     const word = metadataOf(host().$type).handle.add(offsetOf(later) * Process.pointerSize).readPointer();
     expect(host().$type.instanceMethod(later).address.equals(new AsyncFunctionPointer(word).code)).toBe(true);
-    const bound = host().init(10).$method(later, "(x: Swift.Int) async -> Swift.Int");
+    const bound = host().init(10)!.$method(later, "(x: Swift.Int) async -> Swift.Int");
     expect(bound.signature.isAsync).toBe(true);
     expect(await bound.call(5)).toEqual(int64(50));
   });
@@ -119,14 +119,14 @@ describe("calling a vtable slot with a supplied signature", () => {
 
   test("a missing or contradicting signature is refused", () => {
     const { plain, later } = slots();
-    const obj = host().init(10);
+    const obj = host().init(10)!;
     expect(() => host().$type.instanceMethod(plain).bind(obj)).toThrow(/no symbol/);
     expect(() => obj.$method(plain)).toThrow(/no method/);
     expect(() => obj.$method(plain, "(x: Swift.Int)")).toThrow(/cannot parse a signature/);
     expect(() => obj.$method(plain, "(x: Swift.Int) async -> Swift.Int")).toThrow(/is not async/);
     expect(() => obj.$method(later, INT_TO_INT)).toThrow(/is async/);
     expect(() => obj.$method("vtable#1", INT_TO_INT)).toThrow(/no instance method vtable#1/);
-    expect(() => Swift.class("fixture.Dispatcher")!.init().$method("pub", "(_: Swift.Int) -> Swift.Int")).toThrow(/not a vtable#/);
+    expect(() => Swift.class("fixture.Dispatcher")!.init()!.$method("pub", "(_: Swift.Int) -> Swift.Int")).toThrow(/not a vtable#/);
   });
 
   test("a typed hook on a slot sees typed args and the result", () => {
@@ -143,13 +143,13 @@ describe("calling a vtable slot with a supplied signature", () => {
       },
     });
     try {
-      expect(host().init(10).$method(plain, INT_TO_INT).call(5)).toEqual(int64(15));
+      expect(host().init(10)!.$method(plain, INT_TO_INT).call(5)).toEqual(int64(15));
     } finally {
       listener.detach();
     }
     expect(seen).toEqual([int64(5)]);
     expect(left).toEqual(int64(15));
-    const viaBound = Swift.Interceptor.attach(host().init(1).$method(plain, INT_TO_INT), { onEnter() {} });
+    const viaBound = Swift.Interceptor.attach(host().init(1)!.$method(plain, INT_TO_INT), { onEnter() {} });
     viaBound.detach();
   });
 });
@@ -172,7 +172,7 @@ describe("calling a witness slot with a supplied signature", () => {
 
   test("a class's witness slot takes the object as the protocol's Self convention has it", () => {
     const selector = methodSlot("fixture.Vocal");
-    const speaker = Swift.class("fixture.BaseSpeaker")!.init();
+    const speaker = Swift.class("fixture.BaseSpeaker")!.init()!;
     expect(speaker.$method(selector, "() -> Swift.String").call()).toBe("base");
     const member = Swift.class("fixture.BaseSpeaker")!.$type.instanceMethod(selector, "speak() -> Swift.String");
     expect(member.selector).toBe("speak()");
@@ -180,7 +180,7 @@ describe("calling a witness slot with a supplied signature", () => {
   });
 
   test("a witness slot is refused as a typed hook target, like a named requirement", () => {
-    const speaker = Swift.class("fixture.BaseSpeaker")!.init();
+    const speaker = Swift.class("fixture.BaseSpeaker")!.init()!;
     const bound = speaker.$method(methodSlot("fixture.Vocal"), "() -> Swift.String");
     expect(() => Swift.Interceptor.attach(bound, { onEnter() {} })).toThrow(/protocol witness/);
     const member = Swift.class("fixture.BaseSpeaker")!.$type.instanceMethod(methodSlot("fixture.Vocal"), "() -> Swift.String");

@@ -72,7 +72,7 @@ describe("Swift.function", () => {
   });
 
   test("binds a class receiver for a sync instance method: Robot(\"R2\").greet(\"X\")", () => {
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     const greet = Swift.function(module, ROBOT_GREET).bind(robot);
     expect(greet("X")).toBe("Hello X, I am R2");
   });
@@ -197,7 +197,7 @@ describe("Swift.function", () => {
       },
     });
     try {
-      expect(greet.bind(Swift.class("fixture.Robot")!.init("R2"))("X")).toBe("Hello X, I am R2");
+      expect(greet.bind(Swift.class("fixture.Robot")!.init("R2")!)("X")).toBe("Hello X, I am R2");
       expect(seen).toEqual(["X"]);
     } finally {
       listener.detach();
@@ -211,7 +211,7 @@ describe("Swift.function from a qualified selector", () => {
   });
 
   function robot(name: string) {
-    return Swift.class("fixture.Robot")!.init(name);
+    return Swift.class("fixture.Robot")!.init(name)!;
   }
 
   test("an instance method takes self first: Robot.move(to:)(robot, 5) ⇒ 5, move(by:) ⇒ 50", () => {
@@ -243,7 +243,7 @@ describe("Swift.function from a qualified selector", () => {
   test("a selector shared by a type and an instance member needs { static }", () => {
     expect(() => Swift.function("fixture.Dial.scaled(_:)")).toThrow(/pick one with \{ static: true \}/);
     expect(Swift.function("fixture.Dial.scaled(_:)", { static: true }).call(2)).toEqual(int64(200));
-    const dial = Swift.struct("fixture.Dial")!.init({ value: 7 });
+    const dial = Swift.struct("fixture.Dial")!.init({ value: 7 })!;
     expect(Swift.function("fixture.Dial.scaled(_:)", { static: false }).call(dial, 3)).toEqual(int64(21));
   });
 
@@ -259,7 +259,7 @@ describe("Swift.function from a qualified selector", () => {
   });
 
   test("an async member returns a Promise", async () => {
-    const calc = Swift.class("fixture.AsyncCalc")!.init(100);
+    const calc = Swift.class("fixture.AsyncCalc")!.init(100)!;
     expect(await Swift.function("fixture.AsyncCalc.addAsync(_:)").call(calc, 5)).toEqual(int64(105));
   });
 
@@ -288,7 +288,7 @@ describe("Swift.function from a qualified selector", () => {
 
     const addAsync = Swift.function("fixture.AsyncCalc.addAsync(_:)");
     expect(addAsync.signature.isAsync).toBe(true);
-    const calc = Swift.class("fixture.AsyncCalc")!.init(100);
+    const calc = Swift.class("fixture.AsyncCalc")!.init(100)!;
     let seenAsync: unknown;
     const asyncListener = Swift.Interceptor.attachAsync(addAsync, {
       onEnter(args) {
@@ -318,7 +318,7 @@ describe("receivers across binding routes", () => {
     acc.$dispose();
     expect(() => peek(5)).toThrow(/disposed/);
 
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     const greet = Swift.function(module, ROBOT_GREET).bind(robot);
     robot.$dispose();
     expect(() => greet("X")).toThrow(/disposed/);
@@ -326,37 +326,37 @@ describe("receivers across binding routes", () => {
   });
 
   test("a function bound by symbol keeps its receiver alive", () => {
-    const greet = (() => Swift.function(module, ROBOT_GREET).bind(Swift.class("fixture.Robot")!.init("R2")))();
+    const greet = (() => Swift.function(module, ROBOT_GREET).bind(Swift.class("fixture.Robot")!.init("R2")!))();
     gc();
     expect(greet("X")).toBe("Hello X, I am R2");
   });
 
   test("a function bound by symbol refuses a receiver of an unrelated type", () => {
-    const speaker = Swift.class("fixture.BaseSpeaker")!.init();
+    const speaker = Swift.class("fixture.BaseSpeaker")!.init()!;
     expect(() => Swift.function(module, ROBOT_GREET).bind(speaker)).toThrow(/takes a fixture.Robot receiver, not a fixture.BaseSpeaker/);
     const box = (Swift.type("fixture.SmallGenericBox") as SwiftStruct).$new({ base: 10 });
     expect(() => Swift.function(module, ACCUMULATOR_PEEK).bind(box)).toThrow(/takes a fixture.Accumulator receiver/);
-    expect(Swift.function(module, BASE_SPEAKER_SPEAK).bind(Swift.class("fixture.SubSpeaker")!.init())()).toBe("base");
+    expect(Swift.function(module, BASE_SPEAKER_SPEAK).bind(Swift.class("fixture.SubSpeaker")!.init()!)()).toBe("base");
   });
 
   test("a reflected member binds a subclass instance to its override and refuses an unrelated one", () => {
     const speak = Swift.class("fixture.BaseSpeaker")!.$type.instanceMethod("speak");
-    expect(speak.bind(Swift.class("fixture.SubSpeaker")!.init()).call()).toBe("sub");
-    expect(() => speak.bind(Swift.class("fixture.BaseSquawker")!.init())).toThrow(/takes a fixture.BaseSpeaker receiver, not a fixture.BaseSquawker/);
+    expect(speak.bind(Swift.class("fixture.SubSpeaker")!.init()!).call()).toBe("sub");
+    expect(() => speak.bind(Swift.class("fixture.BaseSquawker")!.init()!)).toThrow(/takes a fixture.BaseSpeaker receiver, not a fixture.BaseSquawker/);
     const subSpeak = Swift.class("fixture.SubSpeaker")!.$type.instanceMethod("speak");
-    expect(() => subSpeak.bind(Swift.class("fixture.BaseSpeaker")!.init())).toThrow(/takes a fixture.SubSpeaker receiver/);
+    expect(() => subSpeak.bind(Swift.class("fixture.BaseSpeaker")!.init()!)).toThrow(/takes a fixture.SubSpeaker receiver/);
   });
 
   test("a member of an unbound generic type binds any specialization of it", () => {
     const get = Swift.struct("fixture.Keyed")!.$type.instanceMethod("get");
     expect(get.bind(Swift.struct("fixture.Keyed<Swift.Int>")!.init(5)!).call()).toEqual(int64(5));
     expect(get.bind(Swift.struct("fixture.Keyed<Swift.String>")!.init("c")!).call()).toBe("c");
-    expect(() => get.bind(Swift.class("fixture.BaseSpeaker")!.init())).toThrow(/takes a fixture.Keyed receiver/);
+    expect(() => get.bind(Swift.class("fixture.BaseSpeaker")!.init()!)).toThrow(/takes a fixture.Keyed receiver/);
   });
 
   test("a qualified function dispatches on a subclass self and refuses an unrelated one", () => {
     const speak = Swift.function("fixture.BaseSpeaker.speak()");
-    expect(speak.call(Swift.class("fixture.SubSpeaker")!.init())).toBe("sub");
-    expect(() => speak.call(Swift.class("fixture.BaseSquawker")!.init())).toThrow(/takes a fixture.BaseSpeaker receiver/);
+    expect(speak.call(Swift.class("fixture.SubSpeaker")!.init()!)).toBe("sub");
+    expect(() => speak.call(Swift.class("fixture.BaseSquawker")!.init()!)).toThrow(/takes a fixture.BaseSpeaker receiver/);
   });
 });

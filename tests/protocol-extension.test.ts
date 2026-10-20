@@ -31,12 +31,12 @@ describe("protocol-extension members on a conforming type", () => {
   });
 
   test("a class reaches an extension method of a protocol that is not class-bound", () => {
-    const speaker = (Swift.type("fixture.SubSpeaker") as SwiftClass).init();
+    const speaker = (Swift.type("fixture.SubSpeaker") as SwiftClass).init()!;
     expect(speaker.speakTwice()).toBe("subsub");
   });
 
   test("a class reaches an extension method of a class-bound protocol", () => {
-    const squawker = (Swift.type("fixture.SubSquawker") as SwiftClass).init();
+    const squawker = (Swift.type("fixture.SubSquawker") as SwiftClass).init()!;
     expect(squawker.squawkTwice()).toBe("subsub");
   });
 
@@ -150,7 +150,7 @@ describe("constrained protocol-extension members", () => {
   test("a superclass-constrained extension method is listed and callable on a subclass that conforms", () => {
     const type = Swift.type("fixture.PerchedBird") as SwiftClass;
     expect(type.$type.instanceMethods({ deep: true })).toContain("perchedChirp()");
-    expect(type.init({ call: "tweet" }).perchedChirp()).toBe("perched tweet");
+    expect(type.init({ call: "tweet" })!.perchedChirp()).toBe("perched tweet");
   });
 
   test("a protocol-constrained extension method passes the extra witness table in canonical order", () => {
@@ -190,12 +190,12 @@ describe("constrained protocol-extension members", () => {
   });
 
   test("an associated type made class-bound by the where clause passes and returns directly", () => {
-    const nightjar = (Swift.type("fixture.Nightjar") as SwiftClass).init() as SwiftObject;
+    const nightjar = (Swift.type("fixture.Nightjar") as SwiftClass).init()! as SwiftObject;
     const nightjarNest = (Swift.type("fixture.NightjarNest") as SwiftStruct).init(nightjar)!;
     expect((nightjarNest.nocturnalEcho(nightjar) as SwiftObject).$handle.equals(nightjar.$handle)).toBe(true);
     expect((nightjarNest.nocturnalEgg as SwiftObject).$handle.equals(nightjar.$handle)).toBe(true);
     expect((nightjarNest.objectEcho(nightjar) as SwiftObject).$handle.equals(nightjar.$handle)).toBe(true);
-    const rook = (Swift.type("fixture.Rook") as SwiftClass).init() as SwiftObject;
+    const rook = (Swift.type("fixture.Rook") as SwiftClass).init()! as SwiftObject;
     const rookNest = (Swift.type("fixture.RookNest") as SwiftStruct).init(rook)!;
     expect((rookNest.rookeryEcho(rook) as SwiftObject).$handle.equals(rook.$handle)).toBe(true);
   });
@@ -203,26 +203,26 @@ describe("constrained protocol-extension members", () => {
   test("a superclass constraint that implies the conformance passes no witness table", () => {
     const type = Swift.type("fixture.Rook") as SwiftClass;
     expect(type.$type.instanceMethods({ deep: true })).toContain("rookeryChirp()");
-    expect(type.init().rookeryChirp()).toBe("rookery caw");
+    expect(type.init()!.rookeryChirp()).toBe("rookery caw");
   });
 
   test("a class-bound protocol constraint passes self as a plain reference", () => {
     const type = Swift.type("fixture.Nightjar") as SwiftClass;
     expect(type.$type.instanceMethods({ deep: true })).toContain("nightChirp()");
-    expect(type.init().nightChirp()).toBe("night churr");
+    expect(type.init()!.nightChirp()).toBe("night churr");
   });
 
   test("a generic superclass constraint is met by a subclass of that specialization", () => {
     const type = Swift.type("fixture.HenCoop") as SwiftClass;
     expect(type.$type.instanceMethods({ deep: true })).toContain("coopChirp()");
-    expect(type.init().coopChirp()).toBe("coop cluck");
+    expect(type.init()!.coopChirp()).toBe("coop cluck");
   });
 
   test("an ObjC superclass constraint is met by a Swift subclass", (ctx) => {
     requireDarwin(ctx);
     const type = Swift.type("fixture.Starling") as SwiftClass;
     expect(type.$type.instanceMethods({ deep: true })).toContain("objcChirp()");
-    expect(type.init().objcChirp()).toBe("objc whistle");
+    expect(type.init()!.objcChirp()).toBe("objc whistle");
   });
 
   test("a protocol nested in a type comes after top-level ones in the witness tables", (ctx) => {
@@ -267,7 +267,7 @@ describe("constrained protocol-extension members", () => {
     requireDarwin(ctx);
     const type = Swift.type("fixture.Bat") as SwiftClass;
     expect(type.$type.instanceMethods({ deep: true })).toContain("wingedChirp()");
-    expect(type.init().wingedChirp()).toBe("winged 2 squeak");
+    expect(type.init()!.wingedChirp()).toBe("winged 2 squeak");
     expect((Swift.type("fixture.Starling") as SwiftClass).$type.instanceMethods({ deep: true })).not.toContain("wingedChirp()");
   });
 

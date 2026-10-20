@@ -4,7 +4,7 @@ import { loadFixture, loadFixtureSyms, loadOptimized, fixtureExport } from "./fi
 import { Swift, SwiftObject, type CallResult, SwiftClass, SwiftStruct } from "../src/index.js";
 
 function robot(name: string): SwiftObject {
-  return (Swift.type("fixture.Robot") as SwiftClass).init(name);
+  return (Swift.type("fixture.Robot") as SwiftClass).init(name)!;
 }
 
 function accumulator(total: number): SwiftObject {
@@ -212,7 +212,7 @@ describe("Interceptor self", () => {
   });
 
   test("an async class method's self is set on enter", async () => {
-    const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100);
+    const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100)!;
     let seen: SwiftObject | null = null;
     const listener = Swift.Interceptor.attachAsync(calc.$method("addAsync").address, {
       onEnter() {

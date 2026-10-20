@@ -50,7 +50,7 @@ describe("Swift.Interceptor.attach", () => {
     const Int = metadataFor("Swift.Int")!;
     const Dispatcher = metadataFor("fixturesyms.Dispatcher")!;
     const slot = readVTableChain(new ClassMetadata(Dispatcher.handle)).find((e) => e.declaredImpl.equals(hidden.address))!;
-    const obj = Swift.type("fixturesyms.Dispatcher")!.init() as SwiftObject;
+    const obj = Swift.type("fixturesyms.Dispatcher")!.init()! as SwiftObject;
     const dispatcher = new ClassInstance(obj.$handle);
     let seenArgs: CallResult[] | null = null;
     let seenRet: CallResult = null;

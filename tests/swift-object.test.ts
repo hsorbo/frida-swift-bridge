@@ -5,11 +5,11 @@ import { requireDarwin } from "./swift.js";
 import { Swift, SwiftClass } from "../src/index.js";
 
 function robot(name: string) {
-  return Swift.class("fixture.Robot")!.init(name);
+  return Swift.class("fixture.Robot")!.init(name)!;
 }
 
 function cat() {
-  return Swift.class("fixture.Cat")!.init();
+  return Swift.class("fixture.Cat")!.init()!;
 }
 
 describe("Swift object method sugar", () => {
@@ -143,7 +143,7 @@ describe("Swift object intrinsics", () => {
 
   test("calls a method and reads a field of a Swift subclass of an ObjC class", (ctx) => {
     requireDarwin(ctx);
-    const starling = (Swift.type("fixture.Starling") as SwiftClass).init();
+    const starling = (Swift.type("fixture.Starling") as SwiftClass).init()!;
     expect(starling.chirp()).toBe("whistle");
     expect(starling.pitch).toEqual(int64(5));
   });
@@ -197,7 +197,7 @@ describe("Swift object intrinsics", () => {
 });
 
 function clash(handle: number) {
-  return Swift.class("fixture.Clash")!.init(handle);
+  return Swift.class("fixture.Clash")!.init(handle)!;
 }
 
 describe("Swift object collision-proofing", () => {
@@ -245,7 +245,7 @@ describe("Swift object bridge namespace", () => {
   });
 
   test("a property wrapper's projected value is read through $get", () => {
-    const o = (Swift.type("fixture.Projecting") as SwiftClass).init();
+    const o = (Swift.type("fixture.Projecting") as SwiftClass).init()!;
     expect(o.n).toEqual(int64(3));
     // @ts-expect-error a projected value's $ name is not a declared control; $get reads it
     expect(o.$n).toBeUndefined();

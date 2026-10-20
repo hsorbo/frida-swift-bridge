@@ -110,7 +110,7 @@ describe("consuming methods on value types", () => {
   beforeEach(() => { loadFixture(); });
 
   function token(id: number): { facade: SwiftObject; view: ClassInstance } {
-    const facade = Swift.class("fixture.Token")!.init(id);
+    const facade = Swift.class("fixture.Token")!.init(id)!;
     return { facade, view: new ClassInstance(facade.$handle) };
   }
 

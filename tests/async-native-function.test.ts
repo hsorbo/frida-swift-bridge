@@ -97,7 +97,7 @@ describe("Swift.function on async symbols", () => {
   });
 
   test("binds a class receiver for an instance method: calc(100).addAsync(5) ⇒ 105", async () => {
-    const calc = Swift.class("fixture.AsyncCalc")!.init(100);
+    const calc = Swift.class("fixture.AsyncCalc")!.init(100)!;
     const addAsync = Swift.function(module, ADD_ASYNC).bind(calc);
     expect(await addAsync(5)).toEqual(int64(105));
   });

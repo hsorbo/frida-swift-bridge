@@ -15,11 +15,11 @@ describe("lookup", () => {
 
   bench("class init", ({ measure }) => {
     const Robot = Swift.class("fixture.Robot")!;
-    measure(() => Robot.init("R2"));
+    measure(() => Robot.init("R2")!);
   });
 
   bench("object method call", ({ measure }) => {
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     measure(() => robot.greet("Alice"));
   });
 
@@ -35,7 +35,7 @@ describe("lookup", () => {
   });
 
   bench("Swift.Interceptor attach and detach on a facade method", ({ measure }) => {
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     measure(() => Swift.Interceptor.attach(robot.greet, { onEnter() {} }).detach());
   });
 
@@ -83,7 +83,7 @@ describe("listing", () => {
   });
 
   bench("Object.keys on an object facade", ({ measure }) => {
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     measure(() => Object.keys(robot));
   });
 });

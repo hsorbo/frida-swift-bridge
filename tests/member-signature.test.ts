@@ -4,7 +4,7 @@ import { loadFixture } from "./fixtures/load.js";
 import { Swift, SwiftClass, SwiftStruct, type SwiftObject, type CallResult, type SwiftValue } from "../src/index.js";
 
 function robot(name: string): SwiftObject {
-  return (Swift.type("fixture.Robot") as SwiftClass).init(name);
+  return (Swift.type("fixture.Robot") as SwiftClass).init(name)!;
 }
 
 describe("a member's signature", () => {
@@ -33,7 +33,7 @@ describe("a member's signature", () => {
     expect(move.signature.returnType!.name).toBe("Swift.Int");
     expect(robot("R2").$method("rename").signature.returnType).toBe(null);
     const Int = Swift.type("Swift.Int")!;
-    const echo = (Swift.type("fixture.Box") as SwiftClass).init().$method("echo", { typeArguments: [Int] });
+    const echo = (Swift.type("fixture.Box") as SwiftClass).init()!.$method("echo", { typeArguments: [Int] });
     expect(echo.signature.argTypeNames).toEqual(["A"]);
     expect(echo.signature.argTypes[0]!.name).toBe("Swift.Int");
     const run = (Swift.type("fixture.ByteSource") as SwiftStruct).$type.instanceMethod("run");
@@ -42,7 +42,7 @@ describe("a member's signature", () => {
 
   test("effects and a typed throw are part of the signature", (ctx) => {
     if (Swift.type("fixture.TypedThrower") === null) ctx.skip("fixture compiled without typed throws (Swift < 6.0)");
-    const thrower = (Swift.type("fixture.TypedThrower") as SwiftClass).init(1);
+    const thrower = (Swift.type("fixture.TypedThrower") as SwiftClass).init(1)!;
     const scaled = thrower.$method("scaled").signature;
     expect([scaled.throws, scaled.thrownTypeName, scaled.isAsync]).toEqual([true, "fixture.CodedFailure", false]);
     const scaledAsync = thrower.$method("scaledAsync").signature;
@@ -86,7 +86,7 @@ describe("hooking a member", () => {
   });
 
   test("an async bound method hooks its completion", async () => {
-    const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100);
+    const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100)!;
     let seen: CallResult = null;
     const listener = Swift.Interceptor.attachAsync(calc.$method("addAsync"), {
       onComplete(ret) {
@@ -103,7 +103,7 @@ describe("hooking a member", () => {
 
   test("a generic member hooks without type arguments and reads them per call", () => {
     const Int = Swift.type("Swift.Int")!;
-    const box = (Swift.type("fixture.Box") as SwiftClass).init();
+    const box = (Swift.type("fixture.Box") as SwiftClass).init()!;
     let seen: string[] | null = null;
     const listener = Swift.Interceptor.attach(box.$type.instanceMethod("echo"), {
       onEnter() {

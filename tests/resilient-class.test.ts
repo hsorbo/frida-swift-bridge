@@ -20,7 +20,7 @@ describe("resilient superclass (cross-module fixture)", () => {
   beforeEach(() => { loadFixture(); });
 
   test("reads both the inherited and the subclass's own stored property", () => {
-    const obj = concreteSubType().init(3, 4);
+    const obj = concreteSubType().init(3, 4)!;
     expect(obj.$field("tag").read()).toEqual(int64(3));
     expect(obj.$field("extra").read()).toEqual(int64(4));
   });
@@ -32,10 +32,10 @@ describe("resilient superclass (cross-module fixture)", () => {
     expect(entries.length).toBe(1); // ResilientBase.greeting, inherited positionally
     const slot = entries[0].metadataOffset;
 
-    const sub = concreteSubType().init(1, 2);
+    const sub = concreteSubType().init(1, 2)!;
     expect(new ClassInstance(sub.$handle).vtableMethod(slot, { returnType: String_(), argTypes: [] }).call()).toBe("sub");
 
-    const base = resilientBaseType().init(1);
+    const base = resilientBaseType().init(1)!;
     expect(new ClassInstance(base.$handle).vtableMethod(slot, { returnType: String_(), argTypes: [] }).call()).toBe("base");
   });
 
@@ -45,7 +45,7 @@ describe("resilient superclass (cross-module fixture)", () => {
     );
     const { declaredImpl, metadataOffset } = entries[0];
 
-    const sub = concreteSubType().init(1, 2);
+    const sub = concreteSubType().init(1, 2)!;
     const live = new ClassInstance(sub.$handle).vtableMethod(metadataOffset, { returnType: String_(), argTypes: [] }).address;
     expect(live.equals(declaredImpl)).toBe(false);
   });

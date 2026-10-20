@@ -4,7 +4,7 @@ import { loadFixture } from "./fixtures/load.js";
 import { Swift, SwiftClass, SwiftStruct, type SwiftObject, type SwiftValueObject, type CallResult } from "../src/index.js";
 
 function robot(name: string): SwiftObject {
-  return (Swift.type("fixture.Robot") as SwiftClass).init(name);
+  return (Swift.type("fixture.Robot") as SwiftClass).init(name)!;
 }
 
 function int(n: number): SwiftObject {
@@ -65,7 +65,7 @@ describe("hooks on functions with inout parameters", () => {
     const b = int(2);
     const seen: CallResult[][] = [];
     let views: SwiftValueObject[] = [];
-    const box = (Swift.type("fixture.Box") as SwiftClass).init();
+    const box = (Swift.type("fixture.Box") as SwiftClass).init()!;
     const listener = Swift.Interceptor.attach(box.$method("swapped", { typeArguments: [Int] }).address, {
       onEnter(args) {
         expect(this.typeArguments).toEqual(["Swift.Int"]);
@@ -86,7 +86,7 @@ describe("hooks on functions with inout parameters", () => {
 
   test("an async hook sees the inout argument on entry and its update on completion", async () => {
     const n = int(5);
-    const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100);
+    const calc = (Swift.type("fixture.AsyncCalc") as SwiftClass).init(100)!;
     const seen: CallResult[] = [];
     let view: SwiftValueObject | null = null;
     const listener = Swift.Interceptor.attachAsync(calc.$method("accumulateAsync").address, {

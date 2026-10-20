@@ -6,7 +6,7 @@ import { Swift, SwiftClassObject } from "../src/index.js";
 import { ValueInstance } from "../src/abi.js";
 
 function robot(name: string) {
-  return Swift.class("fixture.Robot")!.init(name);
+  return Swift.class("fixture.Robot")!.init(name)!;
 }
 
 describe("stable object boundary", () => {

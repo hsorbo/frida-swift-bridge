@@ -103,7 +103,7 @@ describe("Swift.reflect(metadata)", () => {
   });
 
   test("a metatype-typed field reads as reflection", () => {
-    const tagged = Swift.class("fixture.TypeTagged")!.init();
+    const tagged = Swift.class("fixture.TypeTagged")!.init()!;
     const Robot = Swift.type("fixture.Robot")!.$type;
     expect(tagged.$fields).toEqual({ tag: int64(1), any: Swift.reflect("Swift.String"), robot: Robot });
     expect(tagged.$field("robot").read()).toBe(Robot);

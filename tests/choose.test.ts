@@ -13,8 +13,8 @@ describe("Swift.choose", () => {
 
   test("finds the live instances of a class as borrowed facades", () => {
     const Base = Swift.class("fixture.Base")!;
-    const first = Base.init({ kind: 1 });
-    const second = Base.init({ kind: 2 });
+    const first = Base.init({ kind: 1 })!;
+    const second = Base.init({ kind: 2 })!;
     const found = Swift.choose(Base, { subclasses: false });
     expect(handles(found)).toContain(first.$handle.toString());
     expect(handles(found)).toContain(second.$handle.toString());
@@ -24,7 +24,7 @@ describe("Swift.choose", () => {
 
   test("includes subclass instances by default and excludes them on request", () => {
     const Base = Swift.class("fixture.Base")!;
-    const derived = Swift.class("fixture.Derived")!.init();
+    const derived = Swift.class("fixture.Derived")!.init()!;
     const withSubclasses = Swift.choose(Base);
     expect(handles(withSubclasses)).toContain(derived.$handle.toString());
     expect(withSubclasses.find((o) => o.$handle.equals(derived.$handle))!.$type.name).toBe("fixture.Derived");
@@ -32,8 +32,8 @@ describe("Swift.choose", () => {
   }, { timeout: 30000 });
 
   test("a generic class named without arguments covers its live specializations", () => {
-    const intCell = Swift.class("fixture.Cell<Swift.Int>")!.init(5);
-    const stringCell = Swift.class("fixture.Cell<Swift.String>")!.init("five");
+    const intCell = Swift.class("fixture.Cell<Swift.Int>")!.init(5)!;
+    const stringCell = Swift.class("fixture.Cell<Swift.String>")!.init("five")!;
     const found = Swift.choose(Swift.class("fixture.Cell")!);
     expect(handles(found)).toContain(intCell.$handle.toString());
     expect(handles(found)).toContain(stringCell.$handle.toString());
@@ -41,7 +41,7 @@ describe("Swift.choose", () => {
   });
 
   test("reaches a subclass of a generic superclass", () => {
-    const coop = Swift.class("fixture.HenCoop")!.init();
+    const coop = Swift.class("fixture.HenCoop")!.init()!;
     const found = Swift.choose(Swift.class("fixture.Coop")!);
     expect(handles(found)).toContain(coop.$handle.toString());
     expect(handles(Swift.choose(Swift.class("fixture.HenCoop")!))).toEqual([coop.$handle.toString()]);
@@ -49,13 +49,13 @@ describe("Swift.choose", () => {
 
   test("finds instances of a Swift subclass of an ObjC class", (ctx) => {
     requireDarwin(ctx);
-    const starling = Swift.class("fixture.Starling")!.init();
+    const starling = Swift.class("fixture.Starling")!.init()!;
     expect(handles(Swift.choose(Swift.class("fixture.Starling")!))).toContain(starling.$handle.toString());
   });
 
   test("rejects malloc blocks shaped like the runtime's type-name cache buckets", () => {
     const HenCoop = Swift.class("fixture.HenCoop")!;
-    const coop = HenCoop.init();
+    const coop = HenCoop.init()!;
     const isa = coop.$handle.readPointer();
     const malloc = new NativeFunction(Module.getGlobalExportByName("malloc"), "pointer", ["size_t"]);
     const free = new NativeFunction(Module.getGlobalExportByName("free"), "void", ["pointer"]);

@@ -154,31 +154,31 @@ describe("ClassInstance method invocation", () => {
   beforeEach(() => { loadFixture(); });
 
   test("calls an instance method with a String arg and return", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     expect(obj.$call("greet", "Alice")).toBe("Hello Alice, I am R2");
   });
 
   test("calls a void method that mutates state", () => {
-    const obj = robotType().init("old");
+    const obj = robotType().init("old")!;
     expect(obj.$field("name").read()).toBe("old");
     obj.$call("rename", "new");
     expect(obj.$field("name").read()).toBe("new");
   });
 
   test("passes a class-typed argument", () => {
-    const a = robotType().init("Ada");
-    const b = robotType().init("Bee");
+    const a = robotType().init("Ada")!;
+    const b = robotType().init("Bee")!;
     expect(a.$call("merged", b)).toBe("Ada+Bee");
   });
 
   test("rejects a class argument whose type is not the declared class", () => {
-    const a = robotType().init("Ada");
-    const token = (typeOf(metadataFor("fixture.Token")!) as ClassType).facade.init(1);
+    const a = robotType().init("Ada")!;
+    const token = (typeOf(metadataFor("fixture.Token")!) as ClassType).facade.init(1)!;
     expect(() => a.$call("merged", token)).toThrow(/expected fixture\.Robot/);
   });
 
   test("adopts a class-existential return, keeping the reference alive past the call", () => {
-    const named = robotType().init("R2").$call("alias") as SwiftObject;
+    const named = robotType().init("R2")!.$call("alias") as SwiftObject;
     expect(named.$kind).toBe("object");
     // Adopted from the container's +1 class ref, not released by the container destroy.
     expect(named.$get("label")).toBe("R2");
@@ -191,32 +191,32 @@ describe("ClassInstance method invocation", () => {
   });
 
   test("reuses a resolved method across calls", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     const greet = obj.$method("greet");
     expect(greet.call("X")).toBe("Hello X, I am R2");
     expect(greet.call("Y")).toBe("Hello Y, I am R2");
   });
 
   test("disambiguates an overload by arity", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     expect(obj.$method("at", { arity: 1 }).call(5)).toEqual(int64(5));
     expect(obj.$method("at", { arity: 2 }).call(5, 6)).toEqual(int64(11));
   });
 
   test("disambiguates a same-arity overload by selector", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     expect(obj.$method("move(to:)").call(5)).toEqual(int64(5));
     expect(obj.$method("move(by:)").call(5)).toEqual(int64(50));
   });
 
   test("disambiguates a same-arity, same-label overload by argTypes", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     expect(obj.$method("tagged", { argTypes: ["Swift.Int"] }).call(7)).toBe("int:7");
     expect(obj.$method("tagged", { argTypes: ["Swift.String"] }).call("hi")).toBe("str:hi");
   });
 
   test("disambiguates a return-type-only overload by returnType", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     expect(obj.$method("pick", { returnType: "Swift.Int" }).call()).toEqual(int64(7));
     expect(obj.$method("pick", { returnType: "Swift.String" }).call()).toBe("seven");
     obj.$method("pick", { returnType: null }).call();
@@ -228,24 +228,24 @@ describe("ClassInstance computed property", () => {
   beforeEach(() => { loadFixture(); });
 
   test("invokes a getter", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     expect(obj.$get("badge")).toBe("[R2]");
   });
 
   test("invokes a setter, observable via getter and stored field", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     obj.$set("badge", "D2");
     expect(obj.$field("name").read()).toBe("D2");
     expect(obj.$get("badge")).toBe("[D2]");
   });
 
   test("throws for an unknown property", () => {
-    const obj = robotType().init("R2");
+    const obj = robotType().init("R2")!;
     expect(() => obj.$get("nope")).toThrow();
   });
 
   test("gets and sets a property inherited from a superclass", () => {
-    const pup = (typeOf(metadataFor("fixture.Pup")!) as ClassType).facade.init("Rex", 4);
+    const pup = (typeOf(metadataFor("fixture.Pup")!) as ClassType).facade.init("Rex", 4)!;
     expect(pup.$get("legs")).toEqual(int64(4));
     pup.$set("legs", 3);
     expect(pup.$get("legs")).toEqual(int64(3));

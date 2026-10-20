@@ -44,17 +44,17 @@ describe("type reflection and facades", () => {
   });
 
   test("SwiftClass.init runs the real initializer", () => {
-    const obj = Swift.class("fixture.Counter")!.init(9);
+    const obj = Swift.class("fixture.Counter")!.init(9)!;
     expect(obj.$field("count").read()).toEqual(int64(9));
     expect(obj.$fields).toEqual({ count: int64(9) });
   });
 
   test("SwiftClass.init surfaces a throwing initializer's error as SwiftError", () => {
     const t = Swift.class("fixture.ThrowingGadget")!;
-    expect(t.init(7).$fields).toEqual({ id: int64(7) });
+    expect(t.init(7)!.$fields).toEqual({ id: int64(7) });
     let thrown: unknown = null;
     try {
-      t.init(-1);
+      t.init(-1)!;
     } catch (e) {
       thrown = e;
     }
@@ -62,25 +62,25 @@ describe("type reflection and facades", () => {
     expect((thrown as SwiftError).value).toBe("boom");
   });
 
-  test("SwiftClass.init throws on a failable initializer's nil instead of adopting NULL", () => {
+  test("SwiftClass.init returns null for a failable initializer's nil instead of adopting NULL", () => {
     const t = Swift.class("fixture.FailableGadget")!;
-    expect(t.init(7).$fields).toEqual({ id: int64(7) });
-    expect(() => t.init(-1)).toThrow(/returned nil/);
+    expect(t.init(7)!.$fields).toEqual({ id: int64(7) });
+    expect(t.init(-1)).toBeNull();
   });
 
   test("SwiftClass.$initializer selects a same-arity overload by { labels }, the escape hatch for a bare name", () => {
     const t = Swift.class("fixture.Vec2")!;
     expect(() => t.init(1, 2)).toThrow(/ambiguous/);
-    expect(t.$initializer({ labels: ["x", "y"] }).call(1, 2).$fields).toEqual({ a: int64(1), b: int64(2) });
-    expect(t.$initializer({ labels: ["angle", "radius"] }).call(1, 2).$fields).toEqual({ a: int64(2), b: int64(6) });
+    expect(t.$initializer({ labels: ["x", "y"] }).call(1, 2)!.$fields).toEqual({ a: int64(1), b: int64(2) });
+    expect(t.$initializer({ labels: ["angle", "radius"] }).call(1, 2)!.$fields).toEqual({ a: int64(2), b: int64(6) });
   });
 
   test("SwiftClass.init selects a labeled overload from a { label: value } object", () => {
     const t = Swift.class("fixture.Vec2")!;
-    expect(t.init({ x: 1, y: 2 }).$fields).toEqual({ a: int64(1), b: int64(2) });
-    expect(t.init({ angle: 1, radius: 2 }).$fields).toEqual({ a: int64(2), b: int64(6) });
+    expect(t.init({ x: 1, y: 2 })!.$fields).toEqual({ a: int64(1), b: int64(2) });
+    expect(t.init({ angle: 1, radius: 2 })!.$fields).toEqual({ a: int64(2), b: int64(6) });
     // keys matching no initializer fall back to positional: the lone object counts as one argument
-    expect(() => t.init({ foo: 1, bar: 2 })).toThrow(/got 1/);
+    expect(() => t.init({ foo: 1, bar: 2 })!).toThrow(/got 1/);
   });
 
   test("swift_allocObject returns raw storage we can write", () => {
@@ -152,7 +152,7 @@ describe("type reflection and facades", () => {
 
   test("an instance's $type is its type's reflection", () => {
     const t = typeOf(metadataFor("fixture.Cat")!) as ClassType;
-    expect(t.facade.init().$type).toBe(t);
+    expect(t.facade.init()!.$type).toBe(t);
     expect(t.typeMethods()).toEqual([]);
   });
 
@@ -192,7 +192,7 @@ describe("type reflection and facades", () => {
     expect(v.$fields).toEqual({ a: int64(1), b: int64(2), c: int64(3), d: int64(4) });
     v.$dispose();
     const c = typeFromDescriptor(findType("fixture.Counter")!) as ClassType;
-    expect(c.facade.init(9).$fields).toEqual({ count: int64(9) });
+    expect(c.facade.init(9)!.$fields).toEqual({ count: int64(9) });
   });
 
   test("layout reports size, stride and alignment as MemoryLayout does", () => {
@@ -236,14 +236,14 @@ describe("reflection versus receiver operations", () => {
     const r = Swift.struct("fixture.Rect")!.$new({ width: 3 });
     expect(r.$kind).toBe("value");
     expect(r.$type.kind).toBe("struct");
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     expect(robot.$kind).toBe("object");
     expect(robot.$type.kind).toBe("class");
   });
 
   test("static properties read through the type facade, instance properties through the object", () => {
     expect(Swift.type("fixture.Duckling")!.$get("flockSize")).toEqual(int64(12));
-    const robot = Swift.class("fixture.Robot")!.init("R2");
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
     expect(robot.$get("badge")).toBe("[R2]");
     robot.$set("badge", "D2");
     expect(robot.badge).toBe("[D2]");
@@ -337,7 +337,7 @@ describe("type identity", () => {
     expect(Swift.class("fixture.Robot")).toBe(Robot);
     expect(Swift.modules.fixture.Robot).toBe(Robot);
     expect(Robot.$type.facade).toBe(Robot);
-    expect(Robot.init("R2").$type).toBe(Robot.$type);
+    expect(Robot.init("R2")!.$type).toBe(Robot.$type);
     expect(typeOf(metadataFor("fixture.Robot")!)).toBe(Robot.$type);
   });
 
@@ -347,7 +347,7 @@ describe("type identity", () => {
   });
 
   test("a subclass instance's $type is its dynamic class, linked to its superclass", () => {
-    const cat = Swift.class("fixture.Cat")!.init();
+    const cat = Swift.class("fixture.Cat")!.init()!;
     expect(Swift.borrowObject(cat.$handle).$type).toBe(Swift.class("fixture.Cat")!.$type);
     expect(cat.$type.superClass).toBe(Swift.class("fixture.Animal")!.$type);
   });

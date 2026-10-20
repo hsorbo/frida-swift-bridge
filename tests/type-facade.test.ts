@@ -20,8 +20,8 @@ describe("Swift type member sugar", () => {
 
   test("calls an operator by bracket access, an app type's and the stdlib's", () => {
     const Selectors = Swift.type("fixture.Selectors")!;
-    expect(Selectors["=="](Selectors.init(3), Selectors.init(3))).toBe(true);
-    expect(Selectors["=="](Selectors.init(3), Selectors.init(4))).toBe(false);
+    expect(Selectors["=="](Selectors.init(3)!, Selectors.init(3)!)).toBe(true);
+    expect(Selectors["=="](Selectors.init(3)!, Selectors.init(4)!)).toBe(false);
     expect("==" in Selectors).toBe(true);
     expect(Object.keys(Selectors)).toContain("==");
     const Int = Swift.type("Swift.Int")!;
@@ -98,7 +98,7 @@ describe("Swift type member sugar", () => {
   });
 
   test("dispatches a type method through an instance's $type", () => {
-    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2");
+    const robot = (Swift.type("fixture.Robot") as SwiftClass).init("R2")!;
     expect(robot.$type.facade.make("Q").greet("A")).toBe("Hello A, I am Q");
   });
 

@@ -141,7 +141,7 @@ describe("protocols()", () => {
   });
 
   test("is reachable through the object facade's $type", () => {
-    const widget = (typeOf(metadataFor("fixture.Widget")!) as ClassType).facade.init("w");
+    const widget = (typeOf(metadataFor("fixture.Widget")!) as ClassType).facade.init("w")!;
     expect(Object.keys(widget.$type.protocols())).toContain("fixture.Named");
   });
 });

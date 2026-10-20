@@ -4,7 +4,7 @@ import { loadFixture, fixtureExport } from "./fixtures/load.js";
 import { Swift, SwiftClass, SwiftStruct, type SwiftValueObject, type SwiftClassObject, type CallResult } from "../src/index.js";
 
 function grid(): SwiftValueObject {
-  return (Swift.type("fixture.Grid") as SwiftStruct).init([1, 2, 3, 4]) as SwiftValueObject;
+  return (Swift.type("fixture.Grid") as SwiftStruct).init([1, 2, 3, 4])! as SwiftValueObject;
 }
 
 describe("subscripts", () => {
@@ -41,7 +41,7 @@ describe("subscripts", () => {
   });
 
   test("a class subscript reads and writes through the object and refuses a disposed one", () => {
-    const board = (Swift.type("fixture.Board") as SwiftClass).init(["a", "b"]) as SwiftClassObject;
+    const board = (Swift.type("fixture.Board") as SwiftClass).init(["a", "b"])! as SwiftClassObject;
     const cell = board.$subscript();
     expect(cell.get(1)).toBe("b");
     cell.set(0, "a string long enough to live on the heap");
