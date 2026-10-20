@@ -156,15 +156,16 @@ whole lookup `null`.
 ```js
 const Keyed = Swift.type("MyApp.Keyed");              // the declaration
 const KeyedInt = Swift.type("MyApp.Keyed<Swift.Int>"); // a specialization
-KeyedInt.echo(21);                                     // 21
+KeyedInt.echo(21);                                     // int64(21)
 Keyed.echo(21);                                        // throws: needs MyApp.Keyed's type arguments
 Keyed.$type.specializations().map(t => t.$type.name);  // ["MyApp.Keyed<Swift.Int>", ...]
 ```
 
-A tuple, an existential or a sugared type has no facade, only reflection.
-`Swift.reflect(spelling)` resolves any spelling a listing prints, the forms a
-member's `argTypeNames` and `returnTypeName` use, to its
-[reflection](#reflection), or `null`. A nominal name yields the object
+A tuple, an existential, a function type or a metatype has no facade, only
+reflection; `T?` and `[T]` are `Swift.Optional<T>` and `Swift.Array<T>`,
+nominal types with facades like any other. `Swift.reflect(spelling)` resolves
+any spelling a listing prints, the forms a member's `argTypeNames` and
+`returnTypeName` use, to its [reflection](#reflection), or `null`. A nominal name yields the object
 `Swift.type(name).$type` is, so the two never disagree; a protocol name or
 `any P & Q` yields the existential, `Any` included; `T?` an `EnumType`, `[T]`
 a `StructType` and `(A, B)` a `TupleType`. The result goes wherever the bridge
@@ -347,7 +348,8 @@ below take the same names with explicit options. `Object.keys(type)` lists the
 defining module's type methods, static properties, cases and nested types; a
 member another module or a protocol extension adds resolves by name and joins
 the listing once read, while `$type.typeMethods()` and
-`$type.instanceMethods()` always span every loaded module. A Swift member
+`$type.instanceMethods()` list the defining module's members, and every loaded
+module's with `{ deep: true }` (see [Reflection](#reflection)). A Swift member
 named like a reserved JS method (`toString`, `toJSON`, `valueOf`,
 `hasOwnProperty`, `constructor`) stays reachable through `$call` and `$get`, as
 is one named by a string only known at runtime. In TypeScript a bare name or
@@ -516,11 +518,13 @@ Other reflection you may encounter: `TupleType` (`elements`, each
 `{ label, type }`), `MetatypeType` (`instanceType`), `FunctionType`
 (`signature`), `FixedArrayType` (`count`, `elementType`: the
 `Builtin.FixedArray` storage inside an `InlineArray`), `BorrowType`
-(`referentType`: a `Builtin.Borrow` view of its referent), and the foreign/ObjC
-bridging wrappers `ObjCClassWrapperType` (`objcClass`), `ForeignClassType`,
-`ForeignReferenceType`. These describe types with no Swift members of their
-own, so they have no facade; `Swift.reflect` names one from its spelling (see
-[Finding types](#finding-types)).
+(`referentType`: a `Builtin.Borrow` view of its referent), and the foreign
+wrappers `ForeignClassType` and `ForeignReferenceType`. These describe types
+with no Swift members of their own, so they have no facade; `Swift.reflect`
+names one from its spelling (see [Finding types](#finding-types)). An imported
+Objective-C class is an `ObjCClassWrapperType` (`objcClass`), a nominal type
+whose facade reaches the Swift extension members declared on the class (see
+[Objects and values](#objects-and-values)).
 
 One type is one reflection object and one facade: `Swift.type`, `Swift.reflect`,
 `Swift.modules`, an instance's `$type` and `typeOf` under `/abi` all meet at the same objects,
@@ -573,7 +577,8 @@ const url = Swift.struct("Foundation.URL").init({ string: "https://frida.re" });
 
 The object form works on value types too — `init` on a struct or enum runs a
 real Swift initializer when its symbol is resolvable, and a failable
-initializer that returns nil yields `null`. A lone object whose keys match no
+initializer that returns nil yields `null`, on a class as on a value type. A
+lone object whose keys match no
 initializer falls back to being a single positional argument, so
 dictionary-like arguments still pass through unchanged. For what an object
 cannot express — mixed labeled and unlabeled arguments, or overloads that
@@ -644,6 +649,10 @@ The control surface (never shadowed by Swift members of the same spelling):
 - `$handle`: the underlying `NativePointer`.
 - `$kind`: `"object"` or `"value"`.
 - `$owned`: whether the facade owns its reference/storage.
+- `$fields`: the instance as data: a struct's or class's stored fields as an
+  object keyed by name, an enum as its case name or `{ case: payload }`, a
+  stdlib scalar or `String` as the value itself. Nested aggregates read as data
+  too. See [Values and marshalling](#values-and-marshalling).
 - `$call(name, ...args)`: invoke a method by name.
 - `$method(name, options?)`: resolve a bound method for overload/generic/mutating
   control (see [Calling methods](#calling-methods)).
@@ -679,7 +688,7 @@ conforms to. The facade looks in the defining module first and searches the
 other modules only for a name it did not find there, filtering symbols by name
 before demangling anything. Listing a facade (`Object.keys(robot)`, `in`)
 shows the defining module's members plus names already looked up; use
-`robot.$type.instanceMethods()` for the full list.
+`robot.$type.instanceMethods({ deep: true })` for the full list.
 
 ### Finding live instances
 
@@ -779,7 +788,7 @@ made.greet("X");    // "Hello X, I am Zed"
 Robot.$call("make", "Zed");      // the same, by name
 
 const Int = Swift.type("Swift.Int");
-Int["*"](6, 7);                // 42: operators are static methods; both operands are arguments
+Int["*"](6, 7);                // int64(42): operators are static methods; both operands are arguments
 Int.$call("*", 6, 7);          // the same, by name
 Int.$typeMethod("*").call(6, 7);
 ```
@@ -809,7 +818,7 @@ their reflection:
 
 ```js
 const box = Swift.type("MyApp.Box").init();
-box.$method("echo", { typeArguments: [Swift.type("Swift.Int")] }).call(21);   // 21
+box.$method("echo", { typeArguments: [Swift.type("Swift.Int")] }).call(21);   // int64(21)
 ```
 
 Witness tables for the method's protocol requirements are resolved from the
@@ -823,9 +832,9 @@ Value methods, sync or async, work the same whether or not they are
 
 ```js
 const acc = Swift.type("MyApp.Accumulator").$new({ total: 5 });
-acc.peek(10);    // 15
+acc.peek(10);    // int64(15)
 acc.add(3);      // writes back through self
-acc.total;       // 8
+acc.total;       // int64(8)
 ```
 
 For a generic method on a small value type (`String`, `Int`, small structs),
@@ -855,7 +864,7 @@ An `inout` parameter takes a value facade and writes the result back into it. A
 ```js
 const n = Swift.type("Swift.Int").$new(21);
 robot.doubled(n);        // func doubled(_ n: inout Int)
-n.$fields;               // 42
+n.$fields;               // int64(42)
 robot.doubled(acc.$field("total"));
 ```
 
@@ -872,7 +881,7 @@ Awaiting an async method looks exactly like a sync call, with `await`:
 
 ```js
 const calc = Swift.type("MyApp.AsyncCalc").init(100);
-await calc.addAsync(5);     // 105
+await calc.addAsync(5);     // int64(105)
 ```
 
 Actor-isolated async methods run on the actor's executor; concurrent calls are
@@ -880,14 +889,14 @@ serialized, and state persists between them:
 
 ```js
 const session = Swift.type("MyApp.Session").init();   // `actor Session`
-await session.advance();    // 1
-await session.advance();    // 2
+await session.advance();    // int64(1)
+await session.advance();    // int64(2)
 ```
 
 An `async throws` method rejects its promise on failure:
 
 ```js
-await calc.divideBaseBy(2);   // 50
+await calc.divideBaseBy(2);   // int64(50)
 await calc.divideBaseBy(0);   // rejects
 ```
 
@@ -902,11 +911,11 @@ return a `Promise`; see [Free functions](#free-functions).
 const app = Process.getModuleByName("MyApp");
 
 const computeAsync = Swift.function(app, "$s5MyApp12computeAsyncyS2iYaF");
-await computeAsync.call(21);    // 42
+await computeAsync.call(21);    // int64(42)
 
 const calc = Swift.type("MyApp.AsyncCalc").init(100);
 const addAsync = Swift.function(app, "$s5MyApp9AsyncCalcC8addAsyncyS2iYaF").bind(calc);
-await addAsync(5);    // 105
+await addAsync(5);    // int64(105)
 ```
 
 An `async throws` function rejects its promise with a `SwiftError` (see
@@ -1095,7 +1104,7 @@ const Int = Swift.type("Swift.Int");
 const addr = Module.getGlobalExportByName("$s5MyApp7addIntsyS2i_SitF");
 
 const addInts = Swift.NativeFunction(addr, Int, [Int, Int]);
-addInts(20, 22);    // 42
+addInts(20, 22);    // int64(42)
 ```
 
 Strings and other non-POD types round-trip:
@@ -1103,7 +1112,7 @@ Strings and other non-POD types round-trip:
 ```js
 const String = Swift.type("Swift.String");
 const stringLength = Swift.NativeFunction(lenAddr, Int, [String]);
-stringLength("frida");    // 5
+stringLength("frida");    // int64(5)
 ```
 
 A `Void` function passes `null` as the return type:
@@ -1113,8 +1122,9 @@ const rename = Swift.NativeFunction(renameAddr, null, [Robot, String]);
 rename(robot, "new");     // null
 ```
 
-A type with no facade, a tuple, an existential (`any P`, `any P & Q`), `T?`
-or `[T]`, is named with `Swift.reflect` (see [Finding types](#finding-types)).
+A type with no facade, a tuple or an existential (`any P`, `any P & Q`), is
+named with `Swift.reflect`, as is any type by the spelling a listing prints,
+`T?` or `[T]` included (see [Finding types](#finding-types)).
 An existential result is projected to its dynamic value, as a method's is, and
 an existential argument takes a value or object facade of a conforming type,
 boxed for the call and released after it; a tuple result decodes to an array:
@@ -1160,7 +1170,7 @@ is invoked with `.call(...)`:
 const app = Process.getModuleByName("MyApp");
 
 const addInts = Swift.function(app, "$s5MyApp7addIntsyS2i_SitF");
-addInts.call(20, 22);     // 42
+addInts.call(20, 22);     // int64(42)
 
 const mightThrow = Swift.function(app, "$s5MyApp10mightThrowyS2iKF");
 mightThrow.call(1);       // throws SwiftError
@@ -1189,7 +1199,7 @@ const greet = Swift.function(app, "$s5MyApp5RobotC5greetyS2SF").bind(robot);
 greet("X");               // "Hello X, I am R2"
 
 const computeAsync = Swift.function(app, "$s5MyApp12computeAsyncyS2iYaF");
-await computeAsync.call(21);    // 42
+await computeAsync.call(21);    // int64(42)
 ```
 
 A generic function takes its type arguments as a generic method does, one per
@@ -1198,7 +1208,7 @@ resolved from them. A value receiver takes `{ self }` as `$method` does.
 
 ```js
 const Int = Swift.type("Swift.Int");
-Swift.function(app, "$s5MyApp15genericIdentityyxxlF", { typeArguments: [Int] }).call(21);   // 21
+Swift.function(app, "$s5MyApp15genericIdentityyxxlF", { typeArguments: [Int] }).call(21);   // int64(21)
 ```
 
 Methods of generic types are rejected; reach for `/abi` for those. An
@@ -1220,13 +1230,13 @@ the type is generic; a call then needs what the member needs.
 
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
-Swift.function("MyApp.Robot.move(to:)").call(robot, 5);        // 5
+Swift.function("MyApp.Robot.move(to:)").call(robot, 5);        // int64(5)
 Swift.function("MyApp.Robot.make(name:)").call("R3");          // a Robot
 
 const deriveKey = Swift.function("CryptoKit.HKDF.deriveKey(inputKeyMaterial:outputByteCount:)");
 Swift.Interceptor.attach(deriveKey, { ... });
 
-await Swift.function("MyApp.AsyncCalc.addAsync(_:)").call(calc, 5);        // 105
+await Swift.function("MyApp.AsyncCalc.addAsync(_:)").call(calc, 5);        // int64(105)
 ```
 
 Free module-level functions are not reachable this way yet; use the mangled
@@ -1242,7 +1252,7 @@ parameters into JS and its return value back into Swift.
 const source = /* a value or object facade with a closure-taking method */;
 source
     .$method("map", { typeArguments: [] })
-    .call(7, Swift.closure(n => Number(n) * 6));    // 42
+    .call(7, Swift.closure(n => Number(n) * 6));    // int64(42)
 ```
 
 Loadable parameters (integers, booleans, pointers, `Double`), `String`, and
@@ -1348,11 +1358,9 @@ it was found with, so it needs no symbol at its address. The arguments arrive
 positionally; the member's labels name them:
 
 ```js
-const greet = robot.greet;
-Swift.Interceptor.attach(greet, {
+Swift.Interceptor.attach(robot.rename, {            // rename(to:)
     onEnter(args) {
-        const named = Object.fromEntries(greet.signature.labels.map((l, i) => [l ?? i, args[i]]));
-        console.log(JSON.stringify(named));
+        console.log(args[0], args.to);              // the same argument, by position and by label
     },
 });
 ```
@@ -1576,7 +1584,7 @@ property is the thrown error's pointer:
 import Swift, { SwiftError } from "frida-swift-bridge2";
 
 const mightThrow = Swift.NativeFunction(addr, Int, [Int], { throws: true });
-mightThrow(0);    // 99
+mightThrow(0);    // int64(99)
 try {
     mightThrow(1);
 } catch (e) {
@@ -1721,7 +1729,7 @@ corrupts memory instead of failing cleanly.
   This is worse on Linux. In ELF, a struct's memberwise initializers are local
   symbols that disappear with `.symtab`, so a stripped `.so` still has the type
   but not its initializer: `init` throws `no method init`. On Mach-O the same
-  initializers are external and survive stripping. `new({ field: value, … })`
+  initializers are external and survive stripping. `$new({ field: value, … })`
   still works, because it writes the fields directly without calling `init`.
 - **Code that was never emitted as a function.** Inlined, specialized or
   dead-stripped code has no entry point to call. Hooking a function doesn't see
@@ -1779,7 +1787,7 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
 - **Methods of generic types in `Swift.function`.** `Swift.function` plans a
   symbol's own generic parameters, not those of its enclosing type.
 - **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan.
-- **Hosts.** arm64 and x86-64 on Darwin and Linux. Anything else throws
+- **Hosts.** arm64 and x86-64 on Darwin, Linux and Windows. Anything else throws
   `unsupported Swift host`.
 
 ## Going lower: the `/abi` entry point
