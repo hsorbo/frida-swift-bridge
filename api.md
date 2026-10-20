@@ -9,7 +9,8 @@ return values.
 
 The examples are written against plausible application types (`MyApp.Robot`,
 …). The tests under `tests/` exercise the same capabilities against the compiled
-fixture in `tests/fixtures/`.
+fixture in `tests/fixtures/`, and the examples marked runnable in this file's
+source run against that fixture, with `MyApp` read as `fixture`.
 
 ```js
 import Swift from "frida-swift-bridge2";
@@ -153,6 +154,7 @@ declaration, whose members are found and hookable but not callable. Each
 argument is spelled the same way; an argument that doesn't resolve makes the
 whole lookup `null`.
 
+<!-- runnable -->
 ```js
 const Keyed = Swift.type("MyApp.Keyed");              // the declaration
 const KeyedInt = Swift.type("MyApp.Keyed<Swift.Int>"); // a specialization
@@ -173,6 +175,7 @@ takes a type: `Swift.NativeFunction` and `{ typeArguments }`. A function or
 metatype spelling has no metadata the bridge can build and is `null`, as is a
 spelling naming a type that isn't loaded.
 
+<!-- runnable -->
 ```js
 Swift.reflect("(Swift.Int, Swift.String)");        // TupleType
 Swift.reflect("any MyApp.Greeter & MyApp.Aged");    // existential
@@ -215,6 +218,7 @@ Each singular pairs with a generator of the same kind (`class` /
 tab-complete. `Swift.modules.MyApp` is the namespace of the Swift module
 `MyApp`, and its members are that module's top-level types and protocols:
 
+<!-- runnable -->
 ```js
 Swift.modules.MyApp.Robot;          // SwiftClass, same as Swift.type("MyApp.Robot")
 Swift.modules.MyApp.Greeter;        // Protocol
@@ -559,6 +563,7 @@ Construct instances from a type wrapper.
 Classes — `SwiftClass.init(...args)` runs a Swift initializer and hands back a
 live [object facade](#objects-and-values):
 
+<!-- runnable -->
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
 robot.greet("Alice");   // "Hello Alice, I am R2"
@@ -634,6 +639,7 @@ structs/enums.
 
 Swift members are reached by their bare name:
 
+<!-- runnable -->
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
 robot.greet("Alice");   // call a method
@@ -781,6 +787,7 @@ Type methods are called on the type wrapper by their bare name, or with
 `$call(name, ...args)`; `$typeMethod(name, options)` looks one up as an
 explicit bound method:
 
+<!-- runnable -->
 ```js
 const Robot = Swift.type("MyApp.Robot");
 const made = Robot.make("Zed");
@@ -830,6 +837,7 @@ argument; its objects are passed and returned as raw pointers.
 Value methods, sync or async, work the same whether or not they are
 `mutating`; a mutating one writes back into the value:
 
+<!-- runnable -->
 ```js
 const acc = Swift.type("MyApp.Accumulator").$new({ total: 5 });
 acc.peek(10);    // int64(15)
@@ -879,6 +887,7 @@ synchronous method and a `Promise` for an `async` one — same syntax, you just
 
 Awaiting an async method looks exactly like a sync call, with `await`:
 
+<!-- runnable -->
 ```js
 const calc = Swift.type("MyApp.AsyncCalc").init(100);
 await calc.addAsync(5);     // int64(105)
@@ -959,6 +968,7 @@ throws.
 `type.$type.properties()` enumerates the declared members, those of its own
 module unless `{ deep: true }`:
 
+<!-- runnable -->
 ```js
 Swift.type("MyApp.Robot").$type.properties().map(p => p.name);   // ["name", "badge"]
 ```
@@ -1559,6 +1569,7 @@ type's [reflection](#reflection), the object `Swift.reflect` returns. A
 bridged `Array`, `Set` or `Dictionary` is a facade like any struct;
 `$container()` projects it to the corresponding JS value:
 
+<!-- runnable -->
 ```js
 const ints = Swift.type("MyApp.Bag").$call("ints");   // a value facade
 ints.$container();    // [int64(10), int64(20), int64(30)]
@@ -1630,6 +1641,7 @@ A facade tracks whether it owns its reference or storage via `$owned`.
 Constructing an instance produces an owned facade; borrowing a handle produces a
 non-owning view:
 
+<!-- runnable -->
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
 robot.$owned;                               // true

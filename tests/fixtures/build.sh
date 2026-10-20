@@ -238,3 +238,5 @@ case "$platform" in
     exit 1
     ;;
 esac
+
+node "$fixtures/../../tools/doc-examples.mjs"
