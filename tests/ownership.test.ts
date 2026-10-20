@@ -84,6 +84,29 @@ describe("ownership", () => {
     expect(view.retainCount).toBe(before);
   });
 
+  test("a borrowed hook argument outlives its hook through $retained", () => {
+    const r = robotType().init("A")!;
+    const other = robotType().init("B")!;
+    const view = new ClassInstance(other.$handle);
+    const before = view.retainCount;
+    let kept: SwiftObject | null = null;
+    const listener = Swift.Interceptor.attach(r.merged, {
+      onEnter(args) {
+        kept = Swift.borrowObject(args[0] as NativePointer).$retained();
+      },
+    });
+    try {
+      expect(r.merged(other)).toBe("A+B");
+    } finally {
+      listener.detach();
+    }
+    expect(kept!.$owned).toBe(true);
+    expect(kept!.name).toBe("B");
+    expect(view.retainCount).toBe(before + 1);
+    kept!.$dispose();
+    expect(view.retainCount).toBe(before);
+  });
+
   test("a marshalled free function borrows its class argument; only the callee's stored ref remains", () => {
     const Int = typeOf(metadataFor("Swift.Int")!);
     const Token = typeOf(metadataFor("fixture.Token")!);

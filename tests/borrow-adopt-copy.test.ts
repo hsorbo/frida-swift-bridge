@@ -79,4 +79,35 @@ describe("class object wrapping", () => {
     adopted.$dispose();
     expect(view.retainCount).toBe(before);
   });
+
+  test("$retained acquires a separately owned facade of the same object, released once on dispose", () => {
+    const token = (Swift.type("fixture.Token") as SwiftClass).init(7)!;
+    const view = new ClassInstance(token.$handle);
+    const before = view.retainCount;
+
+    const borrowed = Swift.borrowObject(token.$handle);
+    const kept = borrowed.$retained();
+    expect(kept.$owned).toBe(true);
+    expect(kept.$handle.equals(token.$handle)).toBe(true);
+    expect(view.retainCount).toBe(before + 1);
+
+    borrowed.$dispose();
+    expect(view.retainCount).toBe(before + 1);
+    kept.$dispose();
+    kept.$dispose();
+    expect(view.retainCount).toBe(before);
+    expect(() => kept.$retained()).toThrow(/disposed/);
+
+    const again = token.$retained();
+    expect(view.retainCount).toBe(before + 1);
+    again.$dispose();
+    expect(view.retainCount).toBe(before);
+  });
+
+  test("$retained is a class-object operation; a value is copied through its type", () => {
+    const v = loadable().$new({ a: 1, b: 2, c: 3, d: 4 });
+    // @ts-expect-error $retained is declared on class objects only
+    expect(() => v.$retained()).toThrow(/\$copy/);
+    v.$dispose();
+  });
 });

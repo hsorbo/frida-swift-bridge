@@ -3,7 +3,8 @@ import { readField } from "../abi/instance.js";
 import { ValueInstance } from "../abi/value.js";
 import { typeOf } from "./swift-type.js";
 import type { SwiftField } from "./object-facade.js";
-import type { SwiftClosureValue, RawInstance } from "./method.js";
+import type { CallArg, CallResult, SwiftClosureValue, RawInstance } from "./method.js";
+import { getSwiftCoreApi } from "./api.js";
 import { isOnCurrentThreadStack } from "./thread-stack.js";
 
 export type ClosureLifetime = Pick<RawInstance, "checkLive">;
@@ -69,5 +70,79 @@ export function borrowedClosure(fn: NativePointer, context: NativePointer): Swif
     function: { value: fn },
     context: { value: context },
     $owned: { value: false },
+    $retained: { value: () => retainedClosure(fn, context, null, `at ${fn}`) },
   }) as unknown as SwiftClosureValue;
+}
+
+export function retainedClosure(
+  fn: NativePointer,
+  context: NativePointer,
+  call: ((...args: CallArg[]) => CallResult) | null,
+  label: string
+): SwiftClosureValue {
+  if (!context.isNull()) {
+    getSwiftCoreApi().swift_retain(context);
+  }
+  return ownedClosure(fn, context, call, label);
+}
+
+// Owns one reference to the context, released on dispose or collection. A closure with no known
+// signature (a retained borrowed one) owns its context without being callable.
+export function ownedClosure(
+  fn: NativePointer,
+  context: NativePointer,
+  call: ((...args: CallArg[]) => CallResult) | null,
+  label: string
+): SwiftClosureValue {
+  const state = { disposed: false };
+  const releaseContext = (): void => {
+    state.disposed = true;
+    if (!context.isNull()) {
+      getSwiftCoreApi().swift_release(context);
+    }
+  };
+  const checkLive = (): void => {
+    if (state.disposed) {
+      throw new Error(`closure ${label} has been disposed`);
+    }
+  };
+  const closure = ((...args: CallArg[]): CallResult => {
+    checkLive();
+    if (call === null) {
+      throw new Error("a retained borrowed closure cannot be called: no signature is known for it");
+    }
+    return call(...args);
+  }) as SwiftClosureValue;
+  Object.setPrototypeOf(closure, closurePrototype);
+  const weakId = Script.bindWeak(closure, () => {
+    if (!state.disposed) {
+      releaseContext();
+    }
+  });
+  const dispose = (): void => {
+    if (!state.disposed) {
+      state.disposed = true;
+      Script.unbindWeak(weakId);
+      releaseContext();
+    }
+  };
+  return Object.defineProperties(closure, {
+    function: { value: fn },
+    context: { value: context },
+    $owned: { value: true },
+    $captures: {
+      value: (): SwiftField[] => {
+        checkLive();
+        return captureFields(closure, { checkLive });
+      },
+    },
+    $retained: {
+      value: (): SwiftClosureValue => {
+        checkLive();
+        return retainedClosure(fn, context, call, label);
+      },
+    },
+    $dispose: { value: dispose },
+    [Symbol.dispose]: { value: dispose },
+  });
 }

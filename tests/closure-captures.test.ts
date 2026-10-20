@@ -16,6 +16,10 @@ function fixtureContext(name: string): NativePointer {
   return new NativeFunction(fixtureExport(name), "pointer", [])() as NativePointer;
 }
 
+function retainCount(context: NativePointer): number {
+  return Number(Swift.api.swift_retainCount(context));
+}
+
 function capturingContext(x: number): NativePointer {
   new NativeFunction(fixtureExport("storeCapturing"), "void", ["int64"])(x);
   return fixtureContext("capturingContext");
@@ -115,6 +119,31 @@ describe("closure captures", () => {
     expect(view.$captures().map((c) => c.read())).toEqual([int64(7), "-fixture"]);
     const words = Swift.borrowClosure({ function: ptr(1), context });
     expect(words.$captures().map((c) => c.type.name)).toEqual(["Swift.Int", "Swift.String"]);
+  });
+
+  test("$retained keeps a borrowed closure's context alive until disposed, without making it callable", () => {
+    const context = capturingContext(7);
+    const before = retainCount(context);
+    const kept = Swift.borrowClosure(context).$retained();
+    expect(kept.$owned).toBe(true);
+    expect(retainCount(context)).toBe(before + 1);
+    expect(kept.$captures().map((c) => c.read())).toEqual([int64(7), "-fixture"]);
+    expect(() => kept()).toThrow(/cannot be called/);
+    kept.$dispose();
+    kept.$dispose();
+    expect(retainCount(context)).toBe(before);
+    expect(() => kept.$captures()).toThrow(/disposed/);
+  });
+
+  test("$retained on a returned closure is a second owned, callable closure over the same context", () => {
+    const add2 = Swift.function(module, MAKE_ADDER).call(2) as SwiftClosureValue;
+    const before = retainCount(add2.context);
+    const kept = add2.$retained();
+    expect(retainCount(add2.context)).toBe(before + 1);
+    add2.$dispose();
+    expect(retainCount(add2.context)).toBe(before);
+    expect(kept(40)).toEqual(int64(42));
+    kept.$dispose();
   });
 
   test("writing a capture through its field view changes what the closure computes", () => {

@@ -56,7 +56,7 @@ import { probeSelfOwnership, RegisterRange } from "./value-convention.js";
 import { AsyncFunctionPointer, findAsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClass, SerialExecutorRef } from "./async-call.js";
 import { SwiftClosure, ClosureSpec, ClosureBody, ClosureWords, LoadableClosureBody, SwiftThrow, closureValueWords, isSwiftClosureValue } from "./closure.js";
-import { closurePrototype, captureFields } from "./closure-view.js";
+import { ownedClosure } from "./closure-view.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
 import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
 import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName, objcClassConformsToProtocol } from "./objc.js";
@@ -113,6 +113,9 @@ export interface SwiftClosureValue {
   readonly context: NativePointer;
   readonly $owned: boolean;
   $captures(): SwiftField[];
+  // A separately owned closure over the same context; one retained from a borrowed closure still
+  // cannot be called.
+  $retained(): SwiftClosureValue;
   $dispose(): void;
   [Symbol.dispose](): void;
 }
@@ -1871,48 +1874,7 @@ function adoptReturnedClosure(words: NativePointer, template: CallPlan): SwiftCl
   const fn = words.readPointer().strip();
   const context = words.readPointer(Process.pointerSize);
   const bound = new BoundMethod({ ...template, address: fn }, { self: context });
-  const state = { disposed: false };
-  const releaseContext = (): void => {
-    state.disposed = true;
-    if (!context.isNull()) {
-      getSwiftCoreApi().swift_release(context);
-    }
-  };
-  const checkLive = (): void => {
-    if (state.disposed) {
-      throw new Error(`closure ${template.selector} has been disposed`);
-    }
-  };
-  const closure = ((...args: CallArg[]): CallResult => {
-    checkLive();
-    return bound.call(...args) as CallResult;
-  }) as SwiftClosureValue;
-  Object.setPrototypeOf(closure, closurePrototype);
-  const weakId = Script.bindWeak(closure, () => {
-    if (!state.disposed) {
-      releaseContext();
-    }
-  });
-  const dispose = (): void => {
-    if (!state.disposed) {
-      state.disposed = true;
-      Script.unbindWeak(weakId);
-      releaseContext();
-    }
-  };
-  return Object.defineProperties(closure, {
-    function: { value: fn },
-    context: { value: context },
-    $owned: { value: true },
-    $captures: {
-      value: (): SwiftField[] => {
-        checkLive();
-        return captureFields(closure, { checkLive });
-      },
-    },
-    $dispose: { value: dispose },
-    [Symbol.dispose]: { value: dispose },
-  });
+  return ownedClosure(fn, context, (...args) => bound.call(...args) as CallResult, template.selector);
 }
 
 // null ⇒ Void; check indirect before lowering, matching lowerArg (a resilient float aggregate is @out).

@@ -38,6 +38,7 @@ const RESERVED = new Set([
   "$set",
   "$field",
   "$container",
+  "$retained",
   "$dispose",
 ]);
 
@@ -91,6 +92,8 @@ export interface SwiftClassObject extends SwiftObjectBase {
   readonly $type: ClassType;
   $method(name: string, options?: MethodResolveOptions | SlotSignature): SwiftClassBoundMethod;
   $subscript(selector?: string | MemberLookupOptions, options?: MemberLookupOptions): SwiftBoundSubscript;
+  // A separately owned facade of the same object, whatever this one's ownership.
+  $retained(): SwiftClassObject;
   $container?: never;
 }
 
@@ -100,6 +103,7 @@ export interface SwiftValueObject extends SwiftObjectBase {
   $method(name: string, options?: ValueMethodResolveOptions | SlotSignature): SwiftValueBoundMethod;
   $subscript(selector?: string | MemberLookupOptions, options?: MemberLookupOptions): SwiftBoundSubscript;
   $container(): SwiftValue;
+  $retained?: never;
 }
 
 export type SwiftObject = SwiftClassObject | SwiftValueObject;
@@ -222,6 +226,11 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
           return () => {
             if (!isValue) throw new Error("$container is only valid on value instances");
             return value.container();
+          };
+        case "$retained":
+          return () => {
+            if (isValue) throw new Error("$retained is only valid on class objects; a value is copied with its type's $copy");
+            return asSwiftObject(object.retained());
           };
         case "$dispose":
           return () => target.dispose();

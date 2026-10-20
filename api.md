@@ -1609,6 +1609,16 @@ The acquisition names encode the reference contract:
   is a non-owning view, `$copy(address)` makes an independent owned copy, and
   `$adopt(address)` takes responsibility for already-initialized storage.
 
+To keep what a borrowed facade shows, acquire an owned one from it:
+
+- `object.$retained()` — a separately owned facade of the same object, whether
+  the receiver is borrowed (a hook's `this.self`, `Swift.borrowObject`) or
+  owned. It releases on dispose or collection; the receiver's lifetime is
+  unchanged.
+- `closure.$retained()` — an owned closure over the same context. One retained
+  from a borrowed closure still cannot be called, since no signature is known.
+- A value is kept by copying it: `value.$type.facade.$copy(value.$handle)`.
+
 An owned facade releases when it is garbage-collected. To release
 deterministically, call `$dispose()` (idempotent) or use a `using` binding:
 
@@ -1619,8 +1629,8 @@ deterministically, call `$dispose()` (idempotent) or use a `using` binding:
 }   // released here
 ```
 
-Raw `retain`/`release` are deliberately absent from the facade — mismatched
-counts cause double releases. Low-level reference-count operations live under
+Raw `retain`/`release` are deliberately absent from instance facades —
+mismatched counts cause double releases. They live in `Swift.api` and under
 `/abi`.
 
 ## Symbols

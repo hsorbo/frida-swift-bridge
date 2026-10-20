@@ -104,6 +104,13 @@ export class ClassInstance implements RawInstance {
     return Boolean(getSwiftCoreApi().swift_isUniquelyReferenced_nonNull(this.handle));
   }
 
+  // A separately owned wrapper of the same object: retains, then adopts that reference.
+  retained(): ClassInstance {
+    this.checkLive();
+    getSwiftCoreApi().swift_unknownObjectRetain(this.handle);
+    return ClassInstance.adopt(this.handle);
+  }
+
   // On an owned object use dispose(), not release(): raw release plus GC release double-frees.
   retain(): this {
     getSwiftCoreApi().swift_unknownObjectRetain(this.handle);

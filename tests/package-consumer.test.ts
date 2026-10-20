@@ -117,7 +117,11 @@ function acquisitionPreservesFacadeKindAtCompileTime(cls: SwiftClass, st: SwiftS
   const kase: SwiftValueObject = en.$case("none");
   const closure: SwiftClosureValue = Swift.borrowClosure(NULL);
   const captures: SwiftField[] = closure.$captures();
-  void [borrowed, adopted, constructed, value, made, kase, captures];
+  const kept: SwiftClassObject = borrowed.$retained();
+  const keptClosure: SwiftClosureValue = closure.$retained();
+  // @ts-expect-error a value is copied through its type's $copy, not retained
+  value.$retained();
+  void [borrowed, adopted, constructed, value, made, kase, captures, kept, keptClosure];
 }
 
 // A facade answers any Swift member name, so of its own members only the $-prefixed controls and
