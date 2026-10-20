@@ -192,7 +192,13 @@ function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
       }
       if (name === "Swift.Array" && Array.isArray(value)) {
         const element = new Metadata(metadata.genericArguments.readPointer());
-        const elementPlans = value.map((v) => planWrite(element, v));
+        const elementPlans: WritePlan[] = [];
+        for (let i = 0; i !== value.length; i++) {
+          if (!(i in value)) {
+            throw new Error(`writeValue: missing element ${i} of ${typeName(metadata)}`);
+          }
+          elementPlans.push(planWrite(element, value[i]));
+        }
         const stride = element.typeLayout.stride;
         return (address) => {
           const array = createArray(metadata, elementPlans.length, (first) => elementPlans.forEach((plan, i) => plan(first.add(i * stride))));

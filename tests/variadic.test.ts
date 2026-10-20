@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
+import { loadSwiftCore } from "./swift.js";
 
 import { Swift, SwiftClass, SwiftStruct, type SwiftObject, type SwiftValue, type SwiftValueObject } from "../src/index.js";
 
@@ -34,6 +35,26 @@ describe("variadic parameters", () => {
     const ints = (Swift.type("Swift.Array<Swift.Int>") as SwiftStruct).$new([7, 8]) as SwiftValueObject;
     expect(ints.$container()).toEqual([int64(7), int64(8)]);
     expect(() => (Swift.type("Swift.Array<Swift.Int>") as SwiftStruct).$new([1, "two"])).toThrow();
+  });
+
+  test("a sparse JS array is rejected before Swift storage is allocated", () => {
+    const module = loadFixture();
+    let allocations = 0;
+    const listener = Interceptor.attach(loadSwiftCore().getExportByName("$ss27_allocateUninitializedArrayySayxG_BptBwlF"), {
+      onEnter() { allocations++; },
+    });
+    try {
+      expect(() => (Swift.type("Swift.Array<Swift.Int>") as SwiftStruct).$new(new Array(2))).toThrow(/missing element 0 of Swift.Array<Swift.Int>/);
+      const strings = ["a"];
+      strings[2] = "a string long enough to live on the heap";
+      expect(() => (Swift.type("Swift.Array<Swift.String>") as SwiftStruct).$new(strings)).toThrow(/missing element 1 of Swift.Array<Swift.String>/);
+      expect(() => Swift.function(module, JOIN_VARIADIC).call(strings, "-")).toThrow(/missing element 1/);
+      expect(allocations).toBe(0);
+    } finally {
+      listener.detach();
+    }
+    const dense = (Swift.type("Swift.Array<Swift.String>") as SwiftStruct).$new(["a", "a string long enough to live on the heap"]) as SwiftValueObject;
+    expect(dense.$container()).toEqual(["a", "a string long enough to live on the heap"]);
   });
 
   test("a hook decodes a variadic argument as an Array facade", () => {
