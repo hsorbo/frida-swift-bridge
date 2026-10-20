@@ -49,6 +49,18 @@ function afp(module: Module, symbol: string): AsyncFunctionPointer {
 }
 
 describe("async interceptor", () => {
+  test("a known sync/async mismatch is rejected before anything is attached", () => {
+    requireSwift();
+    const module = loadFixture();
+    const computeAsync = module.getExportByName(COMPUTE_ASYNC);
+    const drive = module.getExportByName(DRIVE);
+    expect(() => Swift.Interceptor.attach(computeAsync, { onLeave() {} })).toThrow(/computeAsync\(_:\) is async; hook it with attachAsync/);
+    expect(() => Swift.Interceptor.attach(Swift.function(module, COMPUTE_ASYNC), { onLeave() {} })).toThrow(/is async; hook it with attachAsync/);
+    expect(() => Swift.Interceptor.attachAsync(drive, { onComplete() {} })).toThrow(/driveComputeAsync\(_:\) is not async; hook it with attach/);
+    expect(() => Swift.Interceptor.attachAsync(Swift.function(module, DRIVE), { onComplete() {} })).toThrow(/is not async; hook it with attach/);
+    expect(driver(module)(5)).toBe(10);
+  });
+
   test("onEnter fires with the args and the async context pointer", () => {
     requireSwift();
     const module = loadFixture();

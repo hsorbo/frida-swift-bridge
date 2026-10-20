@@ -103,6 +103,16 @@ export type HookRetOf<T> = IsAny<T> extends true
         : Awaited<R>
       : CallResult;
 
+type IsKnownAsync<T> = IsAny<T> extends true
+  ? false
+  : [T] extends [SwiftHookTypes<infer R, any, any> | SwiftFunction<infer R, any>]
+    ? IsAny<R> extends true
+      ? false
+      : [R] extends [Promise<any>]
+        ? true
+        : false
+    : false;
+
 export interface SwiftInvocationCallbacks<Args = SwiftHookArgs, Ret = CallResult> {
   onEnter?: (this: SwiftInvocationContext, args: Args) => void;
   onLeave?: (this: SwiftInvocationContext, retval: Ret, error?: CallResult) => void;
@@ -519,6 +529,11 @@ function parsedSignatureAt(target: NativePointer): ParsedSwiftSignature {
 
 function callShape({ address: target, parsed: known }: HookEntry, ownership?: SelfOwnership, isAsync = false): CallShape {
   const parsed = known ?? parsedSignatureAt(target);
+  const parsedAsync = parsed.kind === "function" && parsed.async;
+  if (parsedAsync !== isAsync) {
+    const name = parsed.kind === "function" ? `${parsed.context}.${parsed.selector}` : `${parsed.context}.${parsed.member}`;
+    throw new Error(parsedAsync ? `${name} is async; hook it with attachAsync` : `${name} is not async; hook it with attach`);
+  }
 
   if (parsed.kind === "function") {
     if (parsed.genericParams.length > 0 && !parsed.simpleGenerics) {
@@ -1185,7 +1200,7 @@ interface SwiftInvocationState {
   thrownSlot?: NativePointer;
 }
 
-function attach<T extends HookableTarget>(hookable: T, callbacks: SwiftInvocationCallbacks<HookArgsOf<T>, HookRetOf<T>>, options?: SwiftInterceptorOptions): InvocationListener;
+function attach<T extends HookableTarget>(hookable: T, callbacks: SwiftInvocationCallbacks<HookArgsOf<T>, HookRetOf<T>> & (IsKnownAsync<T> extends true ? never : unknown), options?: SwiftInterceptorOptions): InvocationListener;
 function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, options: SwiftInterceptorOptions = {}): InvocationListener {
   const entry = hookEntry(hookable);
   const target = entry.address;
@@ -1853,7 +1868,7 @@ function attachAsync(hookable: HookableTarget, callbacks: SwiftAsyncCallbacks, o
 }
 
 export interface SwiftInterceptorApi {
-  attach<T extends HookableTarget>(target: T, callbacks: SwiftInvocationCallbacks<HookArgsOf<T>, HookRetOf<T>>, options?: SwiftInterceptorOptions): InvocationListener;
+  attach<T extends HookableTarget>(target: T, callbacks: SwiftInvocationCallbacks<HookArgsOf<T>, HookRetOf<T>> & (IsKnownAsync<T> extends true ? never : unknown), options?: SwiftInterceptorOptions): InvocationListener;
   attachAsync<T extends HookableTarget>(target: T, callbacks: SwiftAsyncCallbacks<HookArgsOf<T>, HookRetOf<T>>, options?: SwiftInterceptorOptions): InvocationListener;
 }
 

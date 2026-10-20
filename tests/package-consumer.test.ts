@@ -269,11 +269,9 @@ function hookCallbacksFollowTheTargetAtCompileTime(
       void sum;
     },
   });
+  // @ts-expect-error an async target completes after its entry returns; hook it with attachAsync
   Swift.Interceptor.attach(annotated, {
-    onLeave(retval) {
-      const sum: Int64 = retval;
-      void sum;
-    },
+    onLeave() {},
   });
 
   // Everything else, a member read off a facade (any) and a HookableTarget parameter included, keeps today's types.
