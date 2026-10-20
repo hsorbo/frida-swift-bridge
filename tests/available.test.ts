@@ -2,6 +2,7 @@ import { test, expect, describe } from "@frida/injest/agent";
 
 import { Swift } from "../src/index.js";
 import { SWIFTCORE_MODULE } from "./swift.js";
+import { loadFixture } from "./fixtures/load.js";
 
 // No requireSwift() here: available must not load the runtime, so this file never does either.
 describe("Swift.available", () => {
@@ -11,6 +12,16 @@ describe("Swift.available", () => {
     void Swift.available;
     void Swift.available;
     expect(loaded()).toBe(before);
+  });
+
+  // The spawn host is a plain C program, so this is the one place a Swift-free process is known.
+  test.isolated("is false in a process without Swift, loads nothing to say so, and turns true once a Swift module loads", () => {
+    const loaded = (): boolean => Process.findModuleByName(SWIFTCORE_MODULE) !== null;
+    expect(loaded()).toBe(false);
+    expect(Swift.available).toBe(false);
+    expect(loaded()).toBe(false);
+    loadFixture();
+    expect(Swift.available).toBe(true);
   });
 
   test("agrees with plain runtime presence on a supported host", () => {
