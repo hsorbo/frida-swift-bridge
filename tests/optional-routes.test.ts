@@ -3,15 +3,13 @@ import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
 import { Swift, type CallArg, type CallResult } from "../src/index.js";
 
-const Int = Swift.reflect("Swift.Int")!;
-const OptionalInt = Swift.reflect("Swift.Optional<Swift.Int>")!;
-const NestedOptionalInt = Swift.reflect("Swift.Optional<Swift.Optional<Swift.Int>>")!;
-
 function unwrapOrZero() {
+  const OptionalInt = Swift.reflect("Swift.Optional<Swift.Int>")!;
   return Swift.NativeFunction(fixtureExport("fixture.unwrapOrZero"), OptionalInt, [OptionalInt]);
 }
 
 function echoNestedOptional() {
+  const NestedOptionalInt = Swift.reflect("Swift.Optional<Swift.Optional<Swift.Int>>")!;
   return Swift.NativeFunction(fixtureExport("fixture.echoNestedOptional"), NestedOptionalInt, [NestedOptionalInt]);
 }
 
@@ -48,6 +46,7 @@ describe("Optional representation across routes", () => {
       onEnter(args) { nested.push(args[0]); },
       onLeave(ret) { nested.push(ret); },
     });
+    const Int = Swift.reflect("Swift.Int")!;
     try {
       Swift.NativeFunction(fixtureExport("fixture.makeUnwrapOrZero"), Int, [])();
       Swift.NativeFunction(fixtureExport("fixture.makeEchoNestedOptional"), Int, [])();
