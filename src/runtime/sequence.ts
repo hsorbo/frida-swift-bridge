@@ -23,30 +23,6 @@ export function sequenceIterator(instance: ClassInstance | ValueInstance): (() =
   return () => iterate(sequence, witnessSelf(metadata, instance.handle));
 }
 
-// A facade's integer key: Swift traps on an index outside startIndex..<endIndex and takes the
-// process with it, so the key reads an element only when the type is a Collection indexed by Int
-// and the index lies within those bounds, both read through the Collection witness table.
-export function isCollectionIndex(instance: ClassInstance | ValueInstance, index: number): boolean {
-  const protocol = findProtocol("Swift.Collection");
-  if (protocol === null) {
-    return false;
-  }
-  const metadata = instance instanceof ValueInstance ? instance.metadata : instance.dynamicType;
-  const table = conformsToProtocol(metadata, protocol);
-  if (table === null) {
-    return false;
-  }
-  const collection = new WitnessTable(table, metadata);
-  const indexType = collection.associatedType("Index");
-  if (indexType.kind !== MetadataKind.Struct || indexType.description.fullTypeName !== "Swift.Int") {
-    return false;
-  }
-  const self = witnessSelf(metadata, instance.handle);
-  const startIndex = bindRequirementAt(collection, 0, "Swift.Collection.startIndex.getter : A.Index", self);
-  const endIndex = bindRequirementAt(collection, 1, "Swift.Collection.endIndex.getter : A.Index", self);
-  return Number(startIndex.call()) <= index && index < Number(endIndex.call());
-}
-
 // Self is @in_guaranteed through a witness thunk, so a class reference is passed in a cell.
 function witnessSelf(metadata: Metadata, handle: NativePointer): NativePointer {
   if (metadata.kind !== MetadataKind.Class) {

@@ -484,8 +484,6 @@ function typeFacadeState(target: SwiftTypeFacade): TypeFacadeState {
       callable: callableCache((method, args) => target.$typeMethod(method, invokeOptions(args)).call(...args), (method) => target.$typeMethod(method)),
       cases: null,
       has: (key) => typeFacadeHas(target, key),
-      hasElement: () => false,
-      element: () => undefined,
       bridgeMember: (t, key) => {
         if (key === "hasOwnProperty") {
           return typeFacadeState(t).has;

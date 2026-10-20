@@ -74,24 +74,6 @@
           "median": 162
         }
       },
-      "lookup › Array facade element by index": {
-        "counters": {
-          "symbolTables": 0,
-          "exportTables": 0,
-          "resolverQueries": 0,
-          "moduleLists": 0,
-          "pointerScans": 0,
-          "conformsToProtocol": 11,
-          "demangle": 0,
-          "typeByMangledName": 0,
-          "functionRanges": 0,
-          "swiftSections": 0
-        },
-        "wallUs": {
-          "min": 632,
-          "median": 654
-        }
-      },
       "lookup › Swift.Interceptor attach and detach on a facade method": {
         "counters": {
           "symbolTables": 0,

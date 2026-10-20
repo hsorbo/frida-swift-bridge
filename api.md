@@ -641,8 +641,6 @@ The control surface (never shadowed by Swift members of the same spelling):
 - `[Symbol.iterator]()`: on a facade whose type conforms to `Sequence`, the Swift
   iterator, so `for (const x of seq)`, `[...seq]` and `Array.from(seq)` work. See
   [Iterating a Sequence](#iterating-a-sequence).
-- `[i]`: on a facade whose type is a `Collection` indexed by `Int`, the element at
-  Swift index `i`, read-only. See [Indexing a Collection](#indexing-a-collection).
 - `$dispose()` and `[Symbol.dispose]()`: release (idempotent); works with `using`.
 - `equals(other)`: on an object, identity (Swift `===`); on a value, the type's
   `==` through its `Equatable` conformance, so a custom `==` decides. A value
@@ -956,9 +954,7 @@ Robot.$set("fleetSize", 13);  // the same, by name
 ```
 
 Subscripts have no bracket form, since a facade's bracket keys are its members
-and a subscript's labels and indices cannot be spelled there; the one exception
-is an integer index on a `Collection` (see [Indexing a Collection](#indexing-a-collection)).
-`$subscript(...indices)`
+and a subscript's labels and indices cannot be spelled there. `$subscript(...indices)`
 calls the getter and `$setSubscript(value, ...indices)` the setter, each taking
 as a last argument the selector or the `$method` options that pick one
 subscript when the indices alone are ambiguous; a static subscript lives on the
@@ -1526,31 +1522,6 @@ about the stdlib's storage layout is assumed, unlike `$container()`. One Swift
 call per element; the iterator is destroyed when the loop ends or `break`s. A
 facade of a type that is not a `Sequence` has no `Symbol.iterator`, so spreading
 it fails with JavaScript's own "is not iterable".
-
-### Indexing a Collection
-
-A facade whose type conforms to `Collection` with `Index == Int` reads an element
-with an integer key. The key is the Swift index, not an offset: a slice keeps its
-parent's indices, so its first element is at its `startIndex`.
-
-```js
-ints[0];                                         // int64(10)
-ints[3];                                         // undefined: past endIndex
-0 in ints;                                       // true
-const tail = Swift.type("MyApp.Bag").$call("slice");   // [10, 20, 30, 40][2...]
-tail[0];                                         // undefined: startIndex is 2
-tail[2];                                         // int64(30)
-```
-
-Swift traps on an index out of range, so each read first checks
-`startIndex <= i < endIndex` through the `Collection` witness table and answers
-`undefined` outside it. A key is an index only in its canonical form (`"1"`, not
-`"01"` or `"-1"`). The element is read with the type's own `subscript(_: Int)`, as
-`$subscript(i, { argTypes: ["Swift.Int"] })` would. Any other type answers
-`undefined`: `String`, `Set` and `Dictionary` (even `[Int: V]`, whose index is not
-its key) are not indexed by `Int`. Indices are not listed by `Object.keys`, and
-assigning one throws. Each read makes its own Swift calls, so `for...of` is the
-way to walk a whole collection.
 
 ## Errors
 

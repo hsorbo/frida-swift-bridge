@@ -17,7 +17,7 @@ import { findProtocol, conformsToProtocol } from "../abi/protocol-conformance.js
 import { WitnessTable } from "../abi/witness-table.js";
 import { typeName } from "./type-name.js";
 import { POISON, invokeOptions, splitSubscriptArgs, facadeMembers, callableCache, memberProxyHandler, MemberProxyParts } from "./facade-members.js";
-import { sequenceIterator, isCollectionIndex } from "./sequence.js";
+import { sequenceIterator } from "./sequence.js";
 
 const RESERVED = new Set([
   "toString",
@@ -184,8 +184,6 @@ export function asSwiftObject(source: NativePointer | ClassInstance | ValueInsta
     members,
     reserved: RESERVED,
     has,
-    hasElement: (index) => isCollectionIndex(target, index),
-    element: (index) => subscript("getter", [index, { argTypes: ["Swift.Int"] }], []),
     read: readProperty,
     write: writeProperty,
     callable,
