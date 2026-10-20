@@ -954,7 +954,16 @@ Robot.$set("fleetSize", 13);  // the same, by name
 ```
 
 Subscripts have no bracket form, since a facade's bracket keys are its members
-and a subscript's labels and indices cannot be spelled there. `$subscript(...indices)`
+and a subscript's labels and indices cannot be spelled there. That includes an
+integer key: `array[0]` is `undefined`, not the first element. A Swift
+`subscript(_: Int)` traps on an index its collection does not hold and takes
+the process with it, and `Collection` only promises that the valid indices
+are the ones reached from `startIndex` through `index(after:)`; a slice keeps
+its parent's indices, and a custom collection may leave gaps between them.
+Establishing that a key is valid therefore means walking the indices, and
+even the bounds alone cost a dozen conformance lookups per read, in exactly
+the place callers loop. Rather than guess, the bridge leaves element access
+to `$subscript` and to [iteration](#iterating-a-sequence). `$subscript(...indices)`
 calls the getter and `$setSubscript(value, ...indices)` the setter, each taking
 as a last argument the selector or the `$method` options that pick one
 subscript when the indices alone are ambiguous; a static subscript lives on the
@@ -1708,6 +1717,10 @@ corrupts memory instead of failing cleanly.
 - **Module unloading.** A type found by name and its wrapper are kept for the
   life of the script, since a descriptor never changes. If a module is unloaded
   and another mapped at the same address, the old wrapper is stale.
+- **Which integer indices a `Collection` holds.** Only its own `indices` walk
+  knows, so a facade answers no integer key: `array[0]` is `undefined`, and an
+  element is read with `$subscript(i)` or by iterating (see
+  [Properties](#properties)).
 
 **Things the bridge refuses**
 
