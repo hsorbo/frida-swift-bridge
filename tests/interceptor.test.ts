@@ -580,6 +580,26 @@ describe("Swift.Interceptor.attach", () => {
     expect(seen[1]).toEqual({ retval: null, error: "boom" });
   });
 
+  test("a function annotated with its call inputs is observed as decoded values", () => {
+    const mightThrow = Swift.function<Int64, [number]>(loadFixture(), "$s7fixture10mightThrowyS2iKF");
+    const seen: CallResult[] = [];
+    const listener = Swift.Interceptor.attach(mightThrow, {
+      onEnter(args) {
+        seen.push(args[0]);
+      },
+      onLeave(retval, error) {
+        seen.push(retval, error ?? "returned");
+      },
+    });
+    try {
+      mightThrow.call(0);
+      expect(() => mightThrow.call(1)).toThrow();
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual([int64(0), int64(99), "returned", int64(1), null, "boom"]);
+  });
+
   test("decodes a named-protocol existential argument, projecting the dynamic value", () => {
     const String_ = metadataFor("Swift.String")!;
     const Greeter = metadataOf(Swift.reflect("any fixture.Greeter")!);

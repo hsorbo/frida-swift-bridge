@@ -229,6 +229,7 @@ function hookCallbacksFollowTheTargetAtCompileTime(
   move: $Bound<[number | Int64], [Int64], Int64, { to: Int64 }>,
   padded: $Bound<[number | Int64], [Int64], Int64, { length: Int64 }>,
   annotated: SwiftFunction<Promise<Int64>, [number]>,
+  shaped: SwiftFunction<[Int64, string], [Int64 | null, number[], SwiftValueObject]>,
 ) {
   Swift.Interceptor.attach(greet, {
     onEnter(args) {
@@ -236,8 +237,10 @@ function hookCallbacksFollowTheTargetAtCompileTime(
       void who;
     },
     onLeave(retval) {
+      // @ts-expect-error null when the call threw
       const said: string = retval;
-      void said;
+      const saidOrThrew: string | null = retval;
+      void [said, saidOrThrew];
     },
   });
   const greeting: string = greet("x");
@@ -259,14 +262,29 @@ function hookCallbacksFollowTheTargetAtCompileTime(
     },
   });
 
+  // The annotation types what a call accepts; a hook decodes the argument (an Int64 here) untyped.
   Swift.Interceptor.attachAsync(annotated, {
     onEnter(args) {
+      // @ts-expect-error a call accepts a number, a hook observes the decoded value
       const by: number = args[0];
-      void by;
+      const observed: CallResult = args[0];
+      void [by, observed];
     },
     onComplete(retval) {
+      // @ts-expect-error null when the call threw
       const sum: Int64 = retval;
-      void sum;
+      const sumOrThrew: Int64 | null = retval;
+      void [sum, sumOrThrew];
+    },
+  });
+  Swift.Interceptor.attach(shaped, {
+    onEnter(args) {
+      const untyped: Same<typeof args, SwiftHookArgs> = true;
+      void untyped;
+    },
+    onLeave(retval) {
+      const ret: [Int64, string] | null = retval;
+      void ret;
     },
   });
   // @ts-expect-error an async target completes after its entry returns; hook it with attachAsync

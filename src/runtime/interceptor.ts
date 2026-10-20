@@ -49,7 +49,6 @@ import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { borrowedClosure } from "./closure-view.js";
 import {
-  CallArg,
   CallResult,
   SelfOwnership,
   witnessTableCount,
@@ -87,11 +86,7 @@ export type HookArgsOf<T> = IsAny<T> extends true
   ? SwiftHookArgs
   : T extends SwiftHookTypes<any, infer A, infer N>
     ? A & Omit<N, keyof any[]>
-    : T extends SwiftFunction<any, infer A>
-      ? CallArg[] extends A
-        ? SwiftHookArgs
-        : A
-      : SwiftHookArgs;
+    : SwiftHookArgs;
 
 export type HookRetOf<T> = IsAny<T> extends true
   ? CallResult
@@ -115,7 +110,7 @@ type IsKnownAsync<T> = IsAny<T> extends true
 
 export interface SwiftInvocationCallbacks<Args = SwiftHookArgs, Ret = CallResult> {
   onEnter?: (this: SwiftInvocationContext, args: Args) => void;
-  onLeave?: (this: SwiftInvocationContext, retval: Ret, error?: CallResult) => void;
+  onLeave?: (this: SwiftInvocationContext, retval: Ret | null, error?: CallResult) => void;
 }
 
 export interface SwiftInterceptorOptions {
@@ -1567,7 +1562,7 @@ export interface SwiftAsyncCallbacks<Args = SwiftHookArgs, Ret = CallResult> {
   onEnter?: (this: SwiftInvocationContext, args: Args, context: NativePointer) => void;
   // The entry partial function returning: reached the first suspension, not logical completion.
   onFirstSuspend?: (this: InvocationContext) => void;
-  onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: Ret, error?: CallResult) => void;
+  onComplete?: (this: InvocationContext & { typeArguments?: string[] }, retval: Ret | null, error?: CallResult) => void;
 }
 
 function resolveAsyncEntry(target: NativePointer): NativePointer {
