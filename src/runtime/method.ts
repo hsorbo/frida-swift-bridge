@@ -2044,7 +2044,7 @@ export function rootAsyncReceiver<T>(binder: T, receiver: unknown): T {
 // A Swift facade's $handle, an ObjC.Object's handle, or a raw swiftself pointer.
 export type AsyncReceiver = NativePointer | { $handle: NativePointer } | { handle: NativePointer };
 
-function toReceiverPointer(receiver: AsyncReceiver): NativePointer {
+export function toReceiverPointer(receiver: AsyncReceiver): NativePointer {
   if (receiver instanceof NativePointer) {
     return receiver;
   }

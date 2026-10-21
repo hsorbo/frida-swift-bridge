@@ -270,6 +270,19 @@ describe("type-level member lookups by kind", () => {
     expect(peek.bind(acc).call(10)).toEqual(int64(15));
   });
 
+  test("$type.instanceMethod binds a raw pointer or a handle-carrying object to a class member, and a value member takes only a facade", () => {
+    const Robot = Swift.class("fixture.Robot")!;
+    const robot = Robot.init("R2")!;
+    const greet = Robot.$type.instanceMethod("greet");
+    expect(greet.bind(robot.$handle).call("X")).toBe("Hello X, I am R2");
+    expect(greet.bind({ handle: robot.$handle }).call("Y")).toBe("Hello Y, I am R2");
+    const speaker = Swift.class("fixture.BaseSpeaker")!.init()!;
+    expect(() => greet.bind(speaker.$handle)).toThrow(/greet takes a fixture\.Robot receiver, not a fixture\.BaseSpeaker/);
+    expect(() => greet.bind(5 as unknown as NativePointer)).toThrow(/receiver must be a Swift object, an ObjC\.Object, or a NativePointer/);
+    const peek = Swift.struct("fixture.Accumulator")!.$type.instanceMethod("peek");
+    expect(() => peek.bind(robot.$handle)).toThrow(/peek takes a fixture\.Accumulator facade as its receiver/);
+  });
+
   test("$typeMethod and $type.instanceMethod each find only their own kind", () => {
     const Accumulator = Swift.struct("fixture.Accumulator")!;
     expect(() => Accumulator.$typeMethod("peek")).toThrow(/peek/);

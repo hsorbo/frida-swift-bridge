@@ -8,7 +8,7 @@ import { ProtocolRequirement, ProtocolRequirementKind, readProtocolRequirements 
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { WitnessTable } from "../abi/witness-table.js";
 import { parseTypeExpr, type SubscriptAccessor, type SwiftFunctionSignature } from "./type-expr.js";
-import { SwiftObject } from "./object-facade.js";
+import { SwiftObject, asSwiftObject } from "./object-facade.js";
 import { enumerateFields, fieldTypeIn } from "../abi/field-descriptor.js";
 import { makeSwiftNativeFunction, indirect } from "./calling-convention.js";
 import { parseSwiftSignature, symbolicate, hasSwiftSymbolAt, resolveParsedType, resolveTypeExpr, resolveType, ParamConvention } from "./symbolication.js";
@@ -26,6 +26,9 @@ import {
   PropertyInfo,
   callMarshalled,
   checkedReceiver,
+  isSwiftObject,
+  toReceiverPointer,
+  type AsyncReceiver,
   enumerateMemberCandidates,
   enumerateProperties,
   memberOrigin,
@@ -121,7 +124,7 @@ function parseSlotSignature(typeName: string, slot: UnnamedSlot, text: SlotSigna
 }
 
 export interface SwiftInstanceMethod extends SwiftMember {
-  bind(receiver: SwiftObject): SwiftBoundMethod;
+  bind(receiver: SwiftObject | AsyncReceiver): SwiftBoundMethod;
 }
 
 export type TypeKind =
@@ -315,10 +318,7 @@ export abstract class NominalType extends SwiftType {
     const member = this.member(name, false, options, `instance method ${name}`);
     const bind = member.signature === null
       ? (): never => { throw new Error(`${name} on ${this.name} has no symbol to read a signature from`); }
-      : (receiver: SwiftObject): SwiftBoundMethod => {
-          checkedReceiver(receiver, declaringTypeOf(this), name);
-          return receiver.$method(name, options);
-        };
+      : (receiver: SwiftObject | AsyncReceiver): SwiftBoundMethod => receiverFacade(this, receiver, name).$method(name, options);
     return withHookTarget({ ...member, bind }, hookTargetOf(member) ?? null);
   }
 
@@ -739,6 +739,22 @@ export function isUnboundGeneric(type: SwiftType): boolean {
 
 export function declaringTypeOf(type: SwiftType): Metadata | ContextDescriptor {
   return isUnboundGeneric(type) ? descriptorOf(type) : metadataOf(type);
+}
+
+// A class member takes its receiver as Swift.function's bind does: a facade, a raw pointer or an
+// ObjC object, checked against the declaring class. A value's pointer carries no type, so a value
+// member takes only a facade.
+export function receiverFacade(type: NominalType, receiver: SwiftObject | AsyncReceiver, selector: string): SwiftObject {
+  let object: SwiftObject;
+  if (isSwiftObject(receiver as CallResult)) {
+    object = receiver as SwiftObject;
+  } else if (type instanceof ClassType || type instanceof ObjCClassWrapperType) {
+    object = asSwiftObject(toReceiverPointer(receiver as AsyncReceiver));
+  } else {
+    throw new Error(`${selector} takes a ${type.name} facade as its receiver; a raw pointer carries no value type`);
+  }
+  checkedReceiver(object, declaringTypeOf(type), selector);
+  return object;
 }
 
 function metadataDescriptorOf(type: SwiftType): ContextDescriptor {

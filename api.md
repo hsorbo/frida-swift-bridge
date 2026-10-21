@@ -813,7 +813,9 @@ operators behave as in Swift; a JS `*` on two results is JS arithmetic.
 
 `$type.instanceMethod(name, options)` finds an instance method through its
 type's reflection, without an instance. It has an `address` to hook, and
-`bind(instance)` returns the bound method to call:
+`bind(instance)` returns the bound method to call. A class member's receiver
+may also be a raw pointer or an ObjC object, checked against the declaring
+class; a value member takes its facade:
 
 ```js
 const greet = Swift.type("MyApp.Robot").$type.instanceMethod("greet");
