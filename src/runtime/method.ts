@@ -8,6 +8,7 @@ import { ValueInstance } from "../abi/value.js";
 import { readValue, writeValue, embedsManagedReference, isFacadeValueType, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
 import { enumerateTupleElements } from "../abi/tuple.js";
 import { findType, withoutTypeArguments } from "../reflection/registry.js";
+import { opaqueResultType } from "./opaque-result.js";
 import { demangle } from "./demangle.js";
 import {
   parseSwiftSignature,
@@ -674,11 +675,15 @@ function splitParams(params: TypeExprParam[]): { types: TypeExpr[]; conventions:
   return { types: params.map((p) => p.type), conventions: params.map((p) => p.convention) };
 }
 
+// An opaque result resolves through its declaration's symbol, given as the module holding it and its name.
+type OpaqueSource = { module: Module; symbol: string } | null;
+
 function signatureMetadata(
   signature: SwiftFunctionSignature,
   resolveParam: ResolveParam = () => null,
-  thrownIsAbstract: (type: TypeExpr) => boolean = () => false
-): { argTypes: Metadata[]; returnType: Metadata | null; returnClosure?: ArgPlan; thrown?: ThrownType } {
+  thrownIsAbstract: (type: TypeExpr) => boolean = () => false,
+  opaque: OpaqueSource = null
+): { argTypes: Metadata[]; returnType: Metadata | null; returnClosure?: ArgPlan; thrown?: ThrownType; abstractReturn?: true } {
   const argTypes = signature.params.map(({ type }) => {
     const metadata = resolveParsedType(type, resolveParam);
     if (metadata === null) {
@@ -688,15 +693,20 @@ function signatureMetadata(
   });
   let returnType: Metadata | null = null;
   let returnClosure: ArgPlan | undefined;
+  let abstractReturn: true | undefined;
   if (signature.result?.kind === "function") {
     returnClosure = planReturnedClosure(signature.result, (type) => planGenericType(type, [], [], new Set()), signature.selector);
+  } else if (signature.result?.kind === "opaque" && opaque !== null && signature.genericParams.length === 0) {
+    // An opaque result is returned through a buffer whatever its underlying type.
+    returnType = opaqueResultType(opaque.module, opaque.symbol, signature.context);
+    abstractReturn = true;
   } else if (signature.result !== null) {
     returnType = resolveParsedType(signature.result, resolveParam);
     if (returnType === null) {
       throw new Error(`cannot resolve return type ${signature.result.text} of ${signature.selector}`);
     }
   }
-  return { argTypes, returnType, returnClosure, thrown: resolveThrownType(signature, resolveParam, thrownIsAbstract) };
+  return { argTypes, returnType, returnClosure, thrown: resolveThrownType(signature, resolveParam, thrownIsAbstract), abstractReturn };
 }
 
 function resolveThrownType(
@@ -1489,7 +1499,8 @@ function resolveMethodIn(
     const { isStatic, signature, mangled } = candidates[0];
     const params = splitParams(signature.params);
     const address = candidates[0].address.strip();
-    const { argTypes, returnType, returnClosure, thrown } = signatureMetadata(signature);
+    const holder = Process.findModuleByAddress(address);
+    const { argTypes, returnType, returnClosure, thrown, abstractReturn } = signatureMetadata(signature, undefined, undefined, holder === null ? null : { module: holder, symbol: mangled });
     let asyncFunctionPointer: AsyncFunctionPointer | undefined;
     if (signature.async) {
       const module = Process.findModuleByAddress(address.strip());
@@ -1500,7 +1511,7 @@ function resolveMethodIn(
       asyncFunctionPointer = afp;
     }
     const origin = memberOrigin(address, level);
-    return setterShape({ address, argTypes, returnType, returnClosure, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
+    return setterShape({ address, argTypes, returnType, returnClosure, abstractReturn, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
   }
   return null;
 }
@@ -2156,7 +2167,7 @@ function symbolAddress(module: Module, mangled: string): NativePointer {
 function resolveSyncSymbol(module: Module, mangled: string, signature: SwiftFunctionSignature): ResolvedMethod {
   return {
     address: symbolAddress(module, mangled),
-    ...resolveSignatureTypes(signature),
+    ...resolveSignatureTypes(signature, { module, symbol: mangled }),
     throws: signature.throws,
     isStatic: false,
     selector: signature.selector,
@@ -2172,7 +2183,7 @@ function resolveAsyncSymbol(module: Module, mangled: string, signature: SwiftFun
   }
   return {
     address: afp.code,
-    ...resolveSignatureTypes(signature),
+    ...resolveSignatureTypes(signature, { module, symbol: mangled }),
     throws: signature.throws,
     isStatic: false,
     selector: signature.selector,
@@ -2191,11 +2202,12 @@ function rejectInitializer(signature: SwiftFunctionSignature): void {
 }
 
 export function resolveSignatureTypes(
-  signature: SwiftFunctionSignature
-): { argTypes: Metadata[]; returnType: Metadata | null; returnClosure?: ArgPlan; thrown?: ThrownType; argConventions: ParamConvention[] } {
+  signature: SwiftFunctionSignature,
+  opaque: OpaqueSource = null
+): { argTypes: Metadata[]; returnType: Metadata | null; returnClosure?: ArgPlan; thrown?: ThrownType; abstractReturn?: true; argConventions: ParamConvention[] } {
   rejectInitializer(signature);
   const params = splitParams(signature.params);
-  return { ...signatureMetadata(signature), argConventions: params.conventions };
+  return { ...signatureMetadata(signature, undefined, undefined, opaque), argConventions: params.conventions };
 }
 
 // Thin metatype: no self passed.
@@ -3082,6 +3094,7 @@ interface ResolvedAccessor {
   address: NativePointer;
   type: Metadata;
   kind: AccessorKind;
+  abstract: boolean; // an opaque type: by address whatever its underlying type
 }
 
 // Instance accessors only, walking the superclass chain like enumerateProperties so a subclass
@@ -3111,11 +3124,17 @@ function findAccessor(owner: MemberOwner, member: string, kind: AccessorKind, is
     return null;
   }
   const { candidate, level } = found;
-  const type = resolveParsedType(candidate.type, () => null);
+  const type = candidate.type.kind === "opaque" ? opaqueAccessorType(candidate.address, level.fullName) : resolveParsedType(candidate.type, () => null);
   if (type === null) {
     throw new Error(`cannot resolve ${kind} type ${candidate.typeName} of ${level.fullName}.${member}`);
   }
-  return { address: candidate.address, type, kind };
+  return { address: candidate.address, type, kind, abstract: candidate.type.kind === "opaque" };
+}
+
+function opaqueAccessorType(address: NativePointer, context: string): Metadata | null {
+  const symbol = symbolicate(address);
+  const module = Process.findModuleByAddress(address.strip());
+  return symbol === null || module === null ? null : opaqueResultType(module, symbol.name, context);
 }
 
 function isGenericOwner(owner: MemberOwner): boolean {
@@ -3201,7 +3220,7 @@ function bindAccessor(
   if (accessor === null) {
     return null;
   }
-  const plan = accessorPlan(accessor.address, accessor.type, kind);
+  const plan = accessorPlan(accessor.address, accessor.type, kind, accessor.abstract);
   if (self === null) {
     // Self is the metatype: thick (the metadata) for a class or a protocol extension, erased for a value type.
     return new BoundMethod(plan, { self: metatypeSelf(receiver) });

@@ -46,7 +46,7 @@ import {
 import { findType } from "../reflection/registry.js";
 import { findProtocol } from "../abi/protocol-conformance.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
-import { underlyingTypeArgumentMangledName } from "../abi/opaque-type-descriptor.js";
+import { opaqueResultType } from "./opaque-result.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { borrowedClosure } from "./closure-view.js";
@@ -643,30 +643,14 @@ function opaquePlan(metadata: Metadata): TypePlan {
   return { kind: "opaque", underlying: () => metadata };
 }
 
-// An opaque result is one concrete type per declaration, recorded in the declaration's opaque type
-// descriptor, `<entity>QOMQ`; an accessor's entity is its property or subscript. Only a non-generic
-// context is resolved, since the underlying type may name generic arguments the hook doesn't have.
+// An opaque result is named by the descriptor of the declaration whose symbol is at the hooked address.
 function opaqueUnderlyingType(target: NativePointer, context: string): Metadata {
   const symbol = symbolicate(target);
   const module = Process.findModuleByAddress(target.strip());
   if (symbol === null || module === null) {
     throw new Error(`no Swift symbol at ${target} to name its opaque result type`);
   }
-  const owner = findType(context.replace(/^(static|class) /, ""));
-  if (owner?.isGeneric || (owner === null && context.includes("."))) {
-    throw new Error(`unsupported opaque result in a generic context: ${symbol.demangled}`);
-  }
-  const name = `${symbol.name.replace(/([vi])[grM]$/, "$1p")}QOMQ`;
-  const address = module.findExportByName(name) ?? module.findSymbolByName(name);
-  if (address === null) {
-    throw new Error(`no opaque type descriptor for ${symbol.demangled}`);
-  }
-  const descriptor = new ContextDescriptor(address);
-  const metadata = resolveTypeByMangledName(underlyingTypeArgumentMangledName(descriptor, 0), descriptor);
-  if (metadata === null) {
-    throw new Error(`could not resolve the opaque result of ${symbol.demangled}`);
-  }
-  return metadata;
+  return opaqueResultType(module, symbol.name, context);
 }
 
 // A property typed by its generic context's parameters lowers as a subscript with no indices: the

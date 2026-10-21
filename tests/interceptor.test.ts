@@ -1133,4 +1133,9 @@ describe("Swift.Interceptor.attach on accessors typed by a type parameter or an 
     const opaqueCount = Swift.function(module, "$s7fixture11opaqueCountSiyF");
     expect(hookDuring(fixtureExport("fixture.makeOpaqueCount()"), () => opaqueCount.call())).toEqual({ args: [], ret: int64(42), called: int64(42) });
   });
+
+  test("a function returning an opaque type decodes its underlying type", () => {
+    const makeOpaqueGreeter = Swift.function(loadFixture(), "$s7fixture17makeOpaqueGreeterQryF");
+    expect(hookDuring(makeOpaqueGreeter, () => makeOpaqueGreeter.call()).ret).toEqual({ name: "Ada" });
+  });
 });

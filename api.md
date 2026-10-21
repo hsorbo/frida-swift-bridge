@@ -1821,8 +1821,9 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
 - **Methods of generic types in `Swift.function`.** `Swift.function` plans a
   symbol's own generic parameters, not those of its enclosing type.
 - **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan.
-  An opaque result (`some P`) is decoded as its underlying type in a
-  non-generic context only, where the declaration names that type alone.
+- **Opaque results.** A result of opaque type (`some P`), hooked or called,
+  is the declaration's underlying type, resolved in a non-generic context
+  only, where the declaration names that type alone.
 - **Hosts.** arm64 and x86-64 on Darwin, Linux and Windows. Anything else throws
   `unsupported Swift host`.
 

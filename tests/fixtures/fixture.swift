@@ -554,6 +554,7 @@ public struct OpaqueHost {
     public var name: String
     public init(name: String) { self.name = name }
     public var body: some Greeter { PoliteGreeter(name: name) }
+    public func renamed(_ other: String) -> some Greeter { PoliteGreeter(name: other) }
     public var length: some Equatable { name.count }
 }
 // An opaque result is returned through a buffer whatever its underlying type, an Int included.
