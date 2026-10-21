@@ -85,7 +85,7 @@ describe("Swift.enumerateFunctions", () => {
     if (Process.platform !== "darwin") ctx.skip("only Mach-O re-exports symbols");
     const matches = [...Swift.enumerateFunctions("Darwin.POSIXErrorCode.init(rawValue:*")];
     expect(matches.map((m) => m.name)).toEqual(["Darwin.POSIXErrorCode.init(rawValue: Swift.Int32) -> Swift.Optional<Darwin.POSIXErrorCode>"]);
-    expect(matches[0].module).toBe(Process.findModuleByAddress(matches[0].address)!.name);
+    expect(matches[0].module).toBe(Process.findModuleByAddress(matches[0].address.strip())!.name);
   });
 });
 
