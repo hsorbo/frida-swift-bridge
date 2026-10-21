@@ -79,6 +79,21 @@ describe("closure captures", () => {
     expect(p.read()).toEqual({ x: int64(3), y: int64(4) });
   });
 
+  test("a closure inside a captured struct reads as a closure view, in a concrete and a generic struct", () => {
+    new NativeFunction(fixtureExport("storeHandlerCapturing"), "void", ["int64"])(5);
+    const [h] = Swift.borrowClosure(fixtureContext("handlerCapturingContext")).$captures();
+    const { action, label } = h.read() as { action: SwiftClosureValue; label: string };
+    expect(label).toBe("handler");
+    expect(action.$captures().map((c) => c.read())).toEqual([int64(5)]);
+
+    new NativeFunction(fixtureExport("triggerEmitterCapturing"), "void", ["int64"])(6);
+    const [e] = Swift.borrowClosure(fixtureContext("emitterCapturingContext")).$captures();
+    expect(e.type.name).toBe("fixture.Emitter<Swift.Int>");
+    const { emit, tag } = e.read() as { emit: SwiftClosureValue; tag: Int64 };
+    expect(tag).toEqual(int64(6));
+    expect(emit.$captures().map((c) => c.read())).toEqual([int64(6)]);
+  });
+
   test("an escaping closure argument inside a Swift.Interceptor hook reads its captures", () => {
     let seen: { owned: boolean; captures: unknown[] } | null = null;
     const listener = Swift.Interceptor.attach(Swift.function(module, INVOKE_ESCAPING), {

@@ -1806,6 +1806,33 @@ public func resilientCapturingContext() -> UnsafeMutableRawPointer {
     }
 }
 
+var handlerCapturingBody: () -> Int = { 0 }
+public func storeHandlerCapturing(_ n: Int) {
+    let h = makeHandler(n)
+    handlerCapturingBody = { h.action() }
+}
+public func handlerCapturingContext() -> UnsafeMutableRawPointer {
+    return withUnsafePointer(to: &handlerCapturingBody) { p in
+        UnsafeRawPointer(p).load(fromByteOffset: MemoryLayout<Int>.size, as: UnsafeMutableRawPointer.self)
+    }
+}
+
+public struct Emitter<T> {
+    public var emit: () -> T
+    public var tag: Int
+}
+var emitterCapturingBody: () -> Int = { 0 }
+public func storeEmitterCapturing<T>(_ v: T, _ n: Int) {
+    let e = Emitter<T>(emit: { v }, tag: n)
+    emitterCapturingBody = { e.tag }
+}
+public func triggerEmitterCapturing(_ n: Int) { storeEmitterCapturing(n, n) }
+public func emitterCapturingContext() -> UnsafeMutableRawPointer {
+    return withUnsafePointer(to: &emitterCapturingBody) { p in
+        UnsafeRawPointer(p).load(fromByteOffset: MemoryLayout<Int>.size, as: UnsafeMutableRawPointer.self)
+    }
+}
+
 var mixedCapturingBody: () -> Int = { 0 }
 public func storeMixedCapturing(_ flagValue: Int, _ n: Int, _ kind: Int) {
     let flag = flagValue != 0
