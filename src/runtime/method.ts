@@ -850,7 +850,8 @@ function resolveMemberOwner(typeName: string): MemberOwner {
 }
 
 // A member is keyed to its declaring class, so inherited ones need the superclass chain.
-// Most-derived first; non-class/generic types collapse to one level. A Swift class rooted in an
+// Most-derived first; a non-class collapses to one level, as does a generic class named without
+// its arguments, whose chain only a specialization's metadata leads to. A Swift class rooted in an
 // ObjC class continues through its ObjC superclasses, whose Swift members are extension members.
 function classChain(owner: MemberOwner): MemberOwner[] {
   if (owner.kind === "objcClass") {
@@ -865,20 +866,45 @@ function classChain(owner: MemberOwner): MemberOwner[] {
   if (metadata.kind !== MetadataKind.Class) {
     return [owner];
   }
-  const chain: MemberOwner[] = [];
-  let cls: ClassMetadata | null = new ClassMetadata(metadata.handle);
+  const chain = classLevelsOf(metadata).map((level) => level.owner);
+  return chain.length === 0 ? [owner] : chain;
+}
+
+// A level of a class's chain with its metadata: a generic ancestor's carries the subclass's
+// arguments substituted, which is what its members are planned from. An ObjC ancestor has none.
+interface ClassLevel {
+  owner: MemberOwner;
+  metadata: Metadata | null;
+}
+
+function classLevelsOf(metadata: Metadata): ClassLevel[] {
+  const levels: ClassLevel[] = [];
+  let cls: ClassMetadata | null = new ClassMetadata(metadata.kind === MetadataKind.ObjCClassWrapper ? objcClassOf(metadata) : metadata.handle);
   while (cls !== null && cls.isTypeMetadata) {
     const name = cls.description.fullTypeName;
     if (name === null) {
       break;
     }
-    chain.push(describedOwner(name, cls.description));
+    levels.push({ owner: describedOwner(name, cls.description), metadata: new Metadata(cls.handle) });
     cls = cls.superclass;
   }
   if (cls !== null && !cls.isTypeMetadata) {
-    chain.push(...objcClassChain(cls.handle));
+    levels.push(...objcClassChain(cls.handle).map((owner) => ({ owner, metadata: null })));
   }
-  return chain.length === 0 ? [owner] : chain;
+  return levels;
+}
+
+// A specialization's chain runs through its metadata; any other name's through its descriptor.
+function classLevelsNamed(typeName: string, owner: MemberOwner): ClassLevel[] {
+  const specialization =
+    owner.kind !== "objcClass" && owner.descriptor.isGeneric && owner.descriptor.kind === ContextDescriptorKind.Class && withoutTypeArguments(typeName) !== typeName
+      ? resolveTypeExpr(typeName, () => null)
+      : null;
+  return specialization !== null ? classLevelsOf(specialization) : classChain(owner).map((level) => ({ owner: level, metadata: null }));
+}
+
+function levelTypeArguments(level: ClassLevel): Metadata[] | null {
+  return level.metadata !== null && isGenericOwner(level.owner) ? genericTypeArguments(level.metadata).typeArguments : null;
 }
 
 // Every entity symbol leads with its context's mangled node, so the raw name can be tested for it
@@ -1025,8 +1051,8 @@ export function memberKindsInOtherModules(typeName: string, name: string, isStat
     found.writable ||= members.accessors.some((a) => a.member === name && a.isStatic === isStatic && a.kind === "setter");
   };
   const isMethod = (c: MethodCandidate): boolean => c.isStatic === isStatic && c.signature.accessor === undefined && methodKind(c.name) === "method";
-  for (const level of classChain(owner)) {
-    consider(foreignMembers(level, mayName), isMethod);
+  for (const level of classLevelsNamed(typeName, owner)) {
+    consider(foreignMembers(level.owner, mayName), isMethod);
   }
   for (const conformance of conformanceMembers(owner, mayName)) {
     consider(conformance.members, (c) => isConformanceMethod(c) && isMethod(c));
@@ -1311,13 +1337,12 @@ export function enumerateMemberCandidates(
     });
   };
   const typeArguments = typeArgumentsNamed(typeName);
-  const levels = types === "withSuperclasses" ? classChain(owner) : [owner];
+  const levels = types === "withSuperclasses" ? classLevelsNamed(typeName, owner) : [{ owner, metadata: null }];
   levels.forEach((level, i) => {
-    const table = members(level);
-    table.methods.filter((c) => i > 0 || typeArguments === null || memberClauseHolds(owner, typeArguments, c.signature)).forEach(add);
-    if (i === 0) {
-      (typeArguments === null ? table.conditional : conditionalMethods(owner, typeArguments, table)).forEach(add);
-    }
+    const table = members(level.owner);
+    const args = i === 0 ? typeArguments : levelTypeArguments(level);
+    table.methods.filter((c) => args === null || memberClauseHolds(level.owner, args, c.signature)).forEach(add);
+    (args === null ? table.conditional : conditionalMethods(level.owner, args, table)).forEach(add);
   });
   if (modules === "allLoadedModules" && types === "withSuperclasses") {
     for (const conformance of conformanceMembers(owner)) {
@@ -1498,40 +1523,51 @@ function resolveMethodIn(
   members: MemberSource
 ): ResolvedMethod | null {
   for (const level of classChain(owner)) {
-    const candidates = applyOverloadFilters(
-      members(level).methods.filter(
-        (c) => c.name === methodName && c.signature.genericParams.length === 0
-      ),
-      options
-    );
-    if (candidates.length === 0) {
-      continue;
+    const resolved = resolveMethodAt(level, methodName, options, members);
+    if (resolved !== null) {
+      return resolved;
     }
-    if (candidates.length > 1) {
-      const overloads = describeOverloads(candidates);
-      throw new Error(
-        `ambiguous method ${methodName} on ${level.fullName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
-      );
-    }
-
-    const { isStatic, signature, mangled } = candidates[0];
-    const params = splitParams(signature.params);
-    const address = candidates[0].address.strip();
-    const holder = Process.findModuleByAddress(address);
-    const { argTypes, returnType, returnClosure, thrown, abstractReturn } = signatureMetadata(signature, undefined, undefined, holder === null ? null : { module: holder, symbol: mangled });
-    let asyncFunctionPointer: AsyncFunctionPointer | undefined;
-    if (signature.async) {
-      const module = Process.findModuleByAddress(address.strip());
-      const afp = module === null ? null : findAsyncFunctionPointer(module, mangled);
-      if (afp === null) {
-        throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
-      }
-      asyncFunctionPointer = afp;
-    }
-    const origin = memberOrigin(address, level);
-    return setterShape({ address, argTypes, returnType, returnClosure, abstractReturn, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
   }
   return null;
+}
+
+function resolveMethodAt(
+  level: MemberOwner,
+  methodName: string,
+  options: RawMethodResolveOptions,
+  members: MemberSource
+): ResolvedMethod | null {
+  const candidates = applyOverloadFilters(
+    members(level).methods.filter(
+      (c) => c.name === methodName && c.signature.genericParams.length === 0
+    ),
+    options
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+  if (candidates.length > 1) {
+    const overloads = describeOverloads(candidates);
+    throw new Error(
+      `ambiguous method ${methodName} on ${level.fullName}: ${overloads} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`
+    );
+  }
+  const { isStatic, signature, mangled } = candidates[0];
+  const params = splitParams(signature.params);
+  const address = candidates[0].address.strip();
+  const holder = Process.findModuleByAddress(address);
+  const { argTypes, returnType, returnClosure, thrown, abstractReturn } = signatureMetadata(signature, undefined, undefined, holder === null ? null : { module: holder, symbol: mangled });
+  let asyncFunctionPointer: AsyncFunctionPointer | undefined;
+  if (signature.async) {
+    const module = Process.findModuleByAddress(address.strip());
+    const afp = module === null ? null : findAsyncFunctionPointer(module, mangled);
+    if (afp === null) {
+      throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
+    }
+    asyncFunctionPointer = afp;
+  }
+  const origin = memberOrigin(address, level);
+  return setterShape({ address, argTypes, returnType, returnClosure, abstractReturn, throws: signature.throws, thrown, isStatic, selector: signature.selector, signature, async: signature.async, asyncFunctionPointer, argConventions: params.conventions, origin });
 }
 
 // A subscript setter stores the element it is handed, +1, ahead of the indices and returns nothing.
@@ -1568,7 +1604,7 @@ function witnessSelfArgs(
     : { typeArguments: [table.conformingType], witnessTables: witnessTables ?? [table.handle] };
 }
 
-function planOf(resolved: ResolvedMethod): CallPlan {
+export function planOf(resolved: ResolvedMethod): CallPlan {
   const { returnType, thrown } = resolved;
   const implicit = witnessSelfArgs(resolved.witnessSelf, resolved.witnessTables);
   if (thrown !== undefined && resolved.witnessSelf !== undefined && !thrownRidesResultRegisters(thrown, returnType, resolved.abstractReturn === true)) {
@@ -2787,13 +2823,21 @@ function matchingMethods(
   typeArguments: Metadata[] | null = null,
   everyConditional = false
 ): MethodCandidate[] {
-  const matching = (source: MemberSource): MethodCandidate[] => {
-    const table = source(owner);
-    const conditional = everyConditional ? table.conditional : conditionalMethods(owner, typeArguments, table);
-    return applyOverloadFilters([...table.methods, ...conditional].filter(match), options);
-  };
-  const own = matching(definingModuleMembers);
-  return own.length > 0 || options.deep === false ? own : matching(allLoadedModuleMembers);
+  const own = matchingMethodsIn(definingModuleMembers, owner, options, match, typeArguments, everyConditional);
+  return own.length > 0 || options.deep === false ? own : matchingMethodsIn(allLoadedModuleMembers, owner, options, match, typeArguments, everyConditional);
+}
+
+function matchingMethodsIn(
+  members: MemberSource,
+  owner: MemberOwner,
+  options: RawMethodResolveOptions,
+  match: (candidate: MethodCandidate) => boolean,
+  typeArguments: Metadata[] | null,
+  everyConditional: boolean
+): MethodCandidate[] {
+  const table = members(owner);
+  const conditional = everyConditional ? table.conditional : conditionalMethods(owner, typeArguments, table);
+  return applyOverloadFilters([...table.methods, ...conditional].filter(match), options);
 }
 
 function conditionalMethods(owner: MemberOwner, typeArguments: Metadata[] | null, table: TypeMembers): MethodCandidate[] {
@@ -3020,16 +3064,34 @@ function planGenericTypeMethod(
   options: RawMethodResolveOptions,
   trailsSelfMetadata: boolean
 ): { plan: CallPlan; clause: ClauseArguments | null } {
+  const planned =
+    planGenericTypeMethodIn(definingModuleMembers, receiver, methodName, options, trailsSelfMetadata) ??
+    (options.deep === false ? null : planGenericTypeMethodIn(allLoadedModuleMembers, receiver, methodName, options, trailsSelfMetadata));
+  if (planned === null) {
+    throw noMethodError(genericTypeArguments(receiver).unboundName, methodName);
+  }
+  return planned;
+}
+
+function planGenericTypeMethodIn(
+  members: MemberSource,
+  receiver: Metadata,
+  methodName: string,
+  options: RawMethodResolveOptions,
+  trailsSelfMetadata: boolean
+): { plan: CallPlan; clause: ClauseArguments | null } | null {
   const { unboundName, typeParams, typeArguments } = genericTypeArguments(receiver);
   const owner = resolveMemberOwner(unboundName);
-  const candidates = matchingMethods(
+  const candidates = matchingMethodsIn(
+    members,
     owner,
     options,
     (c) => c.name === methodName && c.signature.genericParams.length === 0 && c.signature.simpleGenerics,
-    typeArguments
+    typeArguments,
+    false
   );
   if (candidates.length === 0) {
-    throw noMethodError(unboundName, methodName);
+    return null;
   }
   if (candidates.length > 1) {
     const overloads = describeOverloads(candidates);
@@ -3102,13 +3164,28 @@ export function bindGenericTypeValueMethod(
   return new BoundMethod(plan, { self, routing, consumedSelf: consumedSelf(receiver, options) });
 }
 
-export function bindGenericTypeClassMethod(
-  receiver: Metadata,
-  self: NativePointer,
-  methodName: string,
-  options: RawMethodResolveOptions = {}
-): BoundMethod {
-  return new BoundMethod(planGenericTypeMethod(receiver, methodName, options, false).plan, { self });
+// An instance method of an object's class or an ancestor, most-derived first, every level's own
+// members ahead of any extension's as findMethod orders them. A generic level is planned from its
+// metadata, which already carries the object's arguments; the object recovers them from its isa.
+export function planClassInstanceMethod(receiver: Metadata, methodName: string, options: RawMethodResolveOptions): CallPlan | null {
+  const levels = classLevelsOf(receiver);
+  const sources = options.deep === false ? [definingModuleMembers] : [definingModuleMembers, allLoadedModuleMembers];
+  for (const members of sources) {
+    for (const { owner, metadata } of levels) {
+      if (metadata !== null && isGenericOwner(owner)) {
+        const planned = planGenericTypeMethodIn(members, metadata, methodName, options, false);
+        if (planned !== null) {
+          return planned.plan;
+        }
+      } else {
+        const resolved = resolveMethodAt(owner, methodName, options, members);
+        if (resolved !== null) {
+          return planOf(resolved);
+        }
+      }
+    }
+  }
+  return null;
 }
 
 // A type method of a specialization. A class takes its metadata as the thick metatype self; a value

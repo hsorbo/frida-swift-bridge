@@ -11,12 +11,13 @@ import {
   BoundMethod,
   bindResolved,
   ResolvedMethod,
-  findMethod,
   bindConformanceMethod,
   actorSerialExecutor,
   bindGenericMethod,
   rootAsyncReceiver,
-  bindGenericTypeClassMethod,
+  planClassInstanceMethod,
+  planOf,
+  CallPlan,
   witnessRequirementReceiver,
   RawMethodResolveOptions,
   getProperty,
@@ -162,15 +163,11 @@ export class ClassInstance implements RawInstance {
     if (options.typeArguments !== undefined) {
       return rootAsyncReceiver(bindGenericMethod(this.typeName, name, this.handle, { ...options, static: false }), this);
     }
-    const description = this.metadata.isTypeMetadata ? this.metadata.description : null;
-    if (description !== null && description.isGeneric) {
-      return rootAsyncReceiver(bindGenericTypeClassMethod(this.dynamicType, this.handle, name, options), this);
-    }
-    const resolved = findMethod(this.typeName, name, { ...options, static: false });
-    if (resolved === null) {
+    const plan = planClassInstanceMethod(this.dynamicType, name, { ...options, static: false });
+    if (plan === null) {
       return rootAsyncReceiver(bindConformanceMethod(this.typeName, this.handle, name, options), this);
     }
-    return this.bind(resolved, this.handle);
+    return this.bind(plan, this.handle);
   }
 
   // A vtable or witness slot called with the caller's signature: the former takes the object as a
@@ -178,17 +175,17 @@ export class ClassInstance implements RawInstance {
   slot(selector: string, signature: SlotSignature): BoundMethod {
     const resolved = slotCall(this.type as NominalType, selector, signature, false);
     const table = resolved.witnessSelf;
-    return this.bind(resolved, table === undefined ? this.handle : witnessRequirementReceiver(table, this.handle));
+    return this.bind(planOf(resolved), table === undefined ? this.handle : witnessRequirementReceiver(table, this.handle));
   }
 
-  private bind(resolved: ResolvedMethod, self: NativePointer): BoundMethod {
+  private bind(plan: CallPlan, self: NativePointer): BoundMethod {
     const description = this.metadata.isTypeMetadata ? this.metadata.description : null;
     let executor = null;
-    if (resolved.async === true && description !== null && isActor(description)) {
+    if (plan.async && description !== null && isActor(description)) {
       executor = actorSerialExecutor(this.dynamicType, this.handle)
         ?? (isDefaultActor(description) ? { identity: this.handle, implementation: NULL } : null);
     }
-    return rootAsyncReceiver(bindResolved(resolved, self, { executor }), this);
+    return rootAsyncReceiver(new BoundMethod(plan, { self, executor }), this);
   }
 
   get vtable(): VTableEntry[] {
@@ -234,7 +231,7 @@ export class ClassInstance implements RawInstance {
     if (name === null) {
       throw new Error("ClassInstance: class has no type name");
     }
-    return name;
+    return metadata.description.isGeneric ? typeName(this.dynamicType) : name;
   }
 
   checkLive(): void {
