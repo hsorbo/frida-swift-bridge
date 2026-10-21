@@ -46,6 +46,17 @@ describe("Swift.enumerateFunctions", () => {
     expect(matches.map((m) => m.name)).toEqual(["fixture.Robot.greet(Swift.String) -> Swift.String"]);
   });
 
+  test("a match is callable through Swift.function, a slot or an accessor is refused", () => {
+    const [addInts] = Swift.enumerateFunctions("fixture.addInts(*") as Iterable<SwiftFunctionMatch>;
+    expect(Swift.function(addInts).call(20, 22)).toEqual(int64(42));
+    const [greet] = Swift.enumerateFunctions("fixture.Robot.greet(*") as Iterable<SwiftFunctionMatch>;
+    expect(Swift.function(greet).bind(Swift.class("fixture.Robot")!.init("R2")!)("X")).toBe("Hello X, I am R2");
+    const [level] = Swift.enumerateFunctions("fixture.Gauge.level.getter*") as Iterable<SwiftFunctionMatch>;
+    expect(() => Swift.function(level)).toThrow(/level\.getter : Swift\.Int is a getter; Swift\.function calls functions only/);
+    const [slot] = slotsOf(module);
+    expect(() => Swift.function(slot)).toThrow(/has no symbol to call through/);
+  });
+
   test("a match hooks directly", () => {
     const [addInts] = Swift.enumerateFunctions("fixture.addInts(*") as Iterable<SwiftFunctionMatch>;
     let seen: unknown;

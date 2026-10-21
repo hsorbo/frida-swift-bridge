@@ -1,5 +1,7 @@
 import { nominalTypeNamed, receiverFacade } from "./swift-type.js";
+import { symbolicate } from "./symbolication.js";
 import type { SwiftObject } from "./object-facade.js";
+import type { SwiftFunctionMatch, SwiftFunctionSlot } from "./function-listing.js";
 import {
   AsyncReceiver,
   CallArg,
@@ -130,12 +132,32 @@ export function resolveSwiftFunction<Ret = CallResult | Promise<CallResult>, Arg
   options?: FunctionResolveOptions
 ): SwiftFunction<Ret, Args>;
 export function resolveSwiftFunction(qualified: string, options?: ValueMethodResolveOptions): SwiftMemberFunction;
+export function resolveSwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]>(
+  match: SwiftFunctionMatch | SwiftFunctionSlot,
+  options?: FunctionResolveOptions
+): SwiftFunction<Ret, Args>;
 export function resolveSwiftFunction(
-  target: Module | string,
-  spec?: string | ValueMethodResolveOptions,
+  target: Module | string | SwiftFunctionMatch | SwiftFunctionSlot,
+  spec?: string | ValueMethodResolveOptions | FunctionResolveOptions,
   options?: FunctionResolveOptions
 ): SwiftFunction | SwiftMemberFunction {
-  return typeof target === "string"
-    ? qualifiedFunction(target, spec as ValueMethodResolveOptions | undefined)
-    : resolveFunction(target, spec as string, options);
+  if (typeof target === "string") {
+    return qualifiedFunction(target, spec as ValueMethodResolveOptions | undefined);
+  }
+  if ("address" in target) {
+    return matchedFunction(target, spec as FunctionResolveOptions | undefined);
+  }
+  return resolveFunction(target, spec as string, options);
+}
+
+// A listing's match carries no mangled name; the symbol at its address names it. A slot has none.
+function matchedFunction(match: SwiftFunctionMatch | SwiftFunctionSlot, options?: FunctionResolveOptions): SwiftFunction {
+  if (match.kind !== "function") {
+    throw new Error(`${match.name} is a ${match.kind}; Swift.function calls functions only, read the property through its type`);
+  }
+  const symbol = match.signature === null ? null : symbolicate(match.address);
+  if (symbol === null) {
+    throw new Error(`${match.name} has no symbol to call through; hook its address`);
+  }
+  return resolveFunction(Process.getModuleByName(match.module), symbol.name, options);
 }

@@ -272,7 +272,8 @@ another module re-exports is listed once. Each match has an
 `kind` (`function`, `getter`, `setter`, `modify` or `read`) and the `signature`
 a member carries; a getter, modify or read yields the property's type and a
 setter takes it, as the hook's callbacks see them. A match goes straight into
-`Swift.Interceptor.attach`. Methods and free functions alike are listed;
+`Swift.Interceptor.attach`, and a `function` match into `Swift.function(match)`,
+which calls it as the mangled form would. Methods and free functions alike are listed;
 metadata accessors, deinitializers and thunks are not. With no module in the
 filter the query walks every loaded module, so scope it when you can:
 
@@ -284,6 +285,7 @@ for (const fn of Swift.enumerateFunctions("MyApp.*open*"))
 
 const [open] = Swift.enumerateFunctions("MyApp.Door.open(*");
 Swift.Interceptor.attach(open, { onLeave(ret) { console.log(ret); } });
+Swift.function(open).bind(door)();   // true
 ```
 
 A stripped module keeps its class and protocol dispatch in metadata, not in
@@ -1406,8 +1408,8 @@ refuses a non-escaping one, whose context lives in the caller's frame.
 
 `target` is an address, a member found through a type's reflection, a bound
 method, initializer or type method or a facade's bare-name method (hooked as
-its member; the receiver it was bound to plays no part), or a function from
-`Swift.function`. An address is
+its member; the receiver it was bound to plays no part), a function from
+`Swift.function` or a match from `Swift.enumerateFunctions`. An address is
 symbolicated to learn the signature; a member or function carries the signature
 it was found with, so it needs no symbol at its address. The arguments arrive
 positionally; the member's labels name them:
