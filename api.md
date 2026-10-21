@@ -1250,7 +1250,10 @@ const Int = Swift.type("Swift.Int");
 Swift.function(app, "$s5MyApp15genericIdentityyxxlF", { typeArguments: [Int] }).call(21);   // int64(21)
 ```
 
-Methods of generic types are rejected; reach for `/abi` for those. An
+An instance method of a generic class binds any object of a specialization,
+or of a subclass of one: the receiver's isa supplies the type arguments, so
+no `{ typeArguments }` are taken. Methods of generic value types, and type
+methods of generic classes, are rejected; reach for `/abi` for those. An
 initializer consumes its arguments, so it is rejected too: construct through
 `Swift.type(...).init`.
 

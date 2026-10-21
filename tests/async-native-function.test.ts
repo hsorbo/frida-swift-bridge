@@ -15,6 +15,7 @@ const FLIP_FRAMED_INT128_ASYNC = "$s7fixture21flipFramedInt128AsyncyAA0cD0VADYaF
 const WEIGH_INTS_ASYNC = "$s7fixture14weighIntsAsyncyS2i_S7is5Int32VSitYaF";
 const ADD_ASYNC = "$s7fixture9AsyncCalcC03addB0yS2iYaF";
 const GENERIC_HOLDER_SCALED_STORED_ASYNC = "$s7fixture13GenericHolderC17scaledStoredAsync2byS2i_tYaF";
+const GENERIC_HOLDER_STORED_ASYNC = "$s7fixture13GenericHolderC11storedAsyncxyYaF";
 
 describe("Swift.function on async symbols", () => {
   let module: Module;
@@ -113,10 +114,10 @@ describe("Swift.function on async symbols", () => {
     expect(() => computeAsync.bind(ptr(1))).toThrow(/no receiver/);
   });
 
-  test("rejects a method of a generic type", () => {
-    expect(() => Swift.function(module, GENERIC_HOLDER_SCALED_STORED_ASYNC)).toThrow(
-      /scaledStoredAsync\(by:\) is a member of generic type fixture\.GenericHolder/
-    );
+  test("binds an async method of a generic class: GenericHolder<Int>(3).scaledStoredAsync(by: 7) ⇒ 21, storedAsync() ⇒ 3", async () => {
+    const holder = Swift.class("fixture.GenericHolder<Swift.Int>")!.init(3)!;
+    expect(await Swift.function(module, GENERIC_HOLDER_SCALED_STORED_ASYNC).bind(holder)(7)).toEqual(int64(21));
+    expect(await Swift.function(module, GENERIC_HOLDER_STORED_ASYNC).bind(holder)()).toEqual(int64(3));
   });
 
   test("validates argument count", () => {

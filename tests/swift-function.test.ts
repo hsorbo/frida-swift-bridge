@@ -27,6 +27,8 @@ const COMPUTE_ASYNC = "$s7fixture12computeAsyncyS2iYaF";
 const ROBOT_ALLOCATING_INIT = "$s7fixture5RobotC4nameACSS_tcfC";
 const BURROW_OCCUPANT = "$s7fixture6BurrowC8occupantSSyFZ";
 const GENERIC_HOLDER_SCALED_STORED = "$s7fixture13GenericHolderC12scaledStored2byS2i_tF";
+const GENERIC_HOLDER_STORED = "$s7fixture13GenericHolderC6storedxyF";
+const GENERIC_LABELED_HOLDER_SCALED_STORED = "$s7fixture20GenericLabeledHolderC12scaledStored2byS2i_tF";
 const CONSTRAINED_BOX_SCALED_STORED = "$s7fixture14ConstrainedBoxV12scaledStored2byS2i_tF";
 const PRESSABLE_INT_INIT = "$s7fixture9PressableVAASiRszlE_6actionACySiGSi_yyXEtcfC";
 const PRESSABLE_STRING_INIT = "$s7fixture9PressableVAASSRszlE_6actionACySSGSS_yyXEtcfC";
@@ -131,10 +133,29 @@ describe("Swift.function", () => {
     expect(await scaledBy.bind(box)(3, 7)).toEqual(int64(31));
   });
 
-  test("rejects a method of a generic type", () => {
-    expect(() => Swift.function(module, GENERIC_HOLDER_SCALED_STORED)).toThrow(
-      /scaledStored\(by:\) is a member of generic type fixture\.GenericHolder/
-    );
+  test("binds a method of a generic class from the receiver's specialization: GenericHolder<Int>(3).scaledStored(by: 7) ⇒ 21, stored() ⇒ 3", () => {
+    const holder = Swift.class("fixture.GenericHolder<Swift.Int>")!.init(3)!;
+    expect(Swift.function(module, GENERIC_HOLDER_SCALED_STORED).bind(holder)(7)).toEqual(int64(21));
+    expect(Swift.function(module, GENERIC_HOLDER_STORED).bind(holder)()).toEqual(int64(3));
+    expect(Swift.function(module, GENERIC_HOLDER_STORED).bind(holder.$handle)()).toEqual(int64(3));
+  });
+
+  test("a subclass object reaches its generic superclass's method: LabeledHolder(7).scaledStored(by: 3) ⇒ 21", () => {
+    const labeled = Swift.class("fixture.LabeledHolder")!.init(7, "L")!;
+    expect(Swift.function(module, GENERIC_HOLDER_SCALED_STORED).bind(labeled)(3)).toEqual(int64(21));
+    const genericLabeled = Swift.class("fixture.GenericLabeledHolder<Swift.Int>")!.init(3, "L")!;
+    expect(Swift.function(module, GENERIC_LABELED_HOLDER_SCALED_STORED).bind(genericLabeled)(7)).toEqual(int64(22));
+  });
+
+  test("a generic class's method checks its receiver and needs one", () => {
+    const scaledStored = Swift.function(module, GENERIC_HOLDER_SCALED_STORED);
+    expect(() => scaledStored.call(7)).toThrow(/instance method/);
+    const robot = Swift.class("fixture.Robot")!.init("R2")!;
+    expect(() => scaledStored.bind(robot)).toThrow(/takes a fixture\.GenericHolder receiver, not a fixture\.Robot/);
+    expect(() => scaledStored.bind(robot.$handle)).toThrow(/takes a fixture\.GenericHolder receiver, not a fixture\.Robot/);
+  });
+
+  test("rejects a method of a generic value type", () => {
     expect(() => Swift.function(module, CONSTRAINED_BOX_SCALED_STORED)).toThrow(
       /scaledStored\(by:\) is a member of generic type fixture\.ConstrainedBox/
     );

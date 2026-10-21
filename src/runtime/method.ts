@@ -1,6 +1,6 @@
 import { Metadata, MetadataKind, getMetadata } from "../abi/metadata.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
-import { ClassMetadata, objcClassOf } from "../abi/class-metadata.js";
+import { ClassMetadata, classMetadataOf, objcClassOf } from "../abi/class-metadata.js";
 import { readVTableChain } from "../abi/class-descriptor.js";
 import { ClassInstance } from "../abi/heap-object.js";
 import { asSwiftObject, SwiftObject, SwiftValueObject, SwiftField, RAW } from "./object-facade.js";
@@ -2096,6 +2096,7 @@ const MODULE_CONTEXT = /^[^.\s]+$/;
 interface FunctionReceiver {
   instanceType: Metadata | null;
   metatypeSelf: NativePointer | null;
+  genericClass?: ContextDescriptor;
 }
 
 function isClassType(type: Metadata): boolean {
@@ -2110,7 +2111,11 @@ function resolveReceiver(signature: SwiftFunctionSignature): FunctionReceiver {
   }
   const type = resolveType(context);
   if (type === null) {
-    if (findType(context)?.isGeneric === true) {
+    const descriptor = findType(context);
+    if (descriptor?.isGeneric === true) {
+      if (descriptor.kind === ContextDescriptorKind.Class && !isStatic && signature.genericParams.length === 0 && signature.simpleGenerics) {
+        return { instanceType: null, metatypeSelf: null, genericClass: descriptor };
+      }
       throw new Error(
         `${signature.selector} is a member of generic type ${context}; generic functions are not supported here`
       );
@@ -2129,37 +2134,83 @@ function resolveReceiver(signature: SwiftFunctionSignature): FunctionReceiver {
 // casting; both default to the untyped CallResult/CallArg.
 export class SwiftFunction<Ret = CallResult | Promise<CallResult>, Args extends CallArg[] = CallArg[]> {
   constructor(
-    private readonly plan: CallPlan,
+    private readonly target: CallPlan | GenericClassMethodSymbol,
     private readonly receiver: FunctionReceiver,
     private readonly selfOwnership?: SelfOwnership
   ) {}
 
   get address(): NativePointer {
-    return this.plan.address;
+    return this.target.address;
   }
 
   call(...args: Args): Ret {
-    if (this.receiver.instanceType !== null) {
-      throw new Error(`${this.plan.selector} is an instance method; bind a receiver with .bind(self)`);
+    if (this.receiver.instanceType !== null || "planFor" in this.target) {
+      throw new Error(`${this.target.selector} is an instance method; bind a receiver with .bind(self)`);
     }
-    return new BoundMethod(this.plan, { self: this.receiver.metatypeSelf }).call(...args) as Ret;
+    return new BoundMethod(this.target, { self: this.receiver.metatypeSelf }).call(...args) as Ret;
   }
 
   bind(receiver: AsyncReceiver): (...args: Args) => Ret {
+    if ("planFor" in this.target) {
+      return this.bindGenericClassMethod(this.target, receiver);
+    }
+    const plan = this.target;
     const { instanceType } = this.receiver;
     if (instanceType === null) {
-      throw new Error(`${this.plan.selector} takes no receiver`);
+      throw new Error(`${plan.selector} takes no receiver`);
     }
-    const instance = checkedReceiver(receiver, instanceType, this.plan.selector);
+    const instance = checkedReceiver(receiver, instanceType, plan.selector);
     const self = toReceiverPointer(receiver);
     const binding: Binding = isClassType(instanceType)
       ? { self }
-      : { self, routing: valueReceiverRouting(instanceType, this.plan, this.selfOwnership), consumedSelf: this.selfOwnership === "consuming" ? instanceType : null };
+      : { self, routing: valueReceiverRouting(instanceType, plan, this.selfOwnership), consumedSelf: this.selfOwnership === "consuming" ? instanceType : null };
     return (...args: Args) => {
       instance?.checkLive();
-      return rootAsyncReceiver(new BoundMethod(this.plan, binding), receiver).call(...args) as Ret;
+      return rootAsyncReceiver(new BoundMethod(plan, binding), receiver).call(...args) as Ret;
     };
   }
+
+  // The receiver's isa names the specialization: the method is planned from the declaring class's
+  // level of it, so a parameter or result spelled in the class's type parameters lowers concretely.
+  private bindGenericClassMethod(method: GenericClassMethodSymbol, receiver: AsyncReceiver): (...args: Args) => Ret {
+    const instance = checkedReceiver(receiver, method.declaring, method.selector);
+    const self = toReceiverPointer(receiver);
+    const plan = method.planFor(declaringClassLevel(classMetadataOf(self), method.declaring, method.selector));
+    return (...args: Args) => {
+      instance?.checkLive();
+      return rootAsyncReceiver(new BoundMethod(plan, { self }), receiver).call(...args) as Ret;
+    };
+  }
+}
+
+interface GenericClassMethodSymbol {
+  address: NativePointer;
+  selector: string;
+  declaring: ContextDescriptor;
+  planFor(level: Metadata): CallPlan;
+}
+
+function declaringClassLevel(cls: ClassMetadata, declaring: ContextDescriptor, selector: string): Metadata {
+  for (let level: ClassMetadata | null = cls; level !== null && level.isTypeMetadata; level = level.superclass) {
+    if (level.description.handle.equals(declaring.handle)) {
+      return new Metadata(level.handle);
+    }
+  }
+  throw new Error(`${selector} takes a ${declaring.fullTypeName ?? "its declaring type"} receiver, not a ${typeName(new Metadata(cls.handle))}`);
+}
+
+function genericClassMethodSymbol(module: Module, mangled: string, signature: SwiftFunctionSignature, declaring: ContextDescriptor): GenericClassMethodSymbol {
+  rejectInitializer(signature);
+  const address = symbolAddress(module, mangled);
+  return {
+    address,
+    selector: signature.selector,
+    declaring,
+    planFor: (level) => {
+      const { typeParams, typeArguments } = genericTypeArguments(level);
+      return planTypeMemberSymbol({ address, signature, mangled }, declaring, typeParams, typeArguments, null, null);
+    },
+  };
 }
 
 // A value receiver routes as the facade's $method would: both ways for a plain sync call, borrowing
@@ -2202,7 +2253,12 @@ export function resolveFunction<Ret = CallResult | Promise<CallResult>, Args ext
   options: FunctionResolveOptions = {}
 ): SwiftFunction<Ret, Args> {
   const signature = parseFunctionSymbol(mangled);
-  return hookableFunction(new SwiftFunction<Ret, Args>(planFunctionSymbol(module, mangled, signature, options), resolveReceiver(signature), options.self), signature);
+  const receiver = resolveReceiver(signature);
+  const target =
+    receiver.genericClass === undefined
+      ? planFunctionSymbol(module, mangled, signature, options)
+      : genericClassMethodSymbol(module, mangled, signature, receiver.genericClass);
+  return hookableFunction(new SwiftFunction<Ret, Args>(target, receiver, options.self), signature);
 }
 
 function hookableFunction<T extends SwiftFunction<any, any>>(fn: T, signature: SwiftFunctionSignature): T {
@@ -3100,6 +3156,22 @@ function planGenericTypeMethodIn(
   const { address, signature, mangled, constraints } = candidates[0];
   const descriptor = findType(unboundName)!;
   const clause = constraints.length === 0 ? null : clauseArguments(descriptor, typeArguments, constraints)!;
+  const plan = planTypeMemberSymbol({ address, signature, mangled }, descriptor, typeParams, typeArguments, clause, trailsSelfMetadata ? receiver : null, memberOrigin(address, owner));
+  return { plan, clause };
+}
+
+// A member symbol of a generic type, planned for one specialization: the type's parameters A, B...
+// resolve to its arguments, and a where clause's added witnesses trail the formal arguments.
+function planTypeMemberSymbol(
+  member: { address: NativePointer; signature: SwiftFunctionSignature; mangled: string },
+  descriptor: ContextDescriptor,
+  typeParams: string[],
+  typeArguments: Metadata[],
+  clause: ClauseArguments | null,
+  selfMetadata: Metadata | null,
+  origin?: MemberOrigin
+): CallPlan {
+  const { address, signature, mangled } = member;
   const params = splitParams(signature.params);
   const classBound = classBoundTypeParams(descriptor, typeParams);
   for (const subject of clause?.classBound ?? []) {
@@ -3121,7 +3193,7 @@ function planGenericTypeMethodIn(
       throw new Error(`cannot resolve async function pointer for ${signature.selector}`);
     }
   }
-  const plan = setterPlan({
+  return setterPlan({
     address: address.strip(),
     selector: signature.selector,
     argPlans,
@@ -3130,13 +3202,12 @@ function planGenericTypeMethodIn(
     thrown,
     async: signature.async,
     asyncFunctionPointer,
-    typeArguments: trailsSelfMetadata ? [receiver] : [],
+    typeArguments: selfMetadata === null ? [] : [selfMetadata],
     witnessTables: clause?.added.map((w) => w.witness) ?? [],
     argConventions: params.conventions,
-    origin: memberOrigin(address, owner),
+    origin,
     signature,
   });
-  return { plan, clause };
 }
 
 export function bindGenericTypeValueMethod(
