@@ -1795,6 +1795,17 @@ public func classCapturingContext() -> UnsafeMutableRawPointer {
     }
 }
 
+var resilientCapturingBody: () -> Int = { 0 }
+public func storeResilientCapturing(_ x: Int, _ y: Int) {
+    let p = ResilientPoint(x: x, y: y)
+    resilientCapturingBody = { p.x + p.y }
+}
+public func resilientCapturingContext() -> UnsafeMutableRawPointer {
+    return withUnsafePointer(to: &resilientCapturingBody) { p in
+        UnsafeRawPointer(p).load(fromByteOffset: MemoryLayout<Int>.size, as: UnsafeMutableRawPointer.self)
+    }
+}
+
 var mixedCapturingBody: () -> Int = { 0 }
 public func storeMixedCapturing(_ flagValue: Int, _ n: Int, _ kind: Int) {
     let flag = flagValue != 0

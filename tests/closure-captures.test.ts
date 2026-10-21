@@ -2,6 +2,9 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
 
 import { Swift, SwiftClosureValue, SwiftValueObject, SwiftField } from "../src/index.js";
+import { unwrapReabstractionThunk } from "../src/abi/closure-capture.js";
+
+const OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE = 0x8;
 
 const MAKE_ADDER = "$s7fixture9makeAdderyS2icSiF";
 const MAKE_SCALER = "$s7fixture10makeScaleryxxcxSjRzlF";
@@ -63,6 +66,17 @@ describe("closure captures", () => {
     expect([flag.read(), n.read()]).toEqual([true, int64(5)]);
     expect(object.type.name).toBe("fixture.Base");
     expect(Swift.borrowObject(object.read() as NativePointer).kind).toEqual(int64(9));
+  });
+
+  test("a captured resilient struct, whose box records no fixed offset, lies after the heap header", () => {
+    new NativeFunction(fixtureExport("storeResilientCapturing"), "void", ["int64", "int64"])(3, 4);
+    const context = fixtureContext("resilientCapturingContext");
+    const box = unwrapReabstractionThunk(context) ?? context;
+    expect(box.readPointer().strip().readU32(OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE)).toBe(0);
+    const [p] = Swift.borrowClosure(context).$captures();
+    expect(p.type.name).toBe("resilient.ResilientPoint");
+    expect(p.handle.sub(box).toInt32()).toBe(2 * Process.pointerSize);
+    expect(p.read()).toEqual({ x: int64(3), y: int64(4) });
   });
 
   test("an escaping closure argument inside a Swift.Interceptor hook reads its captures", () => {

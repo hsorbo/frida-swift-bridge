@@ -107,10 +107,13 @@ export function captureDescriptorOf(context: NativePointer): CaptureDescriptor |
   return description.isNull() ? null : new CaptureDescriptor(description);
 }
 
-// bindings, if any, start at this offset and the captures follow them.
+// bindings, if any, start at this offset and the captures follow them. The compiler records 0 when
+// the first element's layout is not fixed at compile time (a resilient struct); it then sits right
+// after the heap header, the allocation aligned to it.
 export function offsetToFirstCapture(context: NativePointer): number {
   const metadata = context.readPointer().strip();
-  return metadata.readU32(OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE);
+  const offset = metadata.readU32(OFFSETOF_HEAP_OFFSET_TO_FIRST_CAPTURE);
+  return offset !== 0 ? offset : 2 * Process.pointerSize;
 }
 
 // A closure capture is spelled as a lowered SIL function type, which the runtime cannot realize.
