@@ -7,7 +7,7 @@ import { ClassInstance } from "../abi/heap-object.js";
 import { ClassMetadata, classMetadataOf } from "../abi/class-metadata.js";
 import { enumerateFields, resolveTypeByMangledName } from "../abi/field-descriptor.js";
 import { buildGenericMetadata, genericParamsAreKey, hasFixedLayoutInGenericContext } from "../abi/generic-instantiation.js";
-import { decodeThrownError } from "./thrown-error.js";
+import { projectThrownError } from "./thrown-error.js";
 import {
   shouldPassIndirectly,
   loweredScalars,
@@ -1078,6 +1078,11 @@ function materializeThrown(
 
 type BorrowedValue = SwiftValue | SwiftObject | BorrowedValue[] | { some: BorrowedValue };
 
+function decodeBorrowedThrownError(errorBox: NativePointer): BorrowedValue {
+  const { type, value } = projectThrownError(errorBox);
+  return decodeBorrowedValue(type, value);
+}
+
 // Mirrors method.ts decodeReturn, but borrows: an interceptor only observes the caller's +1, so it
 // neither adopts nor destroys. A non-POD value embedding a managed reference can't be deep-copied
 // out, so it surfaces as a live facade over the borrowed storage, valid for the callback's duration;
@@ -1279,7 +1284,7 @@ function attach(hookable: HookableTarget, callbacks: SwiftInvocationCallbacks, o
           if (throws && !swiftErrorRegister.isNull()) {
             const error =
               thrown === null
-                ? decodeThrownError(swiftErrorRegister)
+                ? decodeBorrowedThrownError(swiftErrorRegister)
                 : materializeThrown(context, thrown, state.thrownSlot ?? null, state.generics ?? [], environment);
             callbacks.onLeave!.call(this, null, error);
             return;
@@ -1652,7 +1657,7 @@ function fireCompletion(entry: CompletionEntry, context: CpuContext, self: Invoc
   if (entry.throws && !error.isNull()) {
     const thrown =
       entry.thrown === null
-        ? decodeThrownError(error)
+        ? decodeBorrowedThrownError(error)
         : materializeThrown(context, entry.thrown, entry.thrownSlot, entry.generics, entry.environment, true);
     entry.callbacks.onComplete!.call(self, null, thrown);
     return;

@@ -569,7 +569,7 @@ describe("Swift.Interceptor.attach", () => {
     const seen: { retval: CallResult; error?: CallResult }[] = [];
     const listener = Swift.Interceptor.attach(addr, {
       onLeave(retval, error) {
-        seen.push({ retval, error });
+        seen.push({ retval, error: fieldsOf(error) });
       },
     });
     const call = makeSwiftNativeFunction(addr, Int, [Int], { throws: true });
@@ -588,7 +588,7 @@ describe("Swift.Interceptor.attach", () => {
         seen.push(args[0]);
       },
       onLeave(retval, error) {
-        seen.push(retval, error ?? "returned");
+        seen.push(retval, fieldsOf(error) ?? "returned");
       },
     });
     try {

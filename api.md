@@ -1619,11 +1619,13 @@ try {
 `SwiftError` without the option. An `async throws` call — a facade method or
 `Swift.function` — rejects its promise with the same `SwiftError`.
 
-`e.value` decodes the thrown error. An untyped `throws` projects the error
-existential and reads its value; a typed `throws(E)` has no box, so `e.error`
-is the thrown value's own storage and `e.value` decodes it by `E`: a payload-less
-enum reads as its case name, a struct as its fields, a class as an object. A
-hook's `onLeave` / `onComplete` error argument is decoded the same way.
+`e.value` decodes the thrown error the way a call result decodes: a struct or
+enum error is an owned value facade of its own type, a class error an object.
+An untyped `throws` projects the error box; a typed `throws(E)` has no box, so
+`e.error` is the thrown value's own storage, decoded by `E`. Either way the same
+error type reads the same: `e.value.$fields` gives a struct's fields or a
+payload-less enum's case name. A hook's `onLeave` / `onComplete` error argument
+is the same facade, borrowed for the callback's duration.
 `Swift.NativeFunction` reads `throws(E)` off the symbol too; a stripped address
 needs `/abi`'s `makeSwiftNativeFunction` with `{ errorType }`. Code built with
 Swift 6.0 returns every typed error through a buffer, later compilers return a

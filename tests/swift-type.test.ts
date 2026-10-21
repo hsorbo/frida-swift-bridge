@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, loadFixtureSyms } from "./fixtures/load.js";
-import { requireSymbolTable } from "./swift.js";
+import { requireSymbolTable, fieldsOf } from "./swift.js";
 
 import { StructType, EnumType, ClassType, ClassMetadata, ClassInstance, TupleType, MetatypeType, FunctionType, Metadata, MetadataKind, SwiftError, resolveTypeByMangledName, typeFromDescriptor, findType, asSwiftObject, metadataFor, typeOf, metadataOf } from "../src/abi.js";
 
@@ -59,7 +59,7 @@ describe("type reflection and facades", () => {
       thrown = e;
     }
     expect(thrown instanceof SwiftError).toBe(true);
-    expect((thrown as SwiftError).value).toBe("boom");
+    expect(fieldsOf((thrown as SwiftError).value)).toBe("boom");
   });
 
   test("SwiftClass.init returns null for a failable initializer's nil instead of adopting NULL", () => {

@@ -2232,6 +2232,14 @@ public func throwsCoded(_ code: Int) throws(CodedFailure) -> Double {
     if code != 0 { throw CodedFailure(code: code, flag: code > 5) }
     return 2.5
 }
+public func throwsCodedUntyped(_ code: Int) throws -> Double {
+    if code != 0 { throw CodedFailure(code: code, flag: code > 5) }
+    return 2.5
+}
+public func throwsClassUntyped(_ code: Int) throws -> Int {
+    if code != 0 { throw ClassFailure(id: code) }
+    return 3
+}
 public func throwsWide(_ code: Int) throws(WideFailure) -> Int {
     if code != 0 { throw WideFailure(a: code, b: code + 1, c: code + 2, d: code + 3, e: code + 4) }
     return 7

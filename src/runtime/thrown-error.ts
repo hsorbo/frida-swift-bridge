@@ -1,13 +1,30 @@
-import { projectErrorExistential } from "../abi/existential.js";
-import { readValue, SwiftValue } from "../abi/instance.js";
-import { Metadata } from "../abi/metadata.js";
+import { OpaqueExistential, projectErrorExistential } from "../abi/existential.js";
+import { ClassInstance } from "../abi/heap-object.js";
+import { embedsManagedReference, isFacadeValueType, readValue } from "../abi/instance.js";
+import { Metadata, MetadataKind } from "../abi/metadata.js";
+import { ValueInstance } from "../abi/value.js";
 import { getSwiftCoreApi } from "./api.js";
 import { CallResult, decodeReturn } from "./method.js";
+import { asSwiftObject } from "./object-facade.js";
 import { typeName } from "./type-name.js";
 
-export function decodeThrownError(errorBox: NativePointer): SwiftValue {
+export function projectThrownError(errorBox: NativePointer): OpaqueExistential {
   const container = Memory.alloc(Process.pointerSize).writePointer(errorBox);
-  const { type, value } = projectErrorExistential(container);
+  return projectErrorExistential(container);
+}
+
+// The box's value as a call result decodes one: a nominal value is copied out into a facade of its
+// own, a class reference retained into an object, so neither depends on the box's lifetime.
+export function decodeThrownError(errorBox: NativePointer): CallResult {
+  const { type, value } = projectThrownError(errorBox);
+  if (type.kind === MetadataKind.Class) {
+    return asSwiftObject(ClassInstance.adopt(getSwiftCoreApi().swift_unknownObjectRetain(value.readPointer())));
+  }
+  if (isFacadeValueType(type) || embedsManagedReference(type)) {
+    const own = Memory.alloc(Math.max(type.typeLayout.stride, 1));
+    type.valueWitnesses.initializeWithCopy(own, value);
+    return asSwiftObject(ValueInstance.adopt(type, own));
+  }
   return readValue(type, value);
 }
 
@@ -29,6 +46,7 @@ interface TypedErrorValue {
 // typed throw (throws(E)) has no box: `error` is the thrown value's own storage, decoded by E.
 export class SwiftError extends Error {
   private typed: TypedErrorValue | null = null;
+  private decoded: CallResult | undefined;
 
   constructor(readonly error: NativePointer, owned = false) {
     super(`Swift function threw (error at ${error})`);
@@ -60,7 +78,8 @@ export class SwiftError extends Error {
   get value(): CallResult {
     const typed = this.typed;
     if (typed === null) {
-      return decodeThrownError(this.error);
+      this.decoded ??= decodeThrownError(this.error);
+      return this.decoded;
     }
     if (typed.decoded === undefined) {
       typed.decoded = decodeReturn(typed.type, this.error);

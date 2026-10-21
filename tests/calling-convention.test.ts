@@ -1,5 +1,6 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { loadFixture, fixtureExport } from "./fixtures/load.js";
+import { fieldsOf } from "./swift.js";
 
 import { Swift } from "../src/index.js";
 import {
@@ -150,7 +151,7 @@ describe("makeSwiftNativeFunction", () => {
     }
     expect(thrown instanceof SwiftError).toBe(true);
     expect((thrown as SwiftError).error.isNull()).toBe(false);
-    expect((thrown as SwiftError).value).toBe("boom");
+    expect(fieldsOf((thrown as SwiftError).value)).toBe("boom");
   });
 
   test("passes and returns a Double in the floating-point registers", () => {
