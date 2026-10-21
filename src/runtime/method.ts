@@ -2837,8 +2837,7 @@ function planGenericMethod(typeNameArg: string, methodName: string, options: Raw
     throw new Error(`no generic or closure-taking method ${methodName} on ${owner.fullName}`);
   }
   if (candidates.length > 1) {
-    const selectors = candidates.map((c) => c.signature.selector).join(", ");
-    throw new Error(`ambiguous generic method ${methodName} on ${owner.fullName}: ${selectors} (disambiguate with { arity } or { labels })`);
+    throw new Error(`ambiguous generic method ${methodName} on ${owner.fullName}: ${describeOverloads(candidates)} (disambiguate with { arity }, { labels }, { argTypes }, or { returnType })`);
   }
   const { address, signature, mangled } = candidates[0];
   return { ...planGenericSignature(address, mangled, signature, options), origin: memberOrigin(address, owner) };

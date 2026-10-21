@@ -403,6 +403,8 @@ public final class Box {
     public func kept<T>(_ x: __owned T) -> T { x }
     public func swapped<T>(_ a: inout T, _ b: inout T) { swap(&a, &b) }
     public func pick<A, B>(_ a: A, _ b: B) -> A { a }
+    public func head<T>(_ x: T) -> T { x }
+    public func head<T>(_ xs: [T]) -> T { xs[0] }
     public func scaled<T: Scalable>(_ x: T, by k: Int) -> Int { x.scaled(by: k) }
     // [T] is a fixed-layout buffer (direct); T? is address-only in the generic callee (indirect).
     public func tripled<T>(_ x: T) -> [T] { [x, x, x] }

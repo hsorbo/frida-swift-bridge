@@ -15,6 +15,15 @@ function robot(name: string): SwiftObject {
 describe("generic method invocation", () => {
   beforeEach(() => { loadFixture(); });
 
+  test("an ambiguity only argument types separate lists each overload's signature and suggests { argTypes }", () => {
+    const Int = Swift.type("Swift.Int")!;
+    const ambiguous = () => box().$method("head", { typeArguments: [Int] });
+    expect(ambiguous).toThrow(/head\(_:\) \(A\) -> A/);
+    expect(ambiguous).toThrow(/head\(_:\) \(Swift\.Array<A>\) -> A/);
+    expect(ambiguous).toThrow(/\{ argTypes \}/);
+    expect(box().$method("head", { typeArguments: [Int], argTypes: ["A"] }).call(7)).toEqual(int64(7));
+  });
+
   test("calls an unconstrained generic method with a supplied type argument", () => {
     const Int = Swift.type("Swift.Int")!;
     expect(box().$method("echo", { typeArguments: [Int] }).call(7)).toEqual(int64(7));
