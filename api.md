@@ -1246,8 +1246,9 @@ A type's member can also be named by its qualified selector, the spelling a
 demangled symbol prints: `Swift.function("Module.Type.member(labels:)")`. The
 type is found by name and the member by the same lookup `$typeMethod` and
 `$method` use, so no symbol scan runs. The result follows Swift's own unapplied
-method references: a type method is called directly, and an instance method is
-an unbound function that takes `self` as its first argument. The second
+method references: a type method or an initializer is called directly, and an
+instance method is an unbound function that takes `self` as its first
+argument. The second
 argument is the usual options object (`{ argTypes }`, `{ returnType }`,
 `{ self }`, `{ typeArguments }`); when a type declares a type member and an
 instance member with the same selector, `{ static: true }` or
@@ -1263,6 +1264,7 @@ the type is generic; a call then needs what the member needs.
 const robot = Swift.type("MyApp.Robot").init("R2");
 Swift.function("MyApp.Robot.move(to:)").call(robot, 5);        // int64(5)
 Swift.function("MyApp.Robot.make(name:)").call("R3");          // a Robot
+Swift.function("MyApp.Robot.init(name:)").call("R4");          // a Robot
 
 const deriveKey = Swift.function("CryptoKit.HKDF.deriveKey(inputKeyMaterial:outputByteCount:)");
 Swift.Interceptor.attach(deriveKey, { ... });

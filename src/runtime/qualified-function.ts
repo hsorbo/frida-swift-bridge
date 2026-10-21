@@ -90,6 +90,8 @@ export function qualifiedFunction(qualified: string, options: ValueMethodResolve
   const { static: _, ...lookup } = options;
   const call = found.isStatic
     ? (...args: CallArg[]) => type.facade.$typeMethod(selector, lookup).call(...args)
+    : splitSelector(selector, {}).name === "init"
+    ? (...args: CallArg[]) => type.facade.$initializer(selector, lookup).call(...args)
     : (...args: CallArg[]) => {
         const self = args.shift() as CallResult | undefined;
         if (self === undefined || !isSwiftObject(self)) {

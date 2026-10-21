@@ -255,6 +255,13 @@ describe("Swift.function from a qualified selector", () => {
     expect(doubleInit.address.equals(module.findExportByName(PRESSABLE_DOUBLE_INIT)!)).toBe(true);
   });
 
+  test("an initializer is called directly and allocates, as init on the type does", () => {
+    expect((Swift.function("fixture.Robot.init(name:)").call("R2") as SwiftObject).name).toBe("R2");
+    let presses = 0;
+    const made = Swift.function("fixture.Pressable<Swift.Int>.init(_:action:)").call(5, Swift.closure(() => { presses++; })) as SwiftObject;
+    expect([made.kind, made.label, presses]).toEqual(["int", int64(5), 1]);
+  });
+
   test("a selector shared by a type and an instance member needs { static }", () => {
     expect(() => Swift.function("fixture.Dial.scaled(_:)")).toThrow(/pick one with \{ static: true \}/);
     expect(Swift.function("fixture.Dial.scaled(_:)", { static: true }).call(2)).toEqual(int64(200));
