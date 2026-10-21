@@ -107,16 +107,18 @@ export type CallResult = SwiftValue | SwiftObject | SwiftClosureValue | CallResu
 
 // A closure as its two words, `function` and `context`, its captures as field views. One a call
 // returned is owned and callable, its context released on dispose or collection; a borrowed one (a
-// hook argument, closure-typed storage, Swift.borrowClosure) has no signature to be called with.
+// hook argument, closure-typed storage, Swift.borrowClosure) has no signature to be called with
+// until $as supplies one.
 export interface SwiftClosureValue {
   (...args: CallArg[]): CallResult;
   readonly function: NativePointer;
   readonly context: NativePointer;
   readonly $owned: boolean;
   $captures(): SwiftField[];
-  // A separately owned closure over the same context; one retained from a borrowed closure still
-  // cannot be called.
+  // A separately owned closure over the same context, callable as the receiver is.
   $retained(): SwiftClosureValue;
+  // The same closure callable with the given signature, e.g. "(Swift.Int) -> Swift.String".
+  $as(signature: string): SwiftClosureValue;
   $dispose(): void;
   [Symbol.dispose](): void;
 }
@@ -1917,8 +1919,21 @@ export class BoundMethod {
 function adoptReturnedClosure(words: NativePointer, template: CallPlan): SwiftClosureValue {
   const fn = words.readPointer().strip();
   const context = words.readPointer(Process.pointerSize);
+  return ownedClosure(fn, context, closureCall(fn, context, template), template.selector);
+}
+
+function closureCall(fn: NativePointer, context: NativePointer, template: CallPlan): (...args: CallArg[]) => CallResult {
   const bound = new BoundMethod({ ...template, address: fn }, { self: context });
-  return ownedClosure(fn, context, (...args) => bound.call(...args) as CallResult, template.selector);
+  return (...args) => bound.call(...args) as CallResult;
+}
+
+// A closure's two words called by a signature the caller spells, e.g. "(Swift.Int) -> Swift.String".
+export function closureCallBySignature(fn: NativePointer, context: NativePointer, signature: string): (...args: CallArg[]) => CallResult {
+  const type = parseTypeExpr(signature);
+  if (type === null || type.kind !== "function") {
+    throw new Error(`${signature} is not a function type`);
+  }
+  return closureCall(fn, context, closureCallPlan(type, (t) => planGenericType(t, [], [], new Set()), signature));
 }
 
 // null ⇒ Void; check indirect before lowering, matching lowerArg (a resilient float aggregate is @out).
@@ -2440,6 +2455,10 @@ function planClosureType(
 // passed by address, as in any generic function type, but no metadata trails the arguments: the
 // closure carries its own.
 function planReturnedClosure(spelling: Extract<TypeExpr, { kind: "function" }>, planType: (type: TypeExpr) => ArgPlan, selector: string): ArgPlan {
+  return { kind: "closureResult", plan: closureCallPlan(spelling, planType, selector) };
+}
+
+function closureCallPlan(spelling: Extract<TypeExpr, { kind: "function" }>, planType: (type: TypeExpr) => ArgPlan, selector: string): CallPlan {
   if (spelling.async) {
     throw new Error(`${selector}: an async closure result is unsupported`);
   }
@@ -2448,7 +2467,7 @@ function planReturnedClosure(spelling: Extract<TypeExpr, { kind: "function" }>, 
   const argPlans = params.types.map((type, i) => planParam(withoutMetadataArgs(planType(type)), params.conventions[i], selector));
   const result = spelling.result;
   const returnPlan = result.text === "()" || result.text === "Swift.Void" ? null : withoutMetadataArgs(planResultType(result, planType, selector));
-  const plan: CallPlan = {
+  return {
     address: NULL,
     selector: spelling.text,
     argPlans,
@@ -2459,7 +2478,6 @@ function planReturnedClosure(spelling: Extract<TypeExpr, { kind: "function" }>, 
     witnessTables: [],
     argConventions: params.conventions,
   };
-  return { kind: "closureResult", plan };
 }
 
 function planResultType(type: TypeExpr, planType: (type: TypeExpr) => ArgPlan, selector: string): ArgPlan {

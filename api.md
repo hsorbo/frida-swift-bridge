@@ -1350,8 +1350,24 @@ struct field, and `Swift.borrowClosure(x)` for a context found by hand (the two
 words as `{ function, context }`, or the bare context pointer a raw hook on a
 closure body holds in its self register) give borrowed views: `$owned` is
 false, `$dispose()` does nothing, and calling one throws, since no signature is
-known for it. A borrowed view is still accepted where a Swift API takes a
-function-typed parameter, and serializes to JSON as its two words.
+known for it. `$as(signature)` supplies one and gives back the same view,
+callable the way a returned closure is, with the signature spelled as a Swift
+function type of qualified names:
+
+```js
+Swift.Interceptor.attach(Swift.function("MyApp.Button.init(_:action:)"), {
+    onEnter(args) {
+        const action = args[1].$as("() -> ()");
+        action();                       // valid while the hook runs
+        this.press = action.$retained(); // keeps an escaping action for later
+    },
+});
+```
+
+A view called through `$as` runs on the calling thread; a closure that expects
+an actor, such as a SwiftUI action, is the caller's to schedule. A borrowed view
+is still accepted where a Swift API takes a function-typed parameter, and
+serializes to JSON as its two words.
 
 `$captures()` throws when the context cannot be laid out. A non-escaping
 closure's context is a frame on its caller's stack with no capture descriptor;
@@ -1678,8 +1694,9 @@ To keep what a borrowed facade shows, acquire an owned one from it:
   the receiver is borrowed (a hook's `this.self`, `Swift.borrowObject`) or
   owned. It releases on dispose or collection; the receiver's lifetime is
   unchanged.
-- `closure.$retained()` — an owned closure over the same context. One retained
-  from a borrowed closure still cannot be called, since no signature is known.
+- `closure.$retained()` — an owned closure over the same context, callable as
+  the receiver is: one retained from a borrowed closure is called once
+  `$as(signature)` has typed it, before or after retaining.
 - A value is kept by copying it: `value.$type.facade.$copy(value.$handle)`.
 
 An owned facade releases when it is garbage-collected. To release

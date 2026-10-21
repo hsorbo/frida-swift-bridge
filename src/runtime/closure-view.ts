@@ -6,8 +6,10 @@ import type { SwiftField } from "./object-facade.js";
 import type { CallArg, CallResult, SwiftClosureValue, RawInstance } from "./method.js";
 import { getSwiftCoreApi } from "./api.js";
 import { isOnCurrentThreadStack } from "./thread-stack.js";
+import { closureCallBySignature } from "./method.js";
 
 export type ClosureLifetime = Pick<RawInstance, "checkLive">;
+type ClosureCall = (...args: CallArg[]) => CallResult;
 
 // A signature spells escaping and non-escaping function types alike; a non-escaping context is
 // allocated in its caller's frame, so one on the current thread's stack is non-escaping.
@@ -61,25 +63,31 @@ export const closurePrototype: object = Object.create(Function.prototype, {
   },
 });
 
-export function borrowedClosure(fn: NativePointer, context: NativePointer): SwiftClosureValue {
-  const view = (): never => {
-    throw new Error("a borrowed closure cannot be called: no signature is known for it");
+export function borrowedClosure(fn: NativePointer, context: NativePointer, call: ClosureCall | null = null): SwiftClosureValue {
+  const view = (...args: CallArg[]): CallResult => {
+    if (call === null) {
+      throw new Error("a borrowed closure cannot be called: no signature is known for it; $as(signature) supplies one");
+    }
+    return call(...args);
   };
   Object.setPrototypeOf(view, closurePrototype);
   return Object.defineProperties(view, {
     function: { value: fn },
     context: { value: context },
     $owned: { value: false },
-    $retained: { value: () => retainedClosure(fn, context, null, `at ${fn}`) },
+    $retained: { value: () => retainedClosure(fn, context, call, `at ${fn}`) },
+    $as: { value: (signature: string) => borrowedClosure(fn, context, callBySignature(fn, context, signature)) },
   }) as unknown as SwiftClosureValue;
 }
 
-export function retainedClosure(
-  fn: NativePointer,
-  context: NativePointer,
-  call: ((...args: CallArg[]) => CallResult) | null,
-  label: string
-): SwiftClosureValue {
+function callBySignature(fn: NativePointer, context: NativePointer, signature: string): ClosureCall {
+  if (fn.isNull()) {
+    throw new Error("a closure viewed by its context alone has no function to call");
+  }
+  return closureCallBySignature(fn.strip(), context, signature);
+}
+
+export function retainedClosure(fn: NativePointer, context: NativePointer, call: ClosureCall | null, label: string): SwiftClosureValue {
   if (!context.isNull()) {
     if (isOnCurrentThreadStack(context)) {
       throw new Error(
@@ -93,12 +101,7 @@ export function retainedClosure(
 
 // Owns one reference to the context, released on dispose or collection. A closure with no known
 // signature (a retained borrowed one) owns its context without being callable.
-export function ownedClosure(
-  fn: NativePointer,
-  context: NativePointer,
-  call: ((...args: CallArg[]) => CallResult) | null,
-  label: string
-): SwiftClosureValue {
+export function ownedClosure(fn: NativePointer, context: NativePointer, call: ClosureCall | null, label: string): SwiftClosureValue {
   const state = { disposed: false };
   const releaseContext = (): void => {
     state.disposed = true;
@@ -114,7 +117,7 @@ export function ownedClosure(
   const closure = ((...args: CallArg[]): CallResult => {
     checkLive();
     if (call === null) {
-      throw new Error("a retained borrowed closure cannot be called: no signature is known for it");
+      throw new Error("a retained borrowed closure cannot be called: no signature is known for it; $as(signature) supplies one");
     }
     return call(...args);
   }) as SwiftClosureValue;
@@ -145,6 +148,12 @@ export function ownedClosure(
       value: (): SwiftClosureValue => {
         checkLive();
         return retainedClosure(fn, context, call, label);
+      },
+    },
+    $as: {
+      value: (signature: string): SwiftClosureValue => {
+        checkLive();
+        return retainedClosure(fn, context, callBySignature(fn, context, signature), label);
       },
     },
     $dispose: { value: dispose },
