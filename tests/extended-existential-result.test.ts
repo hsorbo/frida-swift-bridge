@@ -16,6 +16,20 @@ describe("a parameterized existential result", () => {
     expect(holder.tag).toEqual(int64(84));
   });
 
+  test("a hook observes the payload as a borrowed facade of its own type", () => {
+    const addr = fixtureExport("fixture.makeHolderInt");
+    let seen: unknown[] | null = null;
+    const listener = Swift.Interceptor.attach(addr, {
+      onLeave(ret) {
+        const holder = ret as SwiftValueObject;
+        seen = [holder.$kind, holder.$owned, holder.$type.name, holder.item, holder.tag];
+      },
+    });
+    Swift.NativeFunction(addr, compiledType("fixture.holderIntType"), [])();
+    listener.detach();
+    expect(seen).toEqual(["value", false, "fixture.IntHolder", int64(42), int64(84)]);
+  });
+
   test("a reference-bearing struct payload owns its reference until disposed", () => {
     const Holder = compiledType("fixture.holderIntType");
     const Int = Swift.type("Swift.Int")!;

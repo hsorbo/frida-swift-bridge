@@ -1,6 +1,6 @@
 import { Metadata, MetadataKind, genericHeaderOffset, readGenericContextHeader } from "../abi/metadata.js";
 import { readValue, embedsManagedReference, isFacadeValueType, projectOptionalPayload, optionalSome, SwiftValue } from "../abi/instance.js";
-import { existentialRepresentation, projectErrorExistential, projectOpaqueExistential } from "../abi/existential.js";
+import { projectExistentialPayload } from "../abi/existential.js";
 import { ValueInstance } from "../abi/value.js";
 import { enumerateTupleElements, getUnlabelledTupleTypeMetadata } from "../abi/tuple.js";
 import { ClassInstance } from "../abi/heap-object.js";
@@ -282,7 +282,7 @@ function planType(type: TypeExpr, generics: GenericEnvironment): TypePlan {
   if (paramIndex !== -1) {
     return { kind: "param", paramIndex };
   }
-  const metadata = resolveParsedType(type, () => null);
+  const metadata = resolveParsedType(type, () => null) ?? resolveUnparameterizedExistential(type);
   if (metadata !== null) {
     return { kind: "concrete", metadata };
   }
@@ -303,6 +303,18 @@ function planType(type: TypeExpr, generics: GenericEnvironment): TypePlan {
     return { kind: "use", expr: type, indirect };
   }
   throw new Error(`could not resolve type: ${type.text}`);
+}
+
+// `any P<Self.P.A == T>` is planned as `any P`: the primary associated type changes the metadata's
+// identity but not the container's layout, and a hook only borrows the payload out of it.
+function resolveUnparameterizedExistential(type: TypeExpr): Metadata | null {
+  const isParameterized = (m: TypeExpr): m is Extract<TypeExpr, { kind: "nominal" }> =>
+    m.kind === "nominal" && m.args.length > 0 && m.args.every((a) => a.kind === "sameType");
+  if (type.kind !== "existential" || !type.members.some(isParameterized)) {
+    return null;
+  }
+  const members = type.members.map((m) => (isParameterized(m) ? { ...m, args: [] } : m));
+  return resolveParsedType({ ...type, members }, () => null);
 }
 
 function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, generics: Metadata[], environment: GenericEnvironment): Metadata {
@@ -1103,10 +1115,9 @@ function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent:
     const some = projectOptionalPayload(metadata, address);
     return some === null ? null : optionalSome(some.payloadType, decodeBorrowedValue(some.payloadType, some.address, parent));
   }
-  if (metadata.kind === MetadataKind.Existential && existentialRepresentation(metadata) !== "class") {
-    const payload =
-      existentialRepresentation(metadata) === "error" ? projectErrorExistential(address) : projectOpaqueExistential(address);
-    if (isFacadeValueType(payload.type) || embedsManagedReference(payload.type)) {
+  if (metadata.kind === MetadataKind.Existential || metadata.kind === MetadataKind.ExtendedExistential) {
+    const payload = projectExistentialPayload(metadata, address);
+    if (payload !== null && (isFacadeValueType(payload.type) || embedsManagedReference(payload.type))) {
       return decodeBorrowedValue(payload.type, payload.value, parent);
     }
   }
