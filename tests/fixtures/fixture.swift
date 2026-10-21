@@ -1559,6 +1559,18 @@ public func storeHolderInt(_ p: UnsafeMutableRawPointer) {
     p.assumingMemoryBound(to: (any Holder<Int>).self).initialize(to: IntHolder(item: 42))
 }
 public func makeHolderInt() -> any Holder<Int> { IntHolder(item: 42) }
+public final class ClassIntHolder: Holder {
+    public let item: Int
+    public var tag: Int { item }
+    public init(item: Int) { self.item = item }
+}
+public struct TokenHolder: Holder {
+    public var item: Int
+    public let token: Token
+    public var tag: Int { item + token.id }
+}
+public func makeClassHolderInt(_ n: Int) -> any Holder<Int> { ClassIntHolder(item: n) }
+public func makeTokenHolderInt(_ t: Token, _ n: Int) -> any Holder<Int> { TokenHolder(item: n, token: t) }
 public func holderMetatypeType() -> UnsafeRawPointer {
     unsafeBitCast((any Holder<Int>.Type).self as Any.Type, to: UnsafeRawPointer.self)
 }

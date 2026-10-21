@@ -220,6 +220,22 @@ export function isClassExistential(metadata: Metadata): boolean {
     : existentialRepresentation(metadata) === "class";
 }
 
+// The payload an existential keeps in its buffer or error box; a class or metatype shape holds a
+// bare word instead, and projects to nothing.
+export function projectExistentialPayload(metadata: Metadata, container: NativePointer): OpaqueExistential | null {
+  if (metadata.kind === MetadataKind.ExtendedExistential) {
+    return extendedExistentialSpecialKind(metadata) === ExtendedExistentialSpecialKind.None ? projectOpaqueExistential(container) : null;
+  }
+  switch (existentialRepresentation(metadata)) {
+    case "error":
+      return projectErrorExistential(container);
+    case "opaque":
+      return projectOpaqueExistential(container);
+    default:
+      return null;
+  }
+}
+
 export function projectExistentialValue(metadata: Metadata, container: NativePointer): OpaqueExistential {
   if (metadata.kind === MetadataKind.ExtendedExistential) {
     switch (extendedExistentialSpecialKind(metadata)) {

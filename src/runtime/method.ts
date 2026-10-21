@@ -66,9 +66,7 @@ import { readString, createString } from "../abi/string.js";
 import {
   isClassExistential,
   existentialRepresentation,
-  projectErrorExistential,
-  projectOpaqueExistential,
-  OpaqueExistential,
+  projectExistentialPayload,
   protocolClassConstraint,
   compareProtocolDescriptors,
   getExistentialTypeMetadata,
@@ -511,11 +509,6 @@ function marshalArg(metadata: Metadata, value: CallArg): NativePointer {
   return buffer;
 }
 
-function projectExistentialPayload(metadata: Metadata, container: NativePointer): OpaqueExistential {
-  return existentialRepresentation(metadata) === "error"
-    ? projectErrorExistential(container)
-    : projectOpaqueExistential(container);
-}
 
 export function zeroSizedStorage(type: Metadata): NativePointer {
   return Memory.alloc(type.typeLayout.stride);
@@ -564,8 +557,8 @@ export function decodeReturn(returnType: Metadata | null, returned: NativePointe
   }
   // A class payload stays in its container, which keeps the box alive; a value payload is copied
   // out into a facade of its own type, and the container destroyed.
-  if (returnType.kind === MetadataKind.Existential) {
-    const payload = projectExistentialPayload(returnType, ret);
+  const payload = isExistential ? projectExistentialPayload(returnType, ret) : null;
+  if (payload !== null) {
     if (payload.type.kind === MetadataKind.Class || payload.type.kind === MetadataKind.ObjCClassWrapper) {
       return asSwiftObject(ValueInstance.adopt(returnType, ret));
     }
