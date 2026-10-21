@@ -298,7 +298,8 @@ Frida's `Interceptor`. A witness slot's `requirement` names what it fills, as
 `Swift.Equatable.==(_:_:)` or `Swift.Hashable.hashValue`, when the protocol's
 module exports its method descriptors: a library built for evolution does,
 the stdlib and the system frameworks among them, while a protocol of a module
-built without it, an app among them, stays `null`, as does a vtable slot. A slot whose function the same
+built without it, an app among them, stays `null`, as does a vtable slot. The
+Windows stdlib exports none, so its protocols stay `null` there. A slot whose function the same
 listing already named is left out. Slots are read for every module the filter covers: scope a glob
 with a literal head (`"MyApp.Door.*"`), which skips any type it cannot match,
 since a glob that starts with a wildcard reads every conformance of every

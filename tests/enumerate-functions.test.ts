@@ -113,10 +113,11 @@ describe("Swift.enumerateFunctions with slots", () => {
   test("a witness slot names its requirement from the protocol's method descriptor export, a vtable slot none", () => {
     const equals = Protocol.find("Swift.Equatable")!.requirementRecords.find((r) => r.kind === ProtocolRequirementKind.Method)!;
     const [witness] = slotsOf("fixture.GridPoint.*").filter((m) => m.name === `fixture.GridPoint.Swift.Equatable#${equals.witnessIndex}`);
-    expect(witness.requirement).toBe("Swift.Equatable.==(_:_:)");
+    const stdlibExports = Process.platform !== "windows"; // the Windows stdlib exports no protocol method descriptors
+    expect(witness.requirement).toBe(stdlibExports ? "Swift.Equatable.==(_:_:)" : null);
     const [description] = slotsOf("fixture.Trio.Swift.CustomStringConvertible#*");
     expect(description.kind).toBe("getter");
-    expect(description.requirement).toBe("Swift.CustomStringConvertible.description");
+    expect(description.requirement).toBe(stdlibExports ? "Swift.CustomStringConvertible.description" : null);
     const [speak] = slotsOf(module).filter((m) => m.name.startsWith("fixture.BaseSpeaker.fixture.Vocal#"));
     expect(speak.requirement).toBeNull(); // only a library-evolution build exports a protocol's method descriptors
     const [override] = slotsOf(module).filter((m) => m.name.startsWith("fixture.SlotSubHost.vtable#"));
