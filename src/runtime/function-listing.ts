@@ -8,6 +8,7 @@ import { ProtocolRequirement, ProtocolRequirementKind, readProtocolRequirements 
 import { AsyncFunctionPointer } from "../abi/async-function-pointer.js";
 import { enumerateTypeContextDescriptors } from "../image/sections.js";
 import { enumerateSwiftModules } from "../reflection/registry.js";
+import { demangle } from "./demangle.js";
 
 type FunctionKind = "function" | "getter" | "setter" | "modify" | "read";
 
@@ -21,13 +22,16 @@ export interface SwiftFunctionMatch {
 }
 
 // A vtable or witness slot no symbol names, as `Module.Type.vtable#<offset>` or
-// `Module.Type.Protocol#<index>`. Without a signature it is hooked by address.
+// `Module.Type.Protocol#<index>`. Without a signature it is hooked by address. A witness slot's
+// requirement is spelled `Protocol.selector` when the protocol's module exports its method
+// descriptors, null for a vtable slot or a protocol built without library evolution.
 export interface SwiftFunctionSlot {
   readonly address: NativePointer;
   readonly module: string;
   readonly name: string;
   readonly kind: FunctionKind;
   readonly signature: null;
+  readonly requirement: string | null;
 }
 
 export interface FunctionListingOptions {
@@ -89,7 +93,25 @@ function functionMatch(match: ApiResolverMatch): SwiftFunctionMatch | null {
 function slot(module: Module, name: string, kind: FunctionKind, entry: NativePointer, isAsync: boolean): SwiftFunctionSlot {
   const address = isAsync ? new AsyncFunctionPointer(entry).code : entry.strip();
   const inModule = address.compare(module.base) >= 0 && address.compare(module.base.add(module.size)) < 0;
-  return { address, module: inModule ? module.name : (Process.findModuleByAddress(address)?.name ?? module.name), name, kind, signature: null };
+  return { address, module: inModule ? module.name : (Process.findModuleByAddress(address)?.name ?? module.name), name, kind, signature: null, requirement: null };
+}
+
+interface WalkedSlot {
+  slot: SwiftFunctionSlot;
+  protocol: ContextDescriptor | null;
+  requirement: ProtocolRequirement | null;
+}
+
+const METHOD_DESCRIPTOR_SUFFIX = "Tq";
+const METHOD_DESCRIPTOR_PREFIX = "method descriptor for ";
+
+function requirementSelector(methodDescriptorSymbol: string): string | null {
+  const demangled = demangle(methodDescriptorSymbol);
+  if (demangled === null || !demangled.startsWith(METHOD_DESCRIPTOR_PREFIX)) {
+    return null;
+  }
+  const parsed = parseSwiftSignature(demangled.slice(METHOD_DESCRIPTOR_PREFIX.length));
+  return parsed === null ? null : parsed.kind === "function" ? parsed.selector : parsed.member;
 }
 
 // Read from descriptors alone, so no type's metadata is realized; a generic class has no fixed vtable
@@ -97,10 +119,12 @@ function slot(module: Module, name: string, kind: FunctionKind, entry: NativePoi
 class SlotWalk {
   private readonly names = new Map<string, string | null>();
   private readonly requirements = new Map<string, ProtocolRequirement[]>();
+  private readonly methodDescriptors = new Map<string, Map<string, string>>();
+  private readonly selectors = new Map<string, string | null>();
 
   constructor(private readonly head = "") {}
 
-  *slots(module: Module): Generator<SwiftFunctionSlot> {
+  *slots(module: Module): Generator<WalkedSlot> {
     for (const handle of enumerateTypeContextDescriptors(module)) {
       const descriptor = new ContextDescriptor(handle);
       if (descriptor.kind !== ContextDescriptorKind.Class || descriptor.isGeneric) {
@@ -113,7 +137,7 @@ class SlotWalk {
       for (const entry of [...readVTable(descriptor), ...readOverrides(descriptor)]) {
         const kind = METHOD_KINDS[entry.kind];
         if (kind !== undefined) {
-          yield slot(module, `${prefix}${entry.metadataOffset}`, kind, entry.declaredImpl, entry.isAsync);
+          yield { slot: slot(module, `${prefix}${entry.metadataOffset}`, kind, entry.declaredImpl, entry.isAsync), protocol: null, requirement: null };
         }
       }
     }
@@ -132,10 +156,43 @@ class SlotWalk {
       for (const { requirement, entry } of readWitnesses(conformance, this.requirementsOf(protocol))) {
         const kind = REQUIREMENT_KINDS[requirement.kind];
         if (kind !== undefined) {
-          yield slot(module, `${prefix}${requirement.witnessIndex}`, kind, entry, requirement.isAsync);
+          yield { slot: slot(module, `${prefix}${requirement.witnessIndex}`, kind, entry, requirement.isAsync), protocol, requirement };
         }
       }
     }
+  }
+
+  // A protocol's module exports a method descriptor at each requirement record when a client may
+  // need it for a resilient witness table; the export trie carries it as data, which a resolver
+  // query leaves out, so it comes from the module's full export list, read once per walk.
+  named({ slot, protocol, requirement }: WalkedSlot): SwiftFunctionSlot {
+    if (protocol === null || requirement === null) {
+      return slot;
+    }
+    const key = requirement.address.toString();
+    let selector = this.selectors.get(key);
+    if (selector === undefined) {
+      const module = Process.findModuleByAddress(protocol.handle);
+      const symbol = module === null ? undefined : this.methodDescriptorsOf(module).get(key);
+      selector = symbol === undefined ? null : requirementSelector(symbol);
+      this.selectors.set(key, selector);
+    }
+    return selector === null ? slot : { ...slot, requirement: `${this.nameOf(protocol.handle)}.${selector}` };
+  }
+
+  private methodDescriptorsOf(module: Module): Map<string, string> {
+    const key = module.path;
+    let byAddress = this.methodDescriptors.get(key);
+    if (byAddress === undefined) {
+      byAddress = new Map();
+      for (const e of module.enumerateExports()) {
+        if (e.name.endsWith(METHOD_DESCRIPTOR_SUFFIX)) {
+          byAddress.set(e.address.toString(), e.name);
+        }
+      }
+      this.methodDescriptors.set(key, byAddress);
+    }
+    return byAddress;
   }
 
   private couldMatch(prefix: string): boolean {
@@ -189,8 +246,8 @@ export function* swiftFunctions(filter?: NameFilter, { slots = false }: Function
   const walk = new SlotWalk(typeof filter === "string" ? filter.split(/[*?]/)[0] : "");
   for (const module of modules) {
     for (const found of walk.slots(module)) {
-      if ((glob === null || glob.test(found.name)) && !named.has(found.address.toString())) {
-        yield found;
+      if ((glob === null || glob.test(found.slot.name)) && !named.has(found.slot.address.toString())) {
+        yield walk.named(found);
       }
     }
   }
@@ -214,9 +271,10 @@ export function findSwiftFunction(address: NativePointer): SwiftFunctionMatch | 
       return found;
     }
   }
-  for (const found of new SlotWalk().slots(module)) {
-    if (found.address.equals(start)) {
-      return found;
+  const walk = new SlotWalk();
+  for (const found of walk.slots(module)) {
+    if (found.slot.address.equals(start)) {
+      return walk.named(found);
     }
   }
   return null;

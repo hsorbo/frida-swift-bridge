@@ -110,6 +110,19 @@ describe("Swift.enumerateFunctions with slots", () => {
     expect(witness.kind).toBe("function");
   });
 
+  test("a witness slot names its requirement from the protocol's method descriptor export, a vtable slot none", () => {
+    const equals = Protocol.find("Swift.Equatable")!.requirementRecords.find((r) => r.kind === ProtocolRequirementKind.Method)!;
+    const [witness] = slotsOf("fixture.GridPoint.*").filter((m) => m.name === `fixture.GridPoint.Swift.Equatable#${equals.witnessIndex}`);
+    expect(witness.requirement).toBe("Swift.Equatable.==(_:_:)");
+    const [description] = slotsOf("fixture.Trio.Swift.CustomStringConvertible#*");
+    expect(description.kind).toBe("getter");
+    expect(description.requirement).toBe("Swift.CustomStringConvertible.description");
+    const [speak] = slotsOf(module).filter((m) => m.name.startsWith("fixture.BaseSpeaker.fixture.Vocal#"));
+    expect(speak.requirement).toBeNull(); // only a library-evolution build exports a protocol's method descriptors
+    const [override] = slotsOf(module).filter((m) => m.name.startsWith("fixture.SlotSubHost.vtable#"));
+    expect(override.requirement).toBeNull();
+  });
+
   test("a glob scopes slots by name across modules, leaving out a slot the listing names", () => {
     const slots = slotsOf("fixture.SlotSubHost.*");
     expect(slots).toHaveLength(1);
@@ -140,6 +153,8 @@ describe("Swift.findFunctionByAddress", () => {
     expect(found.name).toBe(override.name);
     expect(found.address.equals(override.address)).toBe(true);
     expect(found.signature).toBeNull();
+    const [witness] = slotsOf("fixture.GridPoint.Swift.Equatable#*");
+    expect((Swift.findFunctionByAddress(witness.address.add(4)) as SwiftFunctionSlot).requirement).toBe("Swift.Equatable.==(_:_:)");
   });
 
   test("is null outside any function", (ctx) => {

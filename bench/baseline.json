@@ -431,7 +431,7 @@
       "function listing › enumerateFunctions with slots over a module": {
         "counters": {
           "symbolTables": 0,
-          "exportTables": 0,
+          "exportTables": 4,
           "resolverQueries": 1,
           "moduleLists": 1,
           "pointerScans": 0,
@@ -467,7 +467,7 @@
       "function listing › enumerateFunctions with slots over swiftCore": {
         "counters": {
           "symbolTables": 0,
-          "exportTables": 0,
+          "exportTables": 1,
           "resolverQueries": 1,
           "moduleLists": 1,
           "pointerScans": 0,
@@ -539,7 +539,7 @@
       "function lookup › findFunctionByAddress of a swiftCore witness": {
         "counters": {
           "symbolTables": 0,
-          "exportTables": 0,
+          "exportTables": 1,
           "resolverQueries": 1,
           "moduleLists": 1,
           "pointerScans": 0,

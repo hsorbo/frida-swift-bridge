@@ -294,8 +294,12 @@ overriding class at the slot it fills) and `MyApp.Door.MyApp.Lockable#2` for a
 witness, by protocol and requirement index, the spelling a type's member
 listing uses (see [Reflection](#reflection)). A slot's `kind` comes from its
 descriptor and its `signature` is `null`, so hook it by `address` with
-Frida's `Interceptor`. A slot whose function the same listing already named is
-left out. Slots are read for every module the filter covers: scope a glob
+Frida's `Interceptor`. A witness slot's `requirement` names what it fills, as
+`Swift.Equatable.==(_:_:)` or `Swift.Hashable.hashValue`, when the protocol's
+module exports its method descriptors: a library built for evolution does,
+the stdlib and the system frameworks among them, while a protocol of a module
+built without it, an app among them, stays `null`, as does a vtable slot. A slot whose function the same
+listing already named is left out. Slots are read for every module the filter covers: scope a glob
 with a literal head (`"MyApp.Door.*"`), which skips any type it cannot match,
 since a glob that starts with a wildcard reads every conformance of every
 loaded module.
@@ -303,8 +307,9 @@ loaded module.
 ```js
 for (const fn of Swift.enumerateFunctions(Process.getModuleByName("MyApp"), { slots: true }))
     if (fn.signature === null)
-        console.log(fn.kind, fn.name, fn.address);
+        console.log(fn.kind, fn.name, fn.address, fn.requirement ?? "");
 // function MyApp.Door.vtable#14 0x1000a3f20
+// getter   MyApp.Door.Swift.CustomStringConvertible#1 0x1000a4a80 Swift.CustomStringConvertible.description
 ```
 
 `Swift.findFunctionByAddress(address)` maps an address inside a function, a
