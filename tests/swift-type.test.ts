@@ -276,6 +276,7 @@ describe("type-level member lookups by kind", () => {
     const greet = Robot.$type.instanceMethod("greet");
     expect(greet.bind(robot.$handle).call("X")).toBe("Hello X, I am R2");
     expect(greet.bind({ handle: robot.$handle }).call("Y")).toBe("Hello Y, I am R2");
+    expect(greet.bind({ $kind: "instance", handle: robot.$handle } as { handle: NativePointer }).call("Z")).toBe("Hello Z, I am R2");
     const speaker = Swift.class("fixture.BaseSpeaker")!.init()!;
     expect(() => greet.bind(speaker.$handle)).toThrow(/greet takes a fixture\.Robot receiver, not a fixture\.BaseSpeaker/);
     expect(() => greet.bind(5 as unknown as NativePointer)).toThrow(/receiver must be a Swift object, an ObjC\.Object, or a NativePointer/);

@@ -123,8 +123,13 @@ export interface SwiftClosureValue {
   [Symbol.dispose](): void;
 }
 
+// An ObjC.Object has a $kind too, "instance" or a class kind.
 export function isSwiftObject(value: CallResult): value is SwiftObject {
-  return typeof value === "object" && value !== null && "$kind" in value;
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const kind = (value as { $kind?: unknown }).$kind;
+  return kind === "object" || kind === "value";
 }
 
 // A SwiftField ($field view) is a borrowed ValueInstance at runtime, which marshalArg accepts.
