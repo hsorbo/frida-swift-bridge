@@ -195,6 +195,7 @@ function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
     if (!facade.metadata.handle.equals(metadata.handle)) {
       throw new Error(`argument is a ${typeName(facade.metadata)} value, expected ${typeName(metadata)}`);
     }
+    facade.checkLive();
     return (address) => facade.copyInto(address);
   }
   switch (metadata.kind) {

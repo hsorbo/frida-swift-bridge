@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
-import { Swift, type CallArg, type SwiftValueObject } from "../src/index.js";
+import { Swift, type CallArg, type SwiftStruct, type SwiftValue, type SwiftValueObject } from "../src/index.js";
 import { ClassInstance } from "../src/abi.js";
 
 function echo(name: string, type: string) {
@@ -59,6 +59,20 @@ describe("a nominal Optional payload", () => {
     expect(again.some.$fields).toEqual({ x: int64(7) });
     expect(echoNested({ some: null })).toEqual({ some: null });
     expect(echoNested(null)).toBeNull();
+  });
+
+  test("a disposed facade among nested elements is refused before any element is written", () => {
+    const token = Swift.class("fixture.Token")!.init(4)!;
+    const count = new ClassInstance(token.$handle);
+    const make = Swift.NativeFunction(fixtureExport("fixture.makeWrapper"), Swift.type("fixture.Wrapper")!, [Swift.type("fixture.Token")!]);
+    const live = make(token) as SwiftValueObject;
+    const disposed = make(token) as SwiftValueObject;
+    disposed.$dispose();
+    const before = count.retainCount;
+    const Wrappers = Swift.type("Swift.Array<fixture.Wrapper>") as SwiftStruct;
+    expect(() => Wrappers.$new([live, disposed] as unknown as SwiftValue[])).toThrow(/disposed/);
+    expect(count.retainCount).toBe(before);
+    live.$dispose();
   });
 
   test("a facade of another type is refused", () => {
