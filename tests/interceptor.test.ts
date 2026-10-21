@@ -755,6 +755,17 @@ describe("Swift.Interceptor.attach on members of generic types", () => {
     expect(hookDuringDrive("static fixture.Keyed.echo(")).toEqual([{ args: ["a"], ret: "a" }]);
   });
 
+  test("a private type argument is named as the bridge names the type", () => {
+    const module = loadFixture();
+    let typeArguments: string[] | undefined;
+    const echoSealed = Swift.function(module, "$s7fixture10echoSealedSiyF");
+    hookDuring(fixtureExport("static fixture.Keyed.echo("), () => echoSealed.call(), (invocation) => {
+      typeArguments = invocation.typeArguments;
+    });
+    expect(typeArguments).toEqual(["fixture.Sealed"]);
+    expect(Swift.reflect("fixture.Sealed")?.name).toBe("fixture.Sealed");
+  });
+
   test("a generic static member of a generic struct receives the type's arguments before its own", () => {
     expect(hookDuringDrive("static fixture.Keyed.first<")).toEqual([{ args: [int64(7), "b"], ret: int64(7) }]);
   });

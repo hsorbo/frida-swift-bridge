@@ -58,7 +58,7 @@ import { callAsync, AsyncCallOptions, AsyncResultShape, AsyncFloatArg, FloatClas
 import { SwiftClosure, ClosureSpec, ClosureBody, ClosureWords, LoadableClosureBody, SwiftThrow, closureValueWords, isSwiftClosureValue } from "./closure.js";
 import { ownedClosure } from "./closure-view.js";
 import { closureDiscriminator, closureHashString, INDIRECT } from "./closure-discriminator.js";
-import { typeName, mangledTypeName, buildMangledTypeToken } from "./type-name.js";
+import { typeName, mangledTypeName, buildMangledTypeToken, RUNTIME_ANONYMOUS_CONTEXT } from "./type-name.js";
 import { lookUpObjCProtocol, lookUpObjCClass, objcSuperclass, objcClassName, objcClassConformsToProtocol } from "./objc.js";
 import { getSwiftCoreApi } from "./api.js";
 import type { SubscriptAccessor } from "./type-expr.js";
@@ -821,9 +821,8 @@ function metatypeSelf(type: Metadata): NativePointer {
   return type.kind === MetadataKind.ObjCClassWrapper ? objcClassOf(type) : type.handle;
 }
 
-// swift_getTypeName spells a private type's anonymous parent as "(unknown context at $<address>)";
-// its symbols spell the type itself as "(Name in _<discriminator>)". Both collapse to the plain name.
-const RUNTIME_ANONYMOUS_CONTEXT = /\(unknown context at \$[0-9a-f]+\)\./g;
+// A private declaration's symbols spell it as "(Name in _<discriminator>)"; it collapses to the plain
+// name, as the runtime's anonymous parent does (RUNTIME_ANONYMOUS_CONTEXT).
 export const PRIVATE_DECL_NAME = /\(([^()\s]+) in _[0-9A-F]+\)/g;
 
 function resolveMemberOwner(typeName: string): MemberOwner {

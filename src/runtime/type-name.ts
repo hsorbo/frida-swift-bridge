@@ -4,6 +4,10 @@ import { borrowReferentType } from "../abi/borrow.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
 import { getSwiftCoreApi } from "./api.js";
 
+// swift_getTypeName spells a private type's anonymous parent as "(unknown context at $<address>)";
+// the bridge names the type without it, as its descriptor's full name does.
+export const RUNTIME_ANONYMOUS_CONTEXT = /\(unknown context at \$[0-9a-f]+\)\./g;
+
 // The runtime has no demangling for these two kinds; spell them as its demangler would.
 export function typeName(metadata: Metadata, qualified = true): string {
   if (metadata.kind === MetadataKind.FixedArray) {
@@ -16,7 +20,7 @@ export function typeName(metadata: Metadata, qualified = true): string {
     metadata.handle,
     qualified ? 1 : 0
   );
-  return data.readUtf8String(Number(length)) ?? "";
+  return (data.readUtf8String(Number(length)) ?? "").replace(RUNTIME_ANONYMOUS_CONTEXT, "");
 }
 
 export function mangledTypeName(metadata: Metadata): string | null {

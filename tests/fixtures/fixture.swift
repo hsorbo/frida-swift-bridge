@@ -1393,6 +1393,9 @@ public class KeyedHolder<T> {
     public class func label(_ n: Int) -> Int { n }
 }
 public func cellPaired<T, U>(_ cell: Cell<T>, _ u: U) -> U { u }
+// A private type's metadata sits under an anonymous context the runtime spells by address.
+private struct Sealed { let n: Int }
+public func echoSealed() -> Int { Keyed<Sealed>.echo(Sealed(n: 9)).n }
 public func driveKeyed() -> Int {
     let keyed = Keyed("c")
     _ = Keyed<String>.echo("a")
