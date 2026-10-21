@@ -238,7 +238,11 @@ export interface SwiftBoundInitializer {
 }
 
 export function narrowBoundInitializer(binder: SwiftBoundInitializer): SwiftBoundInitializer {
-  return { address: binder.address, call: (...args) => binder.call(...args) };
+  return withHookTarget({ address: binder.address, call: (...args) => binder.call(...args) }, hookTargetOf(binder) ?? null);
+}
+
+function hookableInitializer(bound: BoundMethod): SwiftBoundInitializer {
+  return withHookTarget({ address: bound.address, call: (...args) => bound.call(...args) as SwiftValueObject | null }, bound.hookTarget);
 }
 
 export interface RawInstance {
@@ -2139,7 +2143,7 @@ function valueReceiverRouting(receiver: Metadata, plan: CallPlan, ownership: Sel
   return routing;
 }
 
-function parseFunctionSymbol(mangled: string): SwiftFunctionSignature {
+export function parseFunctionSymbol(mangled: string): SwiftFunctionSignature {
   const demangled = demangle(mangled);
   if (demangled === null) {
     throw new Error(`not a Swift symbol: ${mangled}`);
@@ -2261,16 +2265,14 @@ export function bindValueInitializer(
   if (options.typeArguments !== undefined) {
     const plan = planGenericMethod(typeName(receiver), "init", options);
     const argConventions = plan.argPlans.map((_, i): ParamConvention => (plan.argConventions?.[i] === "inout" ? "inout" : "owned"));
-    const bound = new BoundMethod({ ...plan, argConventions }, { adoptResult: true });
-    return { address: bound.address, call: (...args) => bound.call(...args) as SwiftValueObject | null };
+    return hookableInitializer(new BoundMethod({ ...plan, argConventions }, { adoptResult: true }));
   }
   const resolved = resolveMethod(typeName(receiver), "init", options);
   if (resolved.returnType === null) {
     throw new Error(`${resolved.selector} is not a value initializer`);
   }
   const argConventions = resolved.argTypes.map((_, i): ParamConvention => (resolved.argConventions?.[i] === "inout" ? "inout" : "owned"));
-  const bound = bindResolved({ ...resolved, argConventions }, null, { adoptResult: true });
-  return { address: bound.address, call: (...args) => bound.call(...args) as SwiftValueObject | null };
+  return hookableInitializer(bindResolved({ ...resolved, argConventions }, null, { adoptResult: true }));
 }
 
 export type SelfRouting = { indirect: true } | { indirect: false; receiver: Metadata; bothWays?: boolean };
@@ -3133,7 +3135,7 @@ export function bindGenericTypeInitializer(receiver: Metadata, options: RawMetho
     Object.assign(plan, clauseKeyArguments(receiver, clause));
     bound = new BoundMethod({ ...plan, argConventions }, { adoptResult: true });
   }
-  return { address: bound.address, call: (...args) => bound.call(...args) as SwiftValueObject | null };
+  return hookableInitializer(bound);
 }
 
 interface ResolvedAccessor {

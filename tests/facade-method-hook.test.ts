@@ -47,6 +47,39 @@ describe("a facade's method as a hook target", () => {
     expect(() => Swift.Interceptor.attach(r.at, { onEnter() {} })).toThrow(/ambiguous method at/);
   });
 
+  test("a bound initializer and a bound type method are hook targets", () => {
+    const seen: CallResult[] = [];
+    const listener = Swift.Interceptor.attach(robotType().$initializer("init(name:)"), {
+      onEnter(args) {
+        seen.push(args[0]);
+      },
+    });
+    try {
+      expect(robotType().$initializer("init(name:)").call("Ada")!.name).toBe("Ada");
+    } finally {
+      listener.detach();
+    }
+    expect(seen).toEqual(["Ada"]);
+
+    const dialInit = Swift.struct("fixture.Dial")!.$initializer("init(value:)");
+    const keyedInit = Swift.struct("fixture.Keyed<Swift.Int>")!.$initializer("init(_:)");
+    const make = robotType().$typeMethod("make(name:)");
+    for (const [target, arg, expected] of [[dialInit, 7, int64(7)], [keyedInit, 5, int64(5)], [make, "Eve", "Eve"]] as const) {
+      seen.length = 0;
+      const l = Swift.Interceptor.attach(target, {
+        onEnter(args) {
+          seen.push(args[0]);
+        },
+      });
+      try {
+        target.call(arg);
+      } finally {
+        l.detach();
+      }
+      expect(seen).toEqual([expected]);
+    }
+  });
+
   test("a type facade's static method is hookable the same way", () => {
     const type = robotType();
     expect(type.make.address.equals(type.$typeMethod("make").address)).toBe(true);

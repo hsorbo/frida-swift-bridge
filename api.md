@@ -1402,8 +1402,9 @@ its two words `function` and `context`, with `$captures()` (see
 refuses a non-escaping one, whose context lives in the caller's frame.
 
 `target` is an address, a member found through a type's reflection, a bound
-method or a facade's bare-name method (hooked as its member; the receiver it
-was bound to plays no part), or a function from `Swift.function`. An address is
+method, initializer or type method or a facade's bare-name method (hooked as
+its member; the receiver it was bound to plays no part), or a function from
+`Swift.function`. An address is
 symbolicated to learn the signature; a member or function carries the signature
 it was found with, so it needs no symbol at its address. The arguments arrive
 positionally; the member's labels name them:
@@ -1517,7 +1518,7 @@ throws; name the type with them to call it:
 const deriveKey = Swift.struct("CryptoKit.HKDF")
     .$typeMethod("deriveKey", { labels: ["inputKeyMaterial", "outputByteCount"] });
 
-Swift.Interceptor.attach(deriveKey.address, { /* ... */ });
+Swift.Interceptor.attach(deriveKey, { /* ... */ });
 deriveKey.call(key, 32);   // throws: "... needs CryptoKit.HKDF's type arguments"
 Swift.struct("CryptoKit.HKDF<CryptoKit.SHA256>").deriveKey(key, 32);   // a SymmetricKey
 ```
@@ -1529,7 +1530,7 @@ it another way:
 ```js
 // init<D: ContiguousBytes>(data: D)
 const initData = Swift.struct("CryptoKit.SymmetricKey").$initializer({ labels: ["data"] });
-Swift.Interceptor.attach(initData.address, { /* ... */ });
+Swift.Interceptor.attach(initData, { /* ... */ });
 ```
 
 A non-mutating method of a generic struct whose layout doesn't depend on its

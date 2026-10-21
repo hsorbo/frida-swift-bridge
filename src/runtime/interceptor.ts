@@ -58,11 +58,13 @@ import {
   protocolExtensionLayout,
   resolveProtocolSelfType,
   SwiftBoundMethod,
+  SwiftBoundInitializer,
   SwiftFunction,
   zeroSizedStorage,
 } from "./method.js";
 import { typeOf, type SwiftMember } from "./swift-type.js";
 import type { SwiftMemberFunction } from "./qualified-function.js";
+import type { SwiftClassBoundInitializer } from "./type-facade.js";
 import type { SwiftFunctionMatch } from "./function-listing.js";
 import type { FacadeCallable } from "./facade-members.js";
 import type { ParamLayout, ParsedSwiftSignature, SwiftAccessorSignature } from "./symbolication.js";
@@ -505,7 +507,16 @@ function carriedMetadata(
   return new Metadata(handle);
 }
 
-export type HookableTarget = NativePointer | SwiftMember | SwiftBoundMethod | FacadeCallable | SwiftFunction<any, any> | SwiftMemberFunction | SwiftFunctionMatch;
+export type HookableTarget =
+  | NativePointer
+  | SwiftMember
+  | SwiftBoundMethod
+  | SwiftBoundInitializer
+  | SwiftClassBoundInitializer
+  | FacadeCallable
+  | SwiftFunction<any, any>
+  | SwiftMemberFunction
+  | SwiftFunctionMatch;
 
 interface HookEntry {
   address: NativePointer;

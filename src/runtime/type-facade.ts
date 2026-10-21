@@ -36,6 +36,7 @@ import {
   bindConformanceMethod,
   SwiftBoundSignature,
   hookTargetOf,
+  parseFunctionSymbol,
   withHookTarget,
   unboundSignature,
 } from "./method.js";
@@ -215,6 +216,7 @@ export class SwiftEnum extends SwiftValueType {
 
 interface ClassInitializer {
   address: NativePointer;
+  mangled: string;
   argLabels: (string | null)[];
   argTypeNames: string[];
   throws: boolean;
@@ -324,20 +326,23 @@ export class SwiftClass extends SwiftTypeFacade {
       hasSelf: true,
       throws: chosen.throws,
     });
-    return {
-      address: chosen.address,
-      call: (...args) => {
-        if (args.length !== argTypes.length) {
-          throw new Error(`init expects ${argTypes.length} argument(s), got ${args.length}`);
-        }
-        const argPtrs = marshalConsumedArgs(argTypes, args);
-        const instance = call(metadata.handle, ...argPtrs)!.readPointer();
-        if (chosen.failable && instance.isNull()) {
-          return null;
-        }
-        return asSwiftObject(ClassInstance.adopt(instance));
+    return withHookTarget(
+      {
+        address: chosen.address,
+        call: (...args) => {
+          if (args.length !== argTypes.length) {
+            throw new Error(`init expects ${argTypes.length} argument(s), got ${args.length}`);
+          }
+          const argPtrs = marshalConsumedArgs(argTypes, args);
+          const instance = call(metadata.handle, ...argPtrs)!.readPointer();
+          if (chosen.failable && instance.isNull()) {
+            return null;
+          }
+          return asSwiftObject(ClassInstance.adopt(instance));
+        },
       },
-    };
+      () => ({ address: chosen.address, signature: parseFunctionSymbol(chosen.mangled), witnessDispatched: false })
+    );
   }
 
   $typeMethod(selector: string, selectorOptions: MemberLookupOptions | SlotSignature = {}): SwiftBoundMethod {
@@ -377,6 +382,7 @@ export class SwiftClass extends SwiftTypeFacade {
       .filter((m) => m.mangled.endsWith(ALLOCATING_CONSTRUCTOR))
       .map((m) => ({
         address: m.address.strip(),
+        mangled: m.mangled,
         argLabels: m.argLabels,
         argTypeNames: m.argTypeNames,
         throws: m.throws,
