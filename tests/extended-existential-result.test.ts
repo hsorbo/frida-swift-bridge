@@ -2,7 +2,7 @@ import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { fixtureExport, compiledType, loadFixture } from "./fixtures/load.js";
 
 import { ClassInstance } from "../src/abi.js";
-import { Swift, type SwiftValueObject } from "../src/index.js";
+import { Swift, type SwiftClassObject, type SwiftValueObject } from "../src/index.js";
 
 describe("a parameterized existential result", () => {
   beforeEach(() => { loadFixture(); });
@@ -45,11 +45,28 @@ describe("a parameterized existential result", () => {
     expect(count.retainCount).toBe(before);
   });
 
-  test("a class payload stays boxed and alive until the facade is disposed", () => {
+  test("a class payload is the dynamic object, owned by its facade alone", () => {
     const Holder = compiledType("fixture.holderIntType");
     const Int = Swift.type("Swift.Int")!;
-    const holder = Swift.NativeFunction(fixtureExport("fixture.makeClassHolderInt"), Holder, [Int])(5) as SwiftValueObject;
-    expect([holder.$kind, holder.$owned]).toEqual(["value", true]);
+    const holder = Swift.NativeFunction(fixtureExport("fixture.makeClassHolderInt"), Holder, [Int])(5) as SwiftClassObject;
+    expect([holder.$kind, holder.$owned, holder.$type.name]).toEqual(["object", true, "fixture.ClassIntHolder"]);
+    expect(holder.item).toEqual(int64(5));
+    expect(holder.tag).toEqual(int64(5));
+    expect(new ClassInstance(holder.$handle).retainCount).toBe(1);
     holder.$dispose();
+  });
+
+  test("a hook observes a class payload as a borrowed object", () => {
+    const addr = fixtureExport("fixture.makeClassHolderInt");
+    let seen: unknown[] | null = null;
+    const listener = Swift.Interceptor.attach(addr, {
+      onLeave(ret) {
+        const holder = ret as SwiftClassObject;
+        seen = [holder.$kind, holder.$owned, holder.$type.name, holder.item, holder.tag];
+      },
+    });
+    Swift.NativeFunction(addr, compiledType("fixture.holderIntType"), [Swift.type("Swift.Int")!])(6);
+    listener.detach();
+    expect(seen).toEqual(["object", false, "fixture.ClassIntHolder", int64(6), int64(6)]);
   });
 });

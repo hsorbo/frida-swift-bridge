@@ -555,12 +555,15 @@ export function decodeReturn(returnType: Metadata | null, returned: NativePointe
   if (isExistential && isClassExistential(returnType)) {
     return asSwiftObject(ClassInstance.adopt(ret.readPointer()));
   }
-  // A class payload stays in its container, which keeps the box alive; a value payload is copied
-  // out into a facade of its own type, and the container destroyed.
+  // A class payload is retained out of its container and a value payload copied out into a facade
+  // of its own type; the container is then destroyed.
   const payload = isExistential ? projectExistentialPayload(returnType, ret) : null;
   if (payload !== null) {
     if (payload.type.kind === MetadataKind.Class || payload.type.kind === MetadataKind.ObjCClassWrapper) {
-      return asSwiftObject(ValueInstance.adopt(returnType, ret));
+      const ref = payload.value.readPointer();
+      getSwiftCoreApi().swift_unknownObjectRetain(ref);
+      returnType.valueWitnesses.destroy(ret);
+      return payload.type.kind === MetadataKind.Class ? asSwiftObject(ClassInstance.adopt(ref)) : ref;
     }
     if (isFacadeValueType(payload.type) || embedsManagedReference(payload.type)) {
       const own = Memory.alloc(Math.max(payload.type.typeLayout.stride, 1));

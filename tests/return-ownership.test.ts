@@ -95,17 +95,18 @@ describe("bridge-object container return", () => {
 describe("opaque existential return", () => {
   beforeEach(() => { loadFixture(); });
 
-  test("a class payload stays boxed and alive until the facade is disposed", () => {
+  test("a class payload is the dynamic object, retained until the facade is disposed", () => {
     const greeter = (typeOf(metadataFor("fixture.LoudGreeter")) as ClassType).facade.init("Ada")!;
     const view = new ClassInstance(greeter.$handle);
     const before = view.retainCount;
 
-    const boxed = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).facade.$call("wrap", greeter) as SwiftObject;
-    expect(boxed.$kind).toBe("value");
-    expect(boxed.$owned).toBe(true);
+    const unboxed = (typeOf(metadataFor("fixture.GreeterBox")) as StructType).facade.$call("wrap", greeter) as SwiftObject;
+    expect([unboxed.$kind, unboxed.$owned, unboxed.$type.name]).toEqual(["object", true, "fixture.LoudGreeter"]);
+    expect(unboxed.$handle.equals(greeter.$handle)).toBe(true);
+    expect(unboxed.greet()).toBe("HEY Ada");
     expect(view.retainCount).toBe(before + 1);
 
-    boxed.$dispose();
+    unboxed.$dispose();
     expect(view.retainCount).toBe(before);
   });
 

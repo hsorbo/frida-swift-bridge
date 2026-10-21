@@ -1117,8 +1117,11 @@ function decodeBorrowedValue(metadata: Metadata, address: NativePointer, parent:
   }
   if (metadata.kind === MetadataKind.Existential || metadata.kind === MetadataKind.ExtendedExistential) {
     const payload = projectExistentialPayload(metadata, address);
-    if (payload !== null && (isFacadeValueType(payload.type) || embedsManagedReference(payload.type))) {
-      return decodeBorrowedValue(payload.type, payload.value, parent);
+    if (payload !== null) {
+      const isClass = payload.type.kind === MetadataKind.Class || payload.type.kind === MetadataKind.ObjCClassWrapper;
+      if (isClass || isFacadeValueType(payload.type) || embedsManagedReference(payload.type)) {
+        return decodeBorrowedValue(payload.type, payload.value, parent);
+      }
     }
   }
   if (isFacadeValueType(metadata) || (!metadata.valueWitnesses.isPOD && embedsManagedReference(metadata))) {
