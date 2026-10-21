@@ -16,7 +16,7 @@ describe("the published package, end to end", () => {
     expect(Swift.type("fixture.Robot") === Robot).toBe(true);
     expect(Swift.modules.fixture.Robot === Robot).toBe(true);
     expect(Robot.$type.members().some((m) => m.selector === "greet(_:)" && m.kind === "method" && !m.isStatic)).toBe(true);
-    expect(Robot.$type.properties().map((p) => p.name)).toEqual(["name", "badge"]);
+    expect(Robot.$type.properties().map((p) => p.name).sort()).toEqual(["badge", "name"]);
   });
 
   test("constructs, calls, mutates and reads back", () => {

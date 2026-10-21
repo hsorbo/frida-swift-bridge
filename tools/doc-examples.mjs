@@ -1,8 +1,9 @@
 // The reference's runnable examples, the ```js blocks a `<!-- runnable -->` line precedes, as a
 // test input: tests/doc-examples.test.ts runs them against the fixture with MyApp read as fixture.
 import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
+const root = fileURLToPath(new URL("..", import.meta.url));
 const lines = readFileSync(`${root}/api.md`, "utf8").split("\n");
 const examples = [];
 for (let i = 0; i < lines.length; i++) {

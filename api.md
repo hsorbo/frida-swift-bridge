@@ -966,11 +966,11 @@ Assigning a property without a setter, or a name that is not a property,
 throws.
 
 `type.$type.properties()` enumerates the declared members, those of its own
-module unless `{ deep: true }`:
+module unless `{ deep: true }`, in no promised order:
 
 <!-- runnable -->
 ```js
-Swift.type("MyApp.Robot").$type.properties().map(p => p.name);   // ["name", "badge"]
+Swift.type("MyApp.Robot").$type.properties().map(p => p.name).sort();   // ["badge", "name"]
 ```
 
 Static properties, including those a protocol extension provides, read through
