@@ -70,18 +70,22 @@ function accessorSignature(accessor: SwiftAccessorSignature): SwiftMemberSignatu
   };
 }
 
-function functionMatch(match: ApiResolverMatch): SwiftFunctionMatch | null {
-  const split = match.name.indexOf("!");
-  const name = match.name.substring(split + 1).replace(PRIVATE_DECL_NAME, "$1");
+function plainName(match: ApiResolverMatch): string {
+  return match.name.substring(match.name.indexOf("!") + 1).replace(PRIVATE_DECL_NAME, "$1");
+}
+
+// The resolver reports a re-exported symbol under each module exporting it, so the module is the one
+// holding the code.
+function functionMatch(match: ApiResolverMatch, module: Module): SwiftFunctionMatch | null {
+  const name = plainName(match);
   const parsed = parseSwiftSignature(name);
   if (parsed === null) {
     return null;
   }
-  const path = match.name.substring(0, split);
   return withHookTarget(
     {
       address: match.address,
-      module: path.substring(path.search(/[^\\/]*$/)),
+      module: module.name,
       name,
       kind: parsed.kind,
       signature: parsed.kind === "function" ? memberSignature(parsed) : accessorSignature(parsed),
@@ -224,24 +228,45 @@ function globPattern(glob: string): RegExp {
   return new RegExp(`^${glob.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
 }
 
+// The resolver names a private declaration with its file discriminator, `(name in _HASH)`, which the
+// listing drops. A glob is spelled as the listing prints, so the resolver is asked for a superset
+// that lets any dotted segment carry a discriminator, and the glob then tests the plain name.
+function resolverGlob(glob: string): string {
+  return glob.replace(/\./g, "*.*");
+}
+
 export function swiftFunctions(filter?: NameFilter): Generator<SwiftFunctionMatch>;
 export function swiftFunctions(filter: NameFilter | undefined, options: FunctionListingOptions): Generator<SwiftFunctionMatch | SwiftFunctionSlot>;
 export function* swiftFunctions(filter?: NameFilter, { slots = false }: FunctionListingOptions = {}): Generator<SwiftFunctionMatch | SwiftFunctionSlot> {
+  const glob = typeof filter === "string" ? globPattern(filter) : null;
   const named = new Set<string>();
-  for (const match of swiftMatches(nameQuery("functions", filter))) {
-    const found = functionMatch(match);
+  const listed = new Set<string>();
+  for (const match of swiftMatches(nameQuery("functions", typeof filter === "string" ? resolverGlob(filter) : filter))) {
+    if (glob !== null && !glob.test(plainName(match))) {
+      continue;
+    }
+    const address = match.address.strip();
+    const key = `${address}!${match.name.substring(match.name.indexOf("!"))}`;
+    if (listed.has(key)) {
+      continue;
+    }
+    const module = Process.findModuleByAddress(address);
+    if (module === null || (filter !== undefined && typeof filter !== "string" && module.path !== filter.path)) {
+      continue;
+    }
+    const found = functionMatch(match, module);
     if (found === null) {
       continue;
     }
+    listed.add(key);
     if (slots) {
-      named.add(found.address.strip().toString());
+      named.add(address.toString());
     }
     yield found;
   }
   if (!slots) {
     return;
   }
-  const glob = typeof filter === "string" ? globPattern(filter) : null;
   const modules = filter === undefined || typeof filter === "string" ? enumerateSwiftModules() : [filter];
   const walk = new SlotWalk(typeof filter === "string" ? filter.split(/[*?]/)[0] : "");
   for (const module of modules) {
@@ -266,7 +291,7 @@ export function findSwiftFunction(address: NativePointer): SwiftFunctionMatch | 
   }
   const start = range.base.strip();
   for (const match of swiftMatches(nameQuery("functions", module))) {
-    const found = match.address.strip().equals(start) ? functionMatch(match) : null;
+    const found = match.address.strip().equals(start) ? functionMatch(match, module) : null;
     if (found !== null) {
       return found;
     }

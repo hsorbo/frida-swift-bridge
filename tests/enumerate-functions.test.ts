@@ -70,6 +70,23 @@ describe("Swift.enumerateFunctions", () => {
     expect(init.signature.returnTypeName).toBe("fixturesyms.CodableCard.Hidden");
     expect(matches.some((m) => m.name === "fixturesyms.CodableCard.Hidden.doubled.getter : Swift.Int")).toBe(true);
   });
+
+  test("a glob spells a private declaration by its plain name, as the listing does", (ctx) => {
+    requireSymbolTable(ctx);
+    loadFixtureSyms();
+    expect([...Swift.enumerateFunctions("fixturesyms.CodableCard.Hidden.doubled*")].map((m) => m.name)).toEqual(["fixturesyms.CodableCard.Hidden.doubled.getter : Swift.Int"]);
+    expect([...Swift.enumerateFunctions("*.Hidden.init(n:*")].map((m) => m.name)).toEqual(["fixturesyms.CodableCard.Hidden.init(n: Swift.Int) -> fixturesyms.CodableCard.Hidden"]);
+    expect([...Swift.enumerateTypes("fixturesyms.CodableCard.Hid*")].map((t) => t.$type.name)).toEqual(["fixturesyms.CodableCard.Hidden"]);
+  });
+
+  // The Darwin overlay is split across dylibs that re-export each other, so its symbols are
+  // exported by more than one loaded module.
+  test("a re-exported function is listed once, under the module that holds its code", (ctx) => {
+    if (Process.platform !== "darwin") ctx.skip("only Mach-O re-exports symbols");
+    const matches = [...Swift.enumerateFunctions("Darwin.POSIXErrorCode.init(rawValue:*")];
+    expect(matches.map((m) => m.name)).toEqual(["Darwin.POSIXErrorCode.init(rawValue: Swift.Int32) -> Swift.Optional<Darwin.POSIXErrorCode>"]);
+    expect(matches[0].module).toBe(Process.findModuleByAddress(matches[0].address)!.name);
+  });
 });
 
 describe("Swift.enumerateFunctions with slots", () => {

@@ -266,8 +266,9 @@ table survives. A stripped binary that exports nothing, such as an app's own
 executable, lists nothing here; the vtable and witness slots of its types
 still appear on each type's member listing (see [Reflection](#reflection)).
 A private declaration is spelled by its plain name, without the file
-discriminator its symbol carries. Each match has an
-`address`, its `module`, the demangled `name`, a
+discriminator its symbol carries, and a glob matches that spelling. A function
+another module re-exports is listed once. Each match has an
+`address`, its `module` (the one holding the code), the demangled `name`, a
 `kind` (`function`, `getter`, `setter`, `modify` or `read`) and the `signature`
 a member carries; a getter, modify or read yields the property's type and a
 setter takes it, as the hook's callbacks see them. A match goes straight into
