@@ -976,8 +976,12 @@ robot.badge;                // "[D2]"
 Assigning a property without a setter, or a name that is not a property,
 throws.
 
-`type.$type.properties()` enumerates the declared members, those of its own
-module unless `{ deep: true }`, in no promised order:
+`type.$type.properties()` enumerates the properties the module's symbols name
+through their accessors, those of its own module unless `{ deep: true }`, in no
+promised order. A property whose accessors have no symbol, such as an internal
+one in a stripped binary, is not listed; the stored fields the field descriptor
+records are `type.$type.fields` (see [Reflection](#reflection)) and read through
+`$fields` either way:
 
 <!-- runnable -->
 ```js
