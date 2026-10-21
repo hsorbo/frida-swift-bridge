@@ -1453,7 +1453,14 @@ export function findMember(
   options: RawMethodResolveOptions = {}
 ): FoundMember | null {
   const owner = resolveMemberOwner(typeName);
-  const candidates = matchingMethods(owner, options, (c) => c.name === methodName);
+  const typeArguments = typeArgumentsNamed(typeName);
+  const candidates = matchingMethods(
+    owner,
+    options,
+    (c) => c.name === methodName && (typeArguments === null || memberClauseHolds(owner, typeArguments, c.signature)),
+    typeArguments,
+    typeArguments === null
+  );
   if (candidates.length === 0) {
     return null;
   }
@@ -2764,14 +2771,19 @@ function inferClosureTypeArguments(signature: SwiftFunctionSignature): Metadata[
   });
 }
 
+// everyConditional admits the constrained extensions' members regardless of their clauses, so an
+// unbound name meets every overload it could mean.
 function matchingMethods(
   owner: MemberOwner,
   options: RawMethodResolveOptions,
   match: (candidate: MethodCandidate) => boolean,
-  typeArguments: Metadata[] | null = null
+  typeArguments: Metadata[] | null = null,
+  everyConditional = false
 ): MethodCandidate[] {
+  const conditional = (source: MemberSource): MethodCandidate[] =>
+    everyConditional ? source(owner).conditional : conditionalMethods(owner, typeArguments, source);
   const matching = (source: MemberSource): MethodCandidate[] =>
-    applyOverloadFilters([...source(owner).methods, ...conditionalMethods(owner, typeArguments, source)].filter(match), options);
+    applyOverloadFilters([...source(owner).methods, ...conditional(source)].filter(match), options);
   const own = matching(definingModuleMembers);
   return own.length > 0 || options.deep === false ? own : matching(allLoadedModuleMembers);
 }
@@ -2782,6 +2794,14 @@ function conditionalMethods(owner: MemberOwner, typeArguments: Metadata[] | null
   }
   const { descriptor } = owner;
   return members(owner).conditional.filter((c) => clauseArguments(descriptor, typeArguments, c.constraints) !== null);
+}
+
+// A member whose own clause constrains the type's parameters (init(_:) where A == Int) belongs to
+// the specializations the clause admits, like a constrained extension's. The method's own
+// parameters are the digit-suffixed ones (A1, B1) and are left to the call.
+function memberClauseHolds(owner: MemberOwner, typeArguments: Metadata[], signature: SwiftFunctionSignature): boolean {
+  const onTypeParameters = signature.whereRequirements.filter((r) => !/\b[A-Z]\d/.test(r));
+  return owner.kind === "objcClass" || onTypeParameters.length === 0 || clauseArguments(owner.descriptor, typeArguments, onTypeParameters) !== null;
 }
 
 function typeArgumentsNamed(name: string): Metadata[] | null {

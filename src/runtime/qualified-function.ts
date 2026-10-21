@@ -86,7 +86,7 @@ export function qualifiedFunction(qualified: string, options: ValueMethodResolve
   if (type === null) {
     throw new Error(`unknown type: ${typeName}`);
   }
-  const found = findMemberOfKind(type.name, selector, options);
+  const found = findMemberOfKind(typeName, selector, options);
   const { static: _, ...lookup } = options;
   const call = found.isStatic
     ? (...args: CallArg[]) => type.facade.$typeMethod(selector, lookup).call(...args)

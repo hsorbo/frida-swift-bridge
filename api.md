@@ -1251,7 +1251,11 @@ an unbound function that takes `self` as its first argument. The second
 argument is the usual options object (`{ argTypes }`, `{ returnType }`,
 `{ self }`, `{ typeArguments }`); when a type declares a type member and an
 instance member with the same selector, `{ static: true }` or
-`{ static: false }` picks one. The result carries the member's `signature`
+`{ static: false }` picks one. A selector that several overloads share,
+across a generic type's constrained extensions included, throws and lists
+them; a specialization in the type name keeps only the overloads whose where
+clause it meets, so `"MyApp.Button<MyApp.Text>.init(_:action:)"` names the
+`where Label == Text` one. The result carries the member's `signature`
 and `origin`, and `Swift.Interceptor.attach` takes it directly whether or not
 the type is generic; a call then needs what the member needs.
 

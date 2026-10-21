@@ -2436,3 +2436,18 @@ public enum SoleCase { case only; public init() { self = .only } }
 public func makeZeroSized() -> ZeroSized { ZeroSized() }
 public var soleCaseRequests = 0
 public func makeSoleCase(_ n: Int) -> SoleCase { soleCaseRequests += n; return .only }
+
+// One selector overloaded across constrained extensions and an inline where clause, as SwiftUI
+// spells Button.init(_:action:).
+public struct Pressable<A> {
+    public let label: A
+    public let kind: String
+    public init(label: A, kind: String) { self.label = label; self.kind = kind }
+    public init(_ label: A, action: () -> ()) where A == Double { self.label = label; self.kind = "double"; action() }
+}
+extension Pressable where A == Int {
+    public init(_ label: Int, action: () -> ()) { self.label = label; self.kind = "int"; action() }
+}
+extension Pressable where A == String {
+    public init(_ label: String, action: () -> ()) { self.label = label; self.kind = "string"; action() }
+}

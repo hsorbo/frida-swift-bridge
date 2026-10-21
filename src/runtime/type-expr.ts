@@ -83,6 +83,7 @@ export interface SwiftFunctionSignature {
   returnTypeName: string | null;
   selector: string; // e.g. "greet(name:to:)"
   conformanceRequirements: GenericRequirement[];
+  whereRequirements: string[]; // the member's own clause, e.g. `A == Swift.Int` on init<A where A == Swift.Int>
   // A constrained extension's context demangles as `P< where A: Q>` or `T<A where A: Q>`; the
   // clauses, context bare.
   contextConstraints: string[];
@@ -574,6 +575,7 @@ function subscriptSignature(
     returnTypeName: type.result.text,
     selector: `subscript(${argLabels.map((l) => `${l ?? "_"}:`).join("")})`,
     conformanceRequirements,
+    whereRequirements: clause === null ? [] : whereRequirements(clause),
     contextConstraints,
   };
 }
@@ -622,6 +624,7 @@ function parseFunction(s: string): SwiftFunctionSignature | null {
     returnTypeName: returnTypeName === "()" ? null : returnTypeName,
     selector: `${name}(${argLabels.map((l) => `${l ?? "_"}:`).join("")})`,
     conformanceRequirements,
+    whereRequirements: clause === null ? [] : whereRequirements(clause),
     contextConstraints,
   };
 }

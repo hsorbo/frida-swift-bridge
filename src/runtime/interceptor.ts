@@ -676,6 +676,7 @@ function indexlessSubscript(parsed: SwiftAccessorSignature): SwiftFunctionSignat
     returnTypeName: parsed.typeName,
     selector: parsed.member,
     conformanceRequirements: [],
+    whereRequirements: [],
     contextConstraints: parsed.contextConstraints,
   };
 }

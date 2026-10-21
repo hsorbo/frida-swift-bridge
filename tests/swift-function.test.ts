@@ -28,6 +28,9 @@ const ROBOT_ALLOCATING_INIT = "$s7fixture5RobotC4nameACSS_tcfC";
 const BURROW_OCCUPANT = "$s7fixture6BurrowC8occupantSSyFZ";
 const GENERIC_HOLDER_SCALED_STORED = "$s7fixture13GenericHolderC12scaledStored2byS2i_tF";
 const CONSTRAINED_BOX_SCALED_STORED = "$s7fixture14ConstrainedBoxV12scaledStored2byS2i_tF";
+const PRESSABLE_INT_INIT = "$s7fixture9PressableVAASiRszlE_6actionACySiGSi_yyXEtcfC";
+const PRESSABLE_STRING_INIT = "$s7fixture9PressableVAASSRszlE_6actionACySSGSS_yyXEtcfC";
+const PRESSABLE_DOUBLE_INIT = "$s7fixture9PressableV_6actionACySdGSd_yyXEtcSdRszlufC";
 const RESILIENT_BASE_GREETING_DISPATCH_THUNK = "$s9resilient13ResilientBaseC8greetingSSyFTj";
 
 describe("Swift.function", () => {
@@ -238,6 +241,18 @@ describe("Swift.function from a qualified selector", () => {
     expect(scale.address.equals(Swift.function("fixture.ConstrainedBox.scale(_:by:)").address)).toBe(true);
     expect(scale.call(3, 7)).toEqual(int64(21));
     expect(Swift.function("fixture.Keyed<Swift.String>.echo(_:)").call("a")).toBe("a");
+  });
+
+  test("a selector overloaded across constrained extensions is ambiguous unbound and narrowed by a specialization", () => {
+    const module = loadFixture();
+    expect(() => Swift.function("fixture.Pressable.init(_:action:)")).toThrow(/ambiguous/);
+    const intInit = Swift.function("fixture.Pressable<Swift.Int>.init(_:action:)");
+    expect(intInit.address.equals(module.findExportByName(PRESSABLE_INT_INIT)!)).toBe(true);
+    expect(intInit.signature.argTypeNames).toEqual(["Swift.Int", "() -> ()"]);
+    const stringInit = Swift.function("fixture.Pressable<Swift.String>.init(_:action:)");
+    expect(stringInit.address.equals(module.findExportByName(PRESSABLE_STRING_INIT)!)).toBe(true);
+    const doubleInit = Swift.function("fixture.Pressable<Swift.Double>.init(_:action:)");
+    expect(doubleInit.address.equals(module.findExportByName(PRESSABLE_DOUBLE_INIT)!)).toBe(true);
   });
 
   test("a selector shared by a type and an instance member needs { static }", () => {
