@@ -53,6 +53,25 @@ describe("Swift.choose", () => {
     expect(handles(Swift.choose(Swift.class("fixture.Starling")!))).toContain(starling.$handle.toString());
   });
 
+  test("finds an instance whose isa an artificial subclass replaced, as KVO does", (ctx) => {
+    requireDarwin(ctx);
+    const Starling = Swift.class("fixture.Starling")!;
+    const starling = Starling.init()!;
+    const libobjc = Process.getModuleByName("libobjc.A.dylib");
+    const allocateClassPair = new NativeFunction(libobjc.getExportByName("objc_allocateClassPair"), "pointer", ["pointer", "pointer", "size_t"]);
+    const registerClassPair = new NativeFunction(libobjc.getExportByName("objc_registerClassPair"), "void", ["pointer"]);
+    const getClass = new NativeFunction(libobjc.getExportByName("object_getClass"), "pointer", ["pointer"]);
+    const setClass = new NativeFunction(libobjc.getExportByName("object_setClass"), "pointer", ["pointer", "pointer"]);
+    const observed = allocateClassPair(getClass(starling.$handle), Memory.allocUtf8String("NotifyingStarling"), 0);
+    registerClassPair(observed);
+    setClass(starling.$handle, observed);
+    const found = Swift.choose(Starling);
+    expect(handles(found)).toContain(starling.$handle.toString());
+    const view = found.find((o) => o.$handle.equals(starling.$handle))!;
+    expect(view.$type.name).toBe("fixture.Starling");
+    expect(view.pitch).toEqual(int64(5));
+  });
+
   test("rejects malloc blocks shaped like the runtime's type-name cache buckets", () => {
     const HenCoop = Swift.class("fixture.HenCoop")!;
     const coop = HenCoop.init()!;

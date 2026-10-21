@@ -217,7 +217,10 @@ function classMetadataAt(address: NativePointer): ClassMetadata | null {
       return null;
     }
     const metadata = new ClassMetadata(address);
-    return metadata.isTypeMetadata && metadata.description.kind === ContextDescriptorKind.Class ? metadata : null;
+    if (!metadata.isTypeMetadata) {
+      return null;
+    }
+    return metadata.isArtificialSubclass || metadata.description.kind === ContextDescriptorKind.Class ? metadata : null;
   } catch {
     return null;
   }

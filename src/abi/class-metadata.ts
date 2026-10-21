@@ -56,6 +56,12 @@ export class ClassMetadata {
     return this.handle.readU16(OFFSETOF_INSTANCE_ALIGN_MASK) + 1;
   }
 
+  // The ObjC runtime creates a subclass for KVO by copying its Swift superclass's metadata and
+  // clearing the description, which is how the Swift runtime tells such a class apart.
+  get isArtificialSubclass(): boolean {
+    return this.isTypeMetadata && this.handle.readPointer(OFFSETOF_DESCRIPTION).isNull();
+  }
+
   get description(): ContextDescriptor {
     this.requireTypeMetadata();
     return new ContextDescriptor(this.handle.readPointer(OFFSETOF_DESCRIPTION).strip());
@@ -103,7 +109,13 @@ export function classMetadataOf(object: NativePointer): ClassMetadata {
 
 // A tagged pointer has no isa, and an instance of a Swift subclass of an ObjC class can carry a nonpointer isa.
 export function dynamicTypeOf(object: NativePointer): Metadata {
-  return new Metadata(getSwiftCoreApi().swift_getObjectType(object));
+  let type = new Metadata(getSwiftCoreApi().swift_getObjectType(object));
+  let cls = new ClassMetadata(type.handle);
+  while (type.kind === MetadataKind.Class && cls.isArtificialSubclass) {
+    cls = cls.superclass!;
+    type = new Metadata(cls.handle);
+  }
+  return type;
 }
 
 export interface FieldWithOffset {
