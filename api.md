@@ -1047,7 +1047,11 @@ robot.greet("X");   // "Hello X, I am C3"
 
 A field view is borrowed: its lifetime is bounded by the parent instance. It is
 not itself a full facade — for owning/ABI operations on a field value, go
-through `/abi`.
+through `/abi`. An existential field (`Any`, `any P`) is viewed as its dynamic
+value, as a hook argument of that type decodes: the view's `type` is the
+dynamic type and its `handle` the payload, inline or in the box, so
+`type.facade.$copy(handle)` takes a facade of it. A class-shaped existential
+holds a bare reference and is viewed as declared.
 
 A `weak` stored property's slot is a weak reference, not the optional it is
 declared as: `$fields` loads it through the runtime (the referent's handle while

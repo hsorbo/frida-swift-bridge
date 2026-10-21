@@ -212,6 +212,8 @@ public func bumpTally() -> Int {
 public struct Payload {
     public var value: Any
 }
+public func makeArrayPayload(_ n: Int) -> Payload { Payload(value: [n, n + 1]) }
+public func makeBigPayload(_ n: Int) -> Payload { Payload(value: BigStruct(a: n, b: 2, c: 3, d: 4, e: 5)) }
 
 public struct Reading {
     var n: Int

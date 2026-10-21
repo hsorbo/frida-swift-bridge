@@ -1,6 +1,7 @@
 import { Metadata, MetadataKind } from "./metadata.js";
 import { readValue, writeValue, enumerateInstanceFields, swiftValueEquals, SwiftValue } from "./instance.js";
 import { decodeBridgedContainer } from "./container.js";
+import { projectExistentialPayload } from "./existential.js";
 import {
   BoundMethod,
   bindResolved,
@@ -49,6 +50,19 @@ export class ValueInstance implements RawInstance {
 
   static borrow(metadata: Metadata, handle: NativePointer, parent: Pick<RawInstance, "checkLive"> | null = null): ValueInstance {
     return new ValueInstance(metadata, handle, null, parent);
+  }
+
+  // A stored field's view; an existential field is viewed as its dynamic value, inline or boxed,
+  // as a hook argument of that type decodes. A class or metatype shape holds a bare word and is
+  // viewed as declared.
+  static borrowField(metadata: Metadata, handle: NativePointer, parent: Pick<RawInstance, "checkLive">): ValueInstance {
+    if (metadata.kind === MetadataKind.Existential || metadata.kind === MetadataKind.ExtendedExistential) {
+      const payload = projectExistentialPayload(metadata, handle);
+      if (payload !== null) {
+        return ValueInstance.borrow(payload.type, payload.value, parent);
+      }
+    }
+    return ValueInstance.borrow(metadata, handle, parent);
   }
 
   static fromJS(metadata: Metadata, value: SwiftValue): ValueInstance {
@@ -129,7 +143,7 @@ export class ValueInstance implements RawInstance {
         if (f.storage === "weak") {
           throw new Error(`ValueInstance.field: ${name} is weak storage, not a ${typeName(f.type)}; read it through read() or its getter`);
         }
-        return ValueInstance.borrow(f.type, f.address, this);
+        return ValueInstance.borrowField(f.type, f.address, this);
       }
     }
     throw new Error(`ValueInstance.field: no field ${name}`);
