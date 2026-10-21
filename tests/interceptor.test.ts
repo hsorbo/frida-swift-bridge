@@ -1085,3 +1085,41 @@ describe("Swift.Interceptor.attach on protocol-extension members", () => {
     expect(seen).toEqual({ args: [int64(9)], ret: [int64(9), int64(7)] });
   });
 });
+
+describe("Swift.Interceptor.attach on accessors typed by a type parameter or an opaque type", () => {
+  test("a getter typed by the type parameter decodes its result by the type's arguments", () => {
+    loadFixture();
+    const pouch = Swift.struct("fixture.Pouch<Swift.Int>")!.$new({ value: 7 });
+    let typeArguments: string[] | undefined;
+    const { ret } = hookDuring(fixtureExport("fixture.Pouch.copy.getter"), () => pouch.$get("copy"), (invocation) => {
+      typeArguments = invocation.typeArguments;
+    });
+    expect([ret, typeArguments]).toEqual([int64(7), ["Swift.Int"]]);
+  });
+
+  test("a class's setter and getter typed by the type parameter", () => {
+    loadFixture();
+    const holder = Swift.class("fixture.KeyedHolder<Swift.String>")!.init("a") as SwiftObject;
+    expect(hookDuring(fixtureExport("fixture.KeyedHolder.value.setter"), () => holder.$set("value", "b")).args).toEqual(["b"]);
+    expect(hookDuring(fixtureExport("fixture.KeyedHolder.value.getter"), () => holder.$get("value")).ret).toBe("b");
+  });
+
+  test("a getter typed by an opaque type decodes its underlying type", () => {
+    const module = loadFixture();
+    let self: CallResult = null;
+    const { ret, called } = hookDuring(fixtureExport("fixture.OpaqueHost.body.getter"), () => Swift.function(module, "$s7fixture22greetThroughOpaqueHostyS2SF").call("Ada"), (invocation) => {
+      self = fieldsOf(invocation.self!)!;
+    });
+    expect([self, ret, called]).toEqual([{ name: "Ada" }, { name: "Ada" }, "Hello, Ada"]);
+  });
+
+  test("an opaque result is decoded from the result buffer, not the result registers", () => {
+    const module = loadFixture();
+    const driver = Swift.function(module, "$s7fixture16opaqueHostLengthySiSSF");
+    const { ret, called } = hookDuring(fixtureExport("fixture.OpaqueHost.length.getter"), () => driver.call("Ada"));
+    expect([ret, called]).toEqual([int64(3), int64(3)]);
+    // Stores the Int straight into the buffer, leaving the result registers as they were.
+    const opaqueCount = Swift.function(module, "$s7fixture11opaqueCountSiyF");
+    expect(hookDuring(fixtureExport("fixture.makeOpaqueCount()"), () => opaqueCount.call())).toEqual({ args: [], ret: int64(42), called: int64(42) });
+  });
+});

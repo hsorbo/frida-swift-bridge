@@ -46,6 +46,7 @@ import {
 import { findType } from "../reflection/registry.js";
 import { findProtocol } from "../abi/protocol-conformance.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
+import { underlyingTypeArgumentMangledName } from "../abi/opaque-type-descriptor.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { borrowedClosure } from "./closure-view.js";
@@ -124,6 +125,7 @@ type TypePlan =
   | { kind: "use"; expr: TypeExpr; indirect: boolean } // param-referencing expression: A?, [A], Array<A>
   | { kind: "metatype" } // T.Type: one GP holding the metadata pointer directly (loadable POD)
   | { kind: "closure" } // a thick function value: two GPs, the function then its context
+  | { kind: "opaque"; underlying: (generics: Metadata[]) => Metadata } // some P: by address, as its underlying type
   | { kind: "inout"; target: ValuePlan } // the caller's storage by address, whatever its layout
   | TuplePlan;
 
@@ -271,7 +273,7 @@ function directResultScalars(ret: TypePlan | null): LoweredScalar[] {
 }
 
 function needsGenerics(plan: TypePlan | null): boolean {
-  return plan !== null && (plan.kind === "param" || plan.kind === "use" || plan.kind === "tuple");
+  return plan !== null && (plan.kind === "param" || plan.kind === "use" || plan.kind === "tuple" || plan.kind === "opaque");
 }
 
 function planType(type: TypeExpr, generics: GenericEnvironment): TypePlan {
@@ -325,6 +327,8 @@ function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, ge
       return plan.metadata;
     case "param":
       return generics[plan.paramIndex];
+    case "opaque":
+      return plan.underlying(generics);
     case "use":
     case "tuple": {
       const metadata = resolveParsedType(plan.expr, (name) => {
@@ -346,7 +350,7 @@ function planMetadata(plan: ValuePlan | { kind: "inout"; target: ValuePlan }, ge
 // param values and uses storing one inline are address-only → passed indirectly (one GP pointer, or
 // x8 for a return); other uses are a single reference. An inout argument is its address.
 function isIndirectPlan(plan: TypePlan): boolean {
-  return plan.kind === "param" || plan.kind === "inout" || (plan.kind === "use" && plan.indirect);
+  return plan.kind === "param" || plan.kind === "inout" || plan.kind === "opaque" || (plan.kind === "use" && plan.indirect);
 }
 
 // After the formal arguments and a trailing self, IRGen passes an address-only value self's Self
@@ -555,7 +559,12 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     ownership ??= accessorOwnership;
     let generics = genericEnvironment(parsed, ownership);
     const indices = parsed.params.map((p) => (p.convention === "inout" ? inoutPlan(planType(p.type, generics), p.text) : planType(p.type, generics)));
-    const element = parsed.result === null ? null : planType(parsed.result, generics);
+    const element =
+      parsed.result === null
+        ? null
+        : parsed.result.kind === "opaque" && parsed.genericParams.length === 0
+          ? opaquePlan(opaqueUnderlyingType(target, parsed.context))
+          : planType(parsed.result, generics);
     const args = accessor === "setter" ? [element!, ...indices] : indices;
     const indexLabels = parsed.params.map((p) => p.label);
     const labels = accessor === "setter" ? [null, ...indexLabels] : indexLabels;
@@ -598,11 +607,20 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
   if (findType(parsed.context.replace(/^static /, "")) === null && protocolContext(parsed.context) !== null) {
     return protocolAccessorShape(parsed);
   }
+  if (parsed.type.kind === "opaque") {
+    return accessorShape(parsed, opaquePlan(opaqueUnderlyingType(target, parsed.context)));
+  }
   const memberType = resolveParsedType(parsed.type, () => null);
   if (memberType === null) {
+    if (findType(parsed.context.replace(/^(static|class) /, ""))?.isGeneric) {
+      return callShape({ address: target, parsed: indexlessSubscript(parsed) }, ownership, isAsync);
+    }
     throw new Error(`could not resolve accessor type: ${parsed.typeName}`);
   }
-  const member: TypePlan = { kind: "concrete", metadata: memberType };
+  return accessorShape(parsed, { kind: "concrete", metadata: memberType });
+}
+
+function accessorShape(parsed: SwiftAccessorSignature, member: TypePlan): CallShape {
   const generics: GenericEnvironment = { params: [], sources: [], passesSelfMetadata: false, undecodable: null, layout: () => null, protocol: null };
   switch (parsed.kind) {
     case "getter":
@@ -619,6 +637,60 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
 function protocolContext(context: string): ContextDescriptor | null {
   const name = context.replace(/^(static|class) /, "");
   return name.includes(".") ? findProtocol(name) : null;
+}
+
+function opaquePlan(metadata: Metadata): TypePlan {
+  return { kind: "opaque", underlying: () => metadata };
+}
+
+// An opaque result is one concrete type per declaration, recorded in the declaration's opaque type
+// descriptor, `<entity>QOMQ`; an accessor's entity is its property or subscript. Only a non-generic
+// context is resolved, since the underlying type may name generic arguments the hook doesn't have.
+function opaqueUnderlyingType(target: NativePointer, context: string): Metadata {
+  const symbol = symbolicate(target);
+  const module = Process.findModuleByAddress(target.strip());
+  if (symbol === null || module === null) {
+    throw new Error(`no Swift symbol at ${target} to name its opaque result type`);
+  }
+  const owner = findType(context.replace(/^(static|class) /, ""));
+  if (owner?.isGeneric || (owner === null && context.includes("."))) {
+    throw new Error(`unsupported opaque result in a generic context: ${symbol.demangled}`);
+  }
+  const name = `${symbol.name.replace(/([vi])[grM]$/, "$1p")}QOMQ`;
+  const address = module.findExportByName(name) ?? module.findSymbolByName(name);
+  if (address === null) {
+    throw new Error(`no opaque type descriptor for ${symbol.demangled}`);
+  }
+  const descriptor = new ContextDescriptor(address);
+  const metadata = resolveTypeByMangledName(underlyingTypeArgumentMangledName(descriptor, 0), descriptor);
+  if (metadata === null) {
+    throw new Error(`could not resolve the opaque result of ${symbol.demangled}`);
+  }
+  return metadata;
+}
+
+// A property typed by its generic context's parameters lowers as a subscript with no indices: the
+// value by address, the type's arguments read off self or passed after it.
+function indexlessSubscript(parsed: SwiftAccessorSignature): SwiftFunctionSignature {
+  return {
+    kind: "function",
+    context: parsed.context,
+    name: parsed.member,
+    genericParams: [],
+    simpleGenerics: true,
+    async: false,
+    throws: false,
+    thrownType: null,
+    accessor: parsed.kind,
+    params: [],
+    result: parsed.type,
+    argTypeNames: [],
+    argLabels: [],
+    returnTypeName: parsed.typeName,
+    selector: parsed.member,
+    conformanceRequirements: [],
+    contextConstraints: parsed.contextConstraints,
+  };
 }
 
 function protocolAccessorShape(parsed: SwiftAccessorSignature): CallShape {

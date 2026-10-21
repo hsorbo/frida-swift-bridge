@@ -1472,8 +1472,9 @@ which. `self` is decoded only when read.
 
 `this.typeArguments` names the type arguments of the call in both callbacks: the
 enclosing generic type's first, then the function's own, and `[]` when nothing
-is generic. A static member of a generic type has no `self`, so this is where
-its type's arguments show:
+is generic. An accessor of a property typed by the type's parameter, such as
+`State<Value>.wrappedValue`, decodes the value by them. A static member of a
+generic type has no `self`, so this is where its type's arguments show:
 
 ```js
 // static HKDF<H>.deriveKey<A1, B1>(inputKeyMaterial:salt:info:outputByteCount:)
@@ -1820,6 +1821,8 @@ Each of these throws on purpose: the bridge has no lowering for the shape yet.
 - **Methods of generic types in `Swift.function`.** `Swift.function` plans a
   symbol's own generic parameters, not those of its enclosing type.
 - **Hooking.** `Swift.Interceptor` refuses a generic signature it can't plan.
+  An opaque result (`some P`) is decoded as its underlying type in a
+  non-generic context only, where the declaration names that type alone.
 - **Hosts.** arm64 and x86-64 on Darwin, Linux and Windows. Anything else throws
   `unsupported Swift host`.
 

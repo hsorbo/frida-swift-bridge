@@ -549,6 +549,19 @@ public func makeOpaqueGreeter() -> some Greeter {
     PoliteGreeter(name: "Ada")
 }
 
+// An accessor whose type is opaque, as a SwiftUI View's `var body: some View`.
+public struct OpaqueHost {
+    public var name: String
+    public init(name: String) { self.name = name }
+    public var body: some Greeter { PoliteGreeter(name: name) }
+    public var length: some Equatable { name.count }
+}
+// An opaque result is returned through a buffer whatever its underlying type, an Int included.
+public func makeOpaqueCount() -> some Equatable { 42 }
+public func opaqueCount() -> Int { makeOpaqueCount() as? Int ?? -1 }
+public func opaqueHostLength(_ name: String) -> Int { OpaqueHost(name: name).length as? Int ?? -1 }
+public func greetThroughOpaqueHost(_ name: String) -> String { OpaqueHost(name: name).body.greet() }
+
 public struct Pair<T> {
     public var first: T
     public var second: T
