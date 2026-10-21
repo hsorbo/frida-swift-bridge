@@ -1306,10 +1306,15 @@ export function enumerateMemberCandidates(
       owner,
     });
   };
-  for (const level of types === "withSuperclasses" ? classChain(owner) : [owner]) {
-    members(level).methods.forEach(add);
-  }
-  conditionalMethods(owner, typeArgumentsNamed(typeName), members).forEach(add);
+  const typeArguments = typeArgumentsNamed(typeName);
+  const levels = types === "withSuperclasses" ? classChain(owner) : [owner];
+  levels.forEach((level, i) => {
+    const table = members(level);
+    table.methods.filter((c) => i > 0 || typeArguments === null || memberClauseHolds(owner, typeArguments, c.signature)).forEach(add);
+    if (i === 0) {
+      (typeArguments === null ? table.conditional : conditionalMethods(owner, typeArguments, table)).forEach(add);
+    }
+  });
   if (modules === "allLoadedModules" && types === "withSuperclasses") {
     for (const conformance of conformanceMembers(owner)) {
       conformance.members.methods.filter(isConformanceMethod).forEach(add);
@@ -2780,20 +2785,21 @@ function matchingMethods(
   typeArguments: Metadata[] | null = null,
   everyConditional = false
 ): MethodCandidate[] {
-  const conditional = (source: MemberSource): MethodCandidate[] =>
-    everyConditional ? source(owner).conditional : conditionalMethods(owner, typeArguments, source);
-  const matching = (source: MemberSource): MethodCandidate[] =>
-    applyOverloadFilters([...source(owner).methods, ...conditional(source)].filter(match), options);
+  const matching = (source: MemberSource): MethodCandidate[] => {
+    const table = source(owner);
+    const conditional = everyConditional ? table.conditional : conditionalMethods(owner, typeArguments, table);
+    return applyOverloadFilters([...table.methods, ...conditional].filter(match), options);
+  };
   const own = matching(definingModuleMembers);
   return own.length > 0 || options.deep === false ? own : matching(allLoadedModuleMembers);
 }
 
-function conditionalMethods(owner: MemberOwner, typeArguments: Metadata[] | null, members: MemberSource): MethodCandidate[] {
+function conditionalMethods(owner: MemberOwner, typeArguments: Metadata[] | null, table: TypeMembers): MethodCandidate[] {
   if (typeArguments === null || owner.kind === "objcClass") {
     return [];
   }
   const { descriptor } = owner;
-  return members(owner).conditional.filter((c) => clauseArguments(descriptor, typeArguments, c.constraints) !== null);
+  return table.conditional.filter((c) => clauseArguments(descriptor, typeArguments, c.constraints) !== null);
 }
 
 // A member whose own clause constrains the type's parameters (init(_:) where A == Int) belongs to

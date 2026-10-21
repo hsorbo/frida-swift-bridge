@@ -123,10 +123,10 @@ describe("members of a constrained extension of a generic type", () => {
     expect(Swift.struct("fixture.Pair<fixture.PoliteGreeter>")!.$type.instanceMethods()).not.toContain("sum()");
   });
 
-  test("a generic type named without its arguments lists no conditional member", () => {
+  test("a generic type named without its arguments lists every conditional member", () => {
     const methods = Swift.struct("fixture.Pair")!.$type.instanceMethods();
-    expect(methods).not.toContain("bothGreet()");
-    expect(methods).not.toContain("sum()");
+    expect(methods).toContain("bothGreet()");
+    expect(methods).toContain("sum()");
   });
 
   test("a class recovers its own arguments from the isa and takes the clause's witness table alone", () => {

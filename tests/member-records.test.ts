@@ -39,6 +39,14 @@ describe("members()", () => {
     expect(Robot.typeMethod("make(name:)").address.equals(make.address)).toBe(true);
   });
 
+  test("lists constrained-extension overloads as the lookup sees them: all on the unbound type, the matching ones on a specialization", () => {
+    const presses = (name: string): string[] =>
+      Swift.struct(name)!.$type.members().filter((m) => m.selector === "init(_:action:)").map((m) => m.signature!.argTypeNames[0]).sort();
+    expect(presses("fixture.Pressable")).toEqual(["Swift.Double", "Swift.Int", "Swift.String"]);
+    expect(presses("fixture.Pressable<Swift.Int>")).toEqual(["Swift.Int"]);
+    expect(presses("fixture.Pressable<Swift.Double>")).toEqual(["Swift.Double"]);
+  });
+
   test("lists subscript accessors by kind, as the type's subscript finds them", () => {
     const Grid = Swift.struct("fixture.Grid")!.$type;
     const cells = Grid.members().filter((m) => m.kind === "subscript" && m.selector === "subscript(row:column:)");
