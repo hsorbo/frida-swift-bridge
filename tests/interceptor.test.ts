@@ -1134,6 +1134,26 @@ describe("Swift.Interceptor.attach on accessors typed by a type parameter or an 
     expect(hookDuring(fixtureExport("fixture.makeOpaqueCount()"), () => opaqueCount.call())).toEqual({ args: [], ret: int64(42), called: int64(42) });
   });
 
+  test("an opaque result in a generic type is its underlying type for the call's type arguments", () => {
+    const module = loadFixture();
+    const drive = Swift.function(module, "$s7fixture27greetBothThroughGenericHostyS2SF");
+    let typeArguments: string[] | undefined;
+    const { ret, called } = hookDuring(fixtureExport("fixture.GenericOpaqueHost.both.getter"), () => drive.call("Ada"), (invocation) => {
+      typeArguments = invocation.typeArguments;
+    });
+    expect([ret, called, typeArguments]).toEqual([{ first: { name: "Ada" }, second: { name: "Ada" } }, "Hello, Ada & Hello, Ada", ["fixture.PoliteGreeter"]]);
+  });
+
+  test("an opaque result of a protocol extension is its underlying type for the conforming type", () => {
+    const module = loadFixture();
+    const drive = Swift.function(module, "$s7fixture10greetTwiceyS2SF");
+    let self: CallResult = null;
+    const { ret, called } = hookDuring(fixtureExport("fixture.Greeter.twice()"), () => drive.call("Ada"), (invocation) => {
+      self = fieldsOf(invocation.self!)!;
+    });
+    expect([self, ret, called]).toEqual([{ name: "Ada" }, { first: { name: "Ada" }, second: { name: "Ada" } }, "Hello, Ada & Hello, Ada"]);
+  });
+
   test("a function returning an opaque type decodes its underlying type", () => {
     const makeOpaqueGreeter = Swift.function(loadFixture(), "$s7fixture17makeOpaqueGreeterQryF");
     expect(hookDuring(makeOpaqueGreeter, () => makeOpaqueGreeter.call()).ret).toEqual({ name: "Ada" });

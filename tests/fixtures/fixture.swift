@@ -562,6 +562,20 @@ public func makeOpaqueCount() -> some Equatable { 42 }
 public func opaqueCount() -> Int { makeOpaqueCount() as? Int ?? -1 }
 public func opaqueHostLength(_ name: String) -> Int { OpaqueHost(name: name).length as? Int ?? -1 }
 public func greetThroughOpaqueHost(_ name: String) -> String { OpaqueHost(name: name).body.greet() }
+// Opaque results whose underlying type depends on the context's generic arguments, as a generic
+// view's body or a View modifier's (a protocol extension returning some View).
+public struct GenericOpaqueHost<T: Greeter> {
+    public var value: T
+    public init(_ value: T) { self.value = value }
+    public var both: some Greeter { Pair(first: value, second: value) }
+}
+extension Greeter {
+    public func twice() -> some Greeter { Pair(first: self, second: self) }
+}
+public func greetBothThroughGenericHost(_ name: String) -> String {
+    GenericOpaqueHost(PoliteGreeter(name: name)).both.greet()
+}
+public func greetTwice(_ name: String) -> String { PoliteGreeter(name: name).twice().greet() }
 
 public struct Pair<T> {
     public var first: T

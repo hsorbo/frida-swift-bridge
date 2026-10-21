@@ -698,7 +698,7 @@ function signatureMetadata(
     returnClosure = planReturnedClosure(signature.result, (type) => planGenericType(type, [], [], new Set()), signature.selector);
   } else if (signature.result?.kind === "opaque" && opaque !== null && signature.genericParams.length === 0) {
     // An opaque result is returned through a buffer whatever its underlying type.
-    returnType = opaqueResultType(opaque.module, opaque.symbol, signature.context);
+    returnType = opaqueResultType(opaque.module, opaque.symbol);
     abstractReturn = true;
   } else if (signature.result !== null) {
     returnType = resolveParsedType(signature.result, resolveParam);
@@ -3124,17 +3124,17 @@ function findAccessor(owner: MemberOwner, member: string, kind: AccessorKind, is
     return null;
   }
   const { candidate, level } = found;
-  const type = candidate.type.kind === "opaque" ? opaqueAccessorType(candidate.address, level.fullName) : resolveParsedType(candidate.type, () => null);
+  const type = candidate.type.kind === "opaque" ? opaqueAccessorType(candidate.address) : resolveParsedType(candidate.type, () => null);
   if (type === null) {
     throw new Error(`cannot resolve ${kind} type ${candidate.typeName} of ${level.fullName}.${member}`);
   }
   return { address: candidate.address, type, kind, abstract: candidate.type.kind === "opaque" };
 }
 
-function opaqueAccessorType(address: NativePointer, context: string): Metadata | null {
+function opaqueAccessorType(address: NativePointer): Metadata | null {
   const symbol = symbolicate(address);
   const module = Process.findModuleByAddress(address.strip());
-  return symbol === null || module === null ? null : opaqueResultType(module, symbol.name, context);
+  return symbol === null || module === null ? null : opaqueResultType(module, symbol.name);
 }
 
 function isGenericOwner(owner: MemberOwner): boolean {

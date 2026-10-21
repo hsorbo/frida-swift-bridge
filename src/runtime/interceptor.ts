@@ -46,7 +46,7 @@ import {
 import { findType } from "../reflection/registry.js";
 import { findProtocol } from "../abi/protocol-conformance.js";
 import { ContextDescriptor, ContextDescriptorKind } from "../abi/context-descriptor.js";
-import { opaqueResultType } from "./opaque-result.js";
+import { opaqueResult, type OpaqueResult } from "./opaque-result.js";
 import { typeName } from "./type-name.js";
 import { asSwiftObject, SwiftObject } from "./object-facade.js";
 import { borrowedClosure } from "./closure-view.js";
@@ -562,8 +562,8 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
     const element =
       parsed.result === null
         ? null
-        : parsed.result.kind === "opaque" && parsed.genericParams.length === 0
-          ? opaquePlan(opaqueUnderlyingType(target, parsed.context))
+        : parsed.result.kind === "opaque"
+          ? opaquePlan(opaqueResultAt(target))
           : planType(parsed.result, generics);
     const args = accessor === "setter" ? [element!, ...indices] : indices;
     const indexLabels = parsed.params.map((p) => p.label);
@@ -605,10 +605,13 @@ function callShape({ address: target, parsed: known }: HookEntry, ownership?: Se
   }
 
   if (findType(parsed.context.replace(/^static /, "")) === null && protocolContext(parsed.context) !== null) {
-    return protocolAccessorShape(parsed);
+    return protocolAccessorShape(parsed, target);
   }
   if (parsed.type.kind === "opaque") {
-    return accessorShape(parsed, opaquePlan(opaqueUnderlyingType(target, parsed.context)));
+    // In a generic context the underlying type needs the call's type arguments, which the
+    // generic planning of an indexless subscript reads.
+    const result = opaqueResultAt(target);
+    return result.generic ? callShape({ address: target, parsed: indexlessSubscript(parsed) }, ownership, isAsync) : accessorShape(parsed, opaquePlan(result));
   }
   const memberType = resolveParsedType(parsed.type, () => null);
   if (memberType === null) {
@@ -639,18 +642,18 @@ function protocolContext(context: string): ContextDescriptor | null {
   return name.includes(".") ? findProtocol(name) : null;
 }
 
-function opaquePlan(metadata: Metadata): TypePlan {
-  return { kind: "opaque", underlying: () => metadata };
+function opaquePlan(result: OpaqueResult): TypePlan {
+  return { kind: "opaque", underlying: result.underlying };
 }
 
 // An opaque result is named by the descriptor of the declaration whose symbol is at the hooked address.
-function opaqueUnderlyingType(target: NativePointer, context: string): Metadata {
+function opaqueResultAt(target: NativePointer): OpaqueResult {
   const symbol = symbolicate(target);
   const module = Process.findModuleByAddress(target.strip());
   if (symbol === null || module === null) {
     throw new Error(`no Swift symbol at ${target} to name its opaque result type`);
   }
-  return opaqueResultType(module, symbol.name, context);
+  return opaqueResult(module, symbol.name);
 }
 
 // A property typed by its generic context's parameters lowers as a subscript with no indices: the
@@ -677,7 +680,7 @@ function indexlessSubscript(parsed: SwiftAccessorSignature): SwiftFunctionSignat
   };
 }
 
-function protocolAccessorShape(parsed: SwiftAccessorSignature): CallShape {
+function protocolAccessorShape(parsed: SwiftAccessorSignature, target: NativePointer): CallShape {
   if (parsed.kind === "read" || parsed.kind === "modify") {
     throw new Error(`unsupported protocol-extension ${parsed.kind} accessor: ${parsed.context}.${parsed.member}`);
   }
@@ -685,7 +688,7 @@ function protocolAccessorShape(parsed: SwiftAccessorSignature): CallShape {
     { context: parsed.context, name: parsed.member, selector: parsed.member, genericParams: [], params: [], contextConstraints: parsed.contextConstraints },
     undefined
   );
-  const member = planType(parsed.type, generics);
+  const member = parsed.type.kind === "opaque" ? opaquePlan(opaqueResultAt(target)) : planType(parsed.type, generics);
   const shape = { thrown: null, witnessWords: 0, generics, throws: false, receiver: protocolReceiver(parsed.context, generics) };
   return parsed.kind === "getter" ? { ...shape, args: [], labels: [], ret: member } : { ...shape, args: [member], labels: [null], ret: null };
 }

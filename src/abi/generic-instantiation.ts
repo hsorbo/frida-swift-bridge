@@ -341,6 +341,15 @@ export function buildGenericMetadata(
   descriptor: ContextDescriptor,
   typeArguments: Metadata[]
 ): Metadata {
+  return instantiateGenericMetadata(descriptor, genericKeyArguments(descriptor, typeArguments).keyArguments);
+}
+
+// A generic context's key arguments for its type arguments: the key parameters' metadata, then a
+// witness table per protocol requirement, as a vector a mangled name in the context resolves against.
+export function genericKeyArguments(
+  descriptor: ContextDescriptor,
+  typeArguments: Metadata[]
+): { keyArguments: NativePointer[]; vector: NativePointer } {
   const base = genericHeaderOffset(descriptor); // throws for non-generic / unsupported kinds
   const handle = descriptor.handle;
   const { numParams, numRequirements } = readGenericContextHeader(handle.add(base));
@@ -371,7 +380,7 @@ export function buildGenericMetadata(
     keyArguments.push(witnessTable);
   });
 
-  return instantiateGenericMetadata(descriptor, keyArguments);
+  return { keyArguments, vector: keyArgumentVector };
 }
 
 // Mirrors the runtime's checkGenericRequirement; returns the witness table of a Swift protocol requirement.
