@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const lines = readFileSync(`${root}/api.md`, "utf8").split("\n");
+const lines = readFileSync(`${root}/api.md`, "utf8").split(/\r?\n/);
 const examples = [];
 for (let i = 0; i < lines.length; i++) {
   if (lines[i].trim() !== "<!-- runnable -->") continue;
