@@ -247,12 +247,12 @@ describe("Swift.function from a qualified selector", () => {
     const module = loadFixture();
     expect(() => Swift.function("fixture.Pressable.init(_:action:)")).toThrow(/ambiguous/);
     const intInit = Swift.function("fixture.Pressable<Swift.Int>.init(_:action:)");
-    expect(intInit.address.equals(module.findExportByName(PRESSABLE_INT_INIT)!)).toBe(true);
+    expect(intInit.address.equals(module.findExportByName(PRESSABLE_INT_INIT)!.strip())).toBe(true);
     expect(intInit.signature.argTypeNames).toEqual(["Swift.Int", "() -> ()"]);
     const stringInit = Swift.function("fixture.Pressable<Swift.String>.init(_:action:)");
-    expect(stringInit.address.equals(module.findExportByName(PRESSABLE_STRING_INIT)!)).toBe(true);
+    expect(stringInit.address.equals(module.findExportByName(PRESSABLE_STRING_INIT)!.strip())).toBe(true);
     const doubleInit = Swift.function("fixture.Pressable<Swift.Double>.init(_:action:)");
-    expect(doubleInit.address.equals(module.findExportByName(PRESSABLE_DOUBLE_INIT)!)).toBe(true);
+    expect(doubleInit.address.equals(module.findExportByName(PRESSABLE_DOUBLE_INIT)!.strip())).toBe(true);
   });
 
   test("an initializer is called directly and allocates, as init on the type does", () => {
