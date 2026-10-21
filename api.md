@@ -1364,11 +1364,13 @@ not writable through its view.
 your callbacks the **decoded** Swift arguments and return value — scalars and
 strings as JS values, structs, enums and objects as borrowed facades over the
 storage the call is using, existentials projected to their dynamic value. A
-borrowed facade is valid while the callback runs: read `$fields` or call
-`$retained()` to keep what it shows past the hook, since afterwards it points
-at storage the call has given up. A closure argument is a borrowed closure
-view: its two words `function` and `context`, with `$captures()` (see
-[Closures](#closures)).
+borrowed facade is valid while the callback runs: afterwards it points at
+storage the call has given up. To keep what it shows past the hook, read
+`$fields`, call `$retained()` on an object, or copy a struct or enum with
+`value.$type.facade.$copy(value.$handle)`. A closure argument is a borrowed closure view:
+its two words `function` and `context`, with `$captures()` (see
+[Closures](#closures)); `$retained()` keeps an escaping closure's context, and
+refuses a non-escaping one, whose context lives in the caller's frame.
 
 `target` is an address, a member found through a type's reflection, a bound
 method or a facade's bare-name method (hooked as its member; the receiver it

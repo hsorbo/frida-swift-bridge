@@ -100,6 +100,25 @@ describe("closure captures", () => {
     expect(refused!.message).toMatch(/non-escaping/);
   });
 
+  test("a non-escaping closure argument refuses $retained, since retaining cannot outlive the caller's frame", () => {
+    let refused: Error | null = null;
+    const listener = Swift.Interceptor.attach(Swift.function(module, INVOKE_MAPPING), {
+      onEnter(args) {
+        try {
+          (args[1] as SwiftClosureValue).$retained();
+        } catch (e) {
+          refused = e as Error;
+        }
+      },
+    });
+    try {
+      expect(Swift.function(module, INVOKE_MAPPING_WITH_OFFSET).call(40, 2)).toEqual(int64(42));
+    } finally {
+      listener.detach();
+    }
+    expect(refused!.message).toMatch(/non-escaping/);
+  });
+
   test("a closure stored in a struct field reads as a borrowed view, and serializes as its two words", () => {
     const handler = Swift.function(module, MAKE_HANDLER).call(5) as SwiftValueObject;
     const action = handler.$field("action").read() as SwiftClosureValue;

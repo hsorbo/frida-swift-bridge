@@ -81,6 +81,11 @@ export function retainedClosure(
   label: string
 ): SwiftClosureValue {
   if (!context.isNull()) {
+    if (isOnCurrentThreadStack(context)) {
+      throw new Error(
+        `closure ${label} is non-escaping: its context lives in the caller's frame, which retaining cannot keep alive past the call`
+      );
+    }
     getSwiftCoreApi().swift_retain(context);
   }
   return ownedClosure(fn, context, call, label);
