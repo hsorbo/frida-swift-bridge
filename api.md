@@ -1250,7 +1250,7 @@ type is found by name and the member by the same lookup `$typeMethod` and
 `$method` use, so no symbol scan runs. The result follows Swift's own unapplied
 method references: a type method or an initializer is called directly, and an
 instance method is an unbound function that takes `self` as its first
-argument. The second
+argument, or binds one with `.bind(self)` as the mangled form does. The second
 argument is the usual options object (`{ argTypes }`, `{ returnType }`,
 `{ self }`, `{ typeArguments }`); when a type declares a type member and an
 instance member with the same selector, `{ static: true }` or
@@ -1265,6 +1265,7 @@ the type is generic; a call then needs what the member needs.
 ```js
 const robot = Swift.type("MyApp.Robot").init("R2");
 Swift.function("MyApp.Robot.move(to:)").call(robot, 5);        // int64(5)
+Swift.function("MyApp.Robot.move(to:)").bind(robot)(5);        // the same
 Swift.function("MyApp.Robot.make(name:)").call("R3");          // a Robot
 Swift.function("MyApp.Robot.init(name:)").call("R4");          // a Robot
 

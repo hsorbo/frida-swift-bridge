@@ -1,5 +1,7 @@
-import { declaringTypeOf, nominalTypeNamed } from "./swift-type.js";
+import { nominalTypeNamed, receiverFacade } from "./swift-type.js";
+import type { SwiftObject } from "./object-facade.js";
 import {
+  AsyncReceiver,
   CallArg,
   CallResult,
   FoundMember,
@@ -8,9 +10,7 @@ import {
   SwiftFunction,
   SwiftMemberSignature,
   ValueMethodResolveOptions,
-  checkedReceiver,
   findMember,
-  isSwiftObject,
   lowerResolveOptions,
   memberSignature,
   resolveFunction,
@@ -20,7 +20,7 @@ import {
 
 // A member named by its qualified selector, as a demangled symbol spells it. Like Swift's own
 // unapplied method references, a type member is called directly and an instance member takes self
-// as its first argument.
+// as its first argument, or binds one as Swift.function(module, mangled) does.
 export interface SwiftMemberFunction {
   readonly address: NativePointer;
   readonly selector: string;
@@ -29,6 +29,7 @@ export interface SwiftMemberFunction {
   readonly origin: MemberOrigin;
   readonly signature: SwiftMemberSignature;
   call(...args: CallArg[]): CallResult | Promise<CallResult>;
+  bind(receiver: SwiftObject | AsyncReceiver): (...args: CallArg[]) => CallResult | Promise<CallResult>;
 }
 
 // The member is the last dot-separated segment outside brackets; nested types and generic
@@ -88,17 +89,25 @@ export function qualifiedFunction(qualified: string, options: ValueMethodResolve
   }
   const found = findMemberOfKind(typeName, selector, options);
   const { static: _, ...lookup } = options;
+  const qualifiedName = `${type.name}.${found.selector}`;
+  const takesReceiver = !found.isStatic && splitSelector(selector, {}).name !== "init";
+  const bind = (receiver: SwiftObject | AsyncReceiver) => {
+    if (!takesReceiver) {
+      throw new Error(`${qualifiedName} takes no receiver`);
+    }
+    const bound = receiverFacade(type, receiver, qualifiedName).$method(selector, { ...lookup, static: false });
+    return (...args: CallArg[]) => bound.call(...args);
+  };
   const call = found.isStatic
     ? (...args: CallArg[]) => type.facade.$typeMethod(selector, lookup).call(...args)
-    : splitSelector(selector, {}).name === "init"
+    : !takesReceiver
     ? (...args: CallArg[]) => type.facade.$initializer(selector, lookup).call(...args)
     : (...args: CallArg[]) => {
-        const self = args.shift() as CallResult | undefined;
-        if (self === undefined || !isSwiftObject(self)) {
-          throw new Error(`${type.name}.${found.selector} is an instance method; pass self as the first argument`);
+        const self = args.shift();
+        if (typeof self !== "object" || self === null) {
+          throw new Error(`${qualifiedName} is an instance method; pass self as the first argument`);
         }
-        checkedReceiver(self, declaringTypeOf(type), `${type.name}.${found.selector}`);
-        return self.$method(selector, { ...lookup, static: false }).call(...args);
+        return bind(self as SwiftObject | AsyncReceiver)(...args);
       };
   return withHookTarget(
     {
@@ -109,6 +118,7 @@ export function qualifiedFunction(qualified: string, options: ValueMethodResolve
       origin: found.origin,
       signature: memberSignature(found.signature),
       call,
+      bind,
     },
     { address: found.address, signature: found.signature, witnessDispatched: false }
   );

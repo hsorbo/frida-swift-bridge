@@ -280,6 +280,18 @@ describe("Swift.function from a qualified selector", () => {
     expect(() => move.call(5)).toThrow(/instance method; pass self/);
   });
 
+  test("an instance method binds a facade, a raw pointer or a handle-carrying object with .bind(self)", () => {
+    const r2 = robot("R2");
+    const move = Swift.function("fixture.Robot.move(to:)");
+    expect(move.bind(r2)(5)).toEqual(int64(5));
+    expect(move.bind(r2.$handle)(6)).toEqual(int64(6));
+    expect(Swift.function("fixture.Robot.greet").bind({ handle: r2.$handle })("X")).toBe("Hello X, I am R2");
+    expect(move.call(r2.$handle, 7)).toEqual(int64(7));
+    expect(() => move.bind(Swift.class("fixture.BaseSpeaker")!.init()!)).toThrow(/takes a fixture\.Robot receiver/);
+    expect(() => Swift.function("fixture.Robot.make(name:)").bind(r2)).toThrow(/make\(name:\) takes no receiver/);
+    expect(() => Swift.function("fixture.Robot.init(name:)").bind(r2)).toThrow(/takes no receiver/);
+  });
+
   test("an async member returns a Promise", async () => {
     const calc = Swift.class("fixture.AsyncCalc")!.init(100)!;
     expect(await Swift.function("fixture.AsyncCalc.addAsync(_:)").call(calc, 5)).toEqual(int64(105));
