@@ -2956,6 +2956,9 @@ function planTypeMemberArg(
   typeArguments: Metadata[],
   classBoundParams: Set<string>
 ): ArgPlan {
+  if (type.kind === "function") {
+    return planClosureType(type, typeParams, typeArguments, classBoundParams);
+  }
   const index = type.kind === "param" ? typeParams.indexOf(type.name) : -1;
   if (index !== -1) {
     const metadata = typeArguments[index];

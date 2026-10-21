@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "@frida/injest/agent";
 import { fixtureExport, loadFixture } from "./fixtures/load.js";
 
-import { Swift, SwiftClassObject, SwiftValueObject } from "../src/index.js";
+import { Swift, SwiftClassObject, SwiftObject, SwiftValueObject } from "../src/index.js";
 
 function constrainedBox(typeArg: string, value: { [k: string]: number } | number): SwiftValueObject {
   return Swift.struct(`fixture.ConstrainedBox<${typeArg}>`)!.$new({ value });
@@ -127,6 +127,15 @@ describe("members of a constrained extension of a generic type", () => {
     const methods = Swift.struct("fixture.Pair")!.$type.instanceMethods();
     expect(methods).toContain("bothGreet()");
     expect(methods).toContain("sum()");
+  });
+
+  test("a constrained extension's member taking a closure is called on the specialization meeting its clause", () => {
+    let presses = 0;
+    const action = Swift.closure(() => { presses++; });
+    const ints = Swift.struct("fixture.Pressable<Swift.Int>")!.$initializer({ labels: [null, "action"] }).call(5, action) as SwiftObject;
+    expect([ints.kind, ints.label, presses]).toEqual(["int", int64(5), 1]);
+    const words = Swift.struct("fixture.Pressable<Swift.String>")!.$initializer({ labels: [null, "action"] }).call("hi", action) as SwiftObject;
+    expect([words.kind, words.label, presses]).toEqual(["string", "hi", 2]);
   });
 
   test("a class recovers its own arguments from the isa and takes the clause's witness table alone", () => {
