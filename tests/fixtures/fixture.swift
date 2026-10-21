@@ -73,6 +73,10 @@ public func unwrapOrZero(_ x: Int?) -> Int? { x ?? 0 }
 public func makeUnwrapOrZero() -> Int { unwrapOrZero(5)! }
 public func echoOptionalText(_ s: String?) -> String? { s }
 public func echoNestedOptional(_ x: Int??) -> Int?? { x }
+public func echoOptionalPoint(_ p: Point?) -> Point? { p }
+public func echoNestedOptionalPoint(_ p: Point??) -> Point?? { p }
+public func echoOptionalTint(_ t: Tint?) -> Tint? { t }
+public func echoOptionalWrapper(_ w: Wrapper?) -> Wrapper? { w }
 public func makeEchoNestedOptional() -> Int { echoNestedOptional(.some(.none)) == .some(.none) ? 1 : 0 }
 public struct OptionalFields {
     public var single: Int?

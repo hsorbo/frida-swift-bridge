@@ -490,10 +490,7 @@ function marshalArg(metadata: Metadata, value: CallArg): NativePointer {
       throw new Error(`a ${typeName(metadata)} argument takes a value or object facade of a conforming type`);
     }
     boxIntoExistential(metadata, buffer, arg);
-  } else if (arg instanceof ValueInstance) {
-    if (!arg.metadata.handle.equals(metadata.handle)) {
-      throw new Error(`argument is a ${typeName(arg.metadata)} value, expected ${typeName(metadata)}`);
-    }
+  } else if (arg instanceof ValueInstance && arg.metadata.handle.equals(metadata.handle)) {
     arg.copyInto(buffer);
   } else if (arg instanceof ClassInstance) {
     const referenceType =

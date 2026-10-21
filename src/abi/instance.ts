@@ -18,6 +18,8 @@ import { typeName } from "../runtime/type-name.js";
 import { typeOf, SwiftType } from "../runtime/swift-type.js";
 import { getSwiftCoreApi } from "../runtime/api.js";
 import { borrowedClosure } from "../runtime/closure-view.js";
+import { RAW } from "../runtime/object-facade.js";
+import { ValueInstance } from "./value.js";
 import type { SwiftClosureValue } from "../runtime/method.js";
 import { createArray } from "./array.js";
 import { FunctionMetadataConvention, readFunctionType } from "./function-type.js";
@@ -181,7 +183,20 @@ type WritePlan = (address: NativePointer) => void;
 
 // Reads every caller property exactly once and validates it, so a Proxy or getter cannot change the
 // value between validation and the write, and a failing aggregate never initializes a partial result.
+// A value facade writes where its own type is taken, including as an Optional's payload.
+function facadeInstance(value: SwiftValue): ValueInstance | null {
+  const raw = value !== null && typeof value === "object" ? ((value as { [RAW]?: unknown })[RAW] ?? value) : value;
+  return raw instanceof ValueInstance ? raw : null;
+}
+
 function planWrite(metadata: Metadata, value: SwiftValue): WritePlan {
+  const facade = facadeInstance(value);
+  if (facade !== null && metadata.kind !== MetadataKind.Optional) {
+    if (!facade.metadata.handle.equals(metadata.handle)) {
+      throw new Error(`argument is a ${typeName(facade.metadata)} value, expected ${typeName(metadata)}`);
+    }
+    return (address) => facade.copyInto(address);
+  }
   switch (metadata.kind) {
     case MetadataKind.Struct: {
       const name = metadata.description.fullTypeName ?? "";
